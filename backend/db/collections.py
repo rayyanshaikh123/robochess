@@ -1,0 +1,7 @@
+USERS = "users"
+DEVICES = "devices"
+GAMES = "games"
+MOVES = "moves"
+REFRESH_TOKENS = "refresh_tokens"
+PUZZLES = "puzzles"
+PUZZLE_ATTEMPTS = "puzzle_attempts"

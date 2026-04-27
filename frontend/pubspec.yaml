@@ -1,0 +1,33 @@
+name: robochess_mobile
+description: "RoboChess Mobile Application Built with Clean Architecture, Riverpod, and Custom Dark Theme."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_riverpod: ^2.4.9
+  go_router: ^13.1.0
+  fl_chart: ^0.65.0
+  flutter_chess_board: 1.0.1 # Standard third-party library requested by user
+  google_fonts: ^6.1.0
+  cupertino_icons: ^1.0.6
+  speech_to_text: ^7.3.0
+  chess: ^0.7.0
+  http: ^1.2.1
+  web_socket_channel: ^2.4.0
+  flutter_secure_storage: ^9.2.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/

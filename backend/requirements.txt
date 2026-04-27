@@ -1,0 +1,22 @@
+# RoboChess — backend + ML dependencies
+# Core
+ultralytics
+opencv-contrib-python
+numpy
+python-chess
+requests
+pillow
+
+# Server
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+motor
+pymongo
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt<4.0.0
+redis
+locust
+websockets==10.4
