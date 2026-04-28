@@ -225,7 +225,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     }
   }
 
-  Future<void> _startGameFlow(DeviceModel device) async {
+  Future<void> _startGameFlow(DeviceModel? device) async {
     final result = await showModalBottomSheet<_PreGameResult>(
       context: context,
       isScrollControlled: true,
@@ -248,7 +248,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       await ref.read(gameControllerProvider.notifier).createGame(
             mode: result.mode,
             difficulty: result.difficulty,
-            players: result.useBoard ? [device.deviceId] : null,
+            players: result.useBoard && device != null ? [device.deviceId] : null,
           );
       if (result.useBoard) {
         _fetchLiveFrame();
@@ -414,11 +414,20 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   }
 
   // ── Undo last move ──
-  void _undoMove() {
-    if (_game.history.isEmpty) return;
-    final undone = _game.undo();
-    if (undone != null) {
-      // Remove from move history
+  Future<void> _undoMove() async {
+    if (_game.history.isEmpty && _linkedGameId == null) return;
+    
+    // Optimistically undo local state, then let server dictate final state
+    _game.undo();
+    
+    if (_linkedGameId != null) {
+      try {
+        await ref.read(gameControllerProvider.notifier).undoMove();
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _syncError = 'Failed to undo move.');
+      }
+    } else {
       if (_moveHistory.isNotEmpty) {
         final last = _moveHistory.last;
         if (last[2] != null) {
@@ -748,9 +757,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
             linkedGameId: _linkedGameId,
             syncing: _syncing,
             error: _syncError,
-            onStart: activeDevice == null
-                ? null
-                : () => _startGameFlow(activeDevice),
+            onStart: () => _startGameFlow(activeDevice),
             onLink: () => context.go('/connect'),
           ),
           const SizedBox(height: 16),
@@ -790,7 +797,12 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           const SizedBox(height: 12),
           _AIInsightCard(game: _game),
           const SizedBox(height: 16),
-          _GameControls(onUndo: _undoMove),
+          _GameControls(
+            onUndo: _undoMove,
+            onAnalyze: _linkedGameId != null
+                ? () => context.go('/analysis?game_id=$_linkedGameId')
+                : null,
+          ),
           const SizedBox(height: 12),
           _VoiceCommandButton(
             expanded: _voiceExpanded,
@@ -1207,7 +1219,7 @@ class _BoardSyncCard extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: syncing || onStart == null ? null : onStart,
+              onPressed: syncing ? null : onStart,
               style: ElevatedButton.styleFrom(
                 backgroundColor: kPrimary,
                 foregroundColor: kOnPrimary,
@@ -1215,7 +1227,7 @@ class _BoardSyncCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10)),
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
-              child: Text(syncing ? 'SYNCING...' : 'START SYNCED GAME',
+              child: Text(syncing ? 'SYNCING...' : 'NEW GAME',
                   style: GoogleFonts.spaceGrotesk(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
@@ -1245,8 +1257,8 @@ class _PreGameResult {
 }
 
 class _PreGameSheet extends ConsumerStatefulWidget {
-  final DeviceModel device;
-  const _PreGameSheet({required this.device});
+  final DeviceModel? device;
+  const _PreGameSheet({this.device});
 
   @override
   ConsumerState<_PreGameSheet> createState() => _PreGameSheetState();
@@ -1255,12 +1267,21 @@ class _PreGameSheet extends ConsumerStatefulWidget {
 class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
   _PlaySurface _surface = _PlaySurface.board;
   _OpponentType _opponent = _OpponentType.bot;
+  int _difficulty = 5;
   bool _modelLoaded = false;
   bool _calibrated = false;
   bool _validated = false;
   bool _busy = false;
   String? _error;
   String? _validationNote;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.device == null) {
+      _surface = _PlaySurface.app;
+    }
+  }
 
   Future<void> _runStep(Future<void> Function() action) async {
     setState(() {
@@ -1365,7 +1386,7 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
     }
     final mode = _resolveMode();
     Navigator.of(context).pop(
-      _PreGameResult(mode: mode, difficulty: 5, useBoard: useBoard),
+      _PreGameResult(mode: mode, difficulty: _difficulty, useBoard: useBoard),
     );
   }
 
@@ -1407,11 +1428,56 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
                     index == 0 ? _OpponentType.bot : _OpponentType.friend;
               }),
             ),
+            if (_opponent == _OpponentType.bot) ...[
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Engine Level',
+                      style: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: kOnSurface)),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: kSurfaceContHighest,
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                    child: Text('Level $_difficulty',
+                        style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: kPrimary,
+                            letterSpacing: 1)),
+                  ),
+                ],
+              ),
+              SliderTheme(
+                data: SliderThemeData(
+                  activeTrackColor: kPrimary,
+                  inactiveTrackColor: kSurfaceContHighest,
+                  thumbColor: kPrimary,
+                  overlayColor: kPrimary.withOpacity(0.2),
+                  trackHeight: 4,
+                  valueIndicatorTextStyle: GoogleFonts.inter(fontWeight: FontWeight.w700),
+                ),
+                child: Slider(
+                  value: _difficulty.toDouble(),
+                  min: 1,
+                  max: 10,
+                  divisions: 9,
+                  label: _difficulty.toString(),
+                  onChanged: (val) => setState(() => _difficulty = val.toInt()),
+                ),
+              ),
+            ],
             const SizedBox(height: 10),
             _OptionRow(
               title: 'Play on',
               options: const ['Board', 'App'],
               selectedIndex: _surface == _PlaySurface.board ? 0 : 1,
+              disabledIndices: widget.device == null ? [0] : [],
               onSelect: (index) => setState(() {
                 _surface = index == 0 ? _PlaySurface.board : _PlaySurface.app;
               }),
@@ -1533,12 +1599,14 @@ class _OptionRow extends StatelessWidget {
   final String title;
   final List<String> options;
   final int selectedIndex;
+  final List<int> disabledIndices;
   final ValueChanged<int> onSelect;
 
   const _OptionRow({
     required this.title,
     required this.options,
     required this.selectedIndex,
+    this.disabledIndices = const [],
     required this.onSelect,
   });
 
@@ -1557,10 +1625,11 @@ class _OptionRow extends StatelessWidget {
           final index = entry.key;
           final label = entry.value;
           final selected = index == selectedIndex;
+          final disabled = disabledIndices.contains(index);
           return Padding(
             padding: const EdgeInsets.only(left: 8),
             child: OutlinedButton(
-              onPressed: () => onSelect(index),
+              onPressed: disabled ? null : () => onSelect(index),
               style: OutlinedButton.styleFrom(
                 backgroundColor:
                     selected ? kPrimary.withOpacity(0.2) : kSurfaceContHighest,
@@ -2044,13 +2113,17 @@ class _InsightChip extends StatelessWidget {
 
 class _GameControls extends StatelessWidget {
   final VoidCallback? onUndo;
-  const _GameControls({this.onUndo});
+  final VoidCallback? onAnalyze;
+  const _GameControls({this.onUndo, this.onAnalyze});
 
   @override
   Widget build(BuildContext context) {
     return Row(children: [
       _ControlBtn(
           icon: Icons.undo, label: 'Undo', color: kOnSurface, onTap: onUndo),
+      const SizedBox(width: 12),
+      _ControlBtn(
+          icon: Icons.analytics, label: 'Analyze', color: kSecondary, onTap: onAnalyze),
       const SizedBox(width: 12),
       _ControlBtn(icon: Icons.flag, label: 'Resign', color: kError),
       const SizedBox(width: 12),

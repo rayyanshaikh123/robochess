@@ -803,7 +803,9 @@ async def ai_move(payload: MoveAiRequest, db=Depends(get_db)) -> ApiResponse:
     manager = GameManager.get_instance()
     difficulty = payload.difficulty or manager.difficulty
     try:
-        move = get_ai_move(manager.board, manager.engine, difficulty, manager.settings.engine_time)
+        move = await asyncio.to_thread(
+            get_ai_move, manager.board, manager.engine, difficulty, manager.settings.engine_time
+        )
     except Exception as exc:
         return error("Engine failed", {"detail": str(exc)})
 
@@ -850,7 +852,9 @@ async def _trigger_ai_move(db):
 
     difficulty = manager.difficulty
     try:
-        move = get_ai_move(manager.board, manager.engine, difficulty, manager.settings.engine_time)
+        move = await asyncio.to_thread(
+            get_ai_move, manager.board, manager.engine, difficulty, manager.settings.engine_time
+        )
     except Exception as e:
         print(f"[ERROR] AI move generation failed: {e}")
         return
@@ -926,6 +930,215 @@ async def submit_move(payload: GameMoveRequest, background_tasks: BackgroundTask
         background_tasks.add_task(_trigger_ai_move, db)
 
     return ok("Move accepted", game_state)
+
+
+@router.get("/game/{game_id}/analysis", response_model=ApiResponse)
+async def game_analysis(game_id: str, db=Depends(get_db)) -> ApiResponse:
+    """
+    Full post-game analysis: replays the game through Stockfish and returns
+    per-move evaluations, move tags, and an AI insight summary.
+    """
+    import asyncio
+    from backend.repositories.move_repo import get_all_moves
+    from backend.services.engine_service import analyze_position
+
+    # 1. Fetch the game and its moves
+    game = await get_game_state(db, game_id)
+    game_data, err = game
+    if err:
+        return error("Game not found", {"detail": err})
+
+    moves_docs = await get_all_moves(db, game_id)
+    if not moves_docs:
+        return error("No moves recorded for this game")
+
+    # 2. Replay and analyze in a thread (Stockfish engine is synchronous)
+    manager = GameManager.get_instance()
+    engine = manager.engine
+    if engine is None:
+        return error("Stockfish engine not available")
+
+    def _run_analysis():
+        board = chess.Board()
+        analysis_moves = []
+        eval_scores = [0]  # starting position eval ≈ 0
+
+        # Evaluate starting position
+        start_eval = analyze_position(board, engine, time_limit=0.08)
+        eval_scores[0] = start_eval["score_cp"]
+
+        for doc in moves_docs:
+            uci_str = doc.get("uci", "")
+            try:
+                move = chess.Move.from_uci(uci_str)
+            except Exception:
+                continue
+
+            if move not in board.legal_moves:
+                continue
+
+            # Engine's best move BEFORE this move is played
+            pre_eval = analyze_position(board, engine, time_limit=0.10)
+            best_move_uci = pre_eval.get("best_move")
+            best_move_san = None
+            if best_move_uci:
+                try:
+                    best_m = chess.Move.from_uci(best_move_uci)
+                    if best_m in board.legal_moves:
+                        best_move_san = board.san(best_m)
+                except Exception:
+                    pass
+
+            # SAN of the played move
+            san = board.san(move)
+            is_white = board.turn == chess.WHITE
+
+            # Push the move
+            board.push(move)
+
+            # Evaluate AFTER the move
+            post_eval = analyze_position(board, engine, time_limit=0.10)
+            score_after = post_eval["score_cp"]
+            eval_scores.append(score_after)
+
+            # Compute centipawn loss from the perspective of the player
+            score_before = pre_eval["score_cp"]
+            if is_white:
+                cp_loss = score_before - score_after
+            else:
+                cp_loss = score_after - score_before
+
+            # Tag the move
+            tag = _tag_move(cp_loss, uci_str, best_move_uci)
+
+            analysis_moves.append({
+                "move_number": doc.get("move_number", 0),
+                "uci": uci_str,
+                "san": san,
+                "is_white": is_white,
+                "score_before": score_before,
+                "score_after": score_after,
+                "cp_loss": cp_loss,
+                "tag": tag,
+                "best_move_uci": best_move_uci,
+                "best_move_san": best_move_san,
+                "fen_after": board.fen(),
+            })
+
+        # Build AI insight for the worst mistake
+        worst = None
+        for m in analysis_moves:
+            if m["tag"] in ("blunder", "mistake", "inaccuracy"):
+                if worst is None or m["cp_loss"] > worst["cp_loss"]:
+                    worst = m
+
+        ai_insight = None
+        if worst:
+            side = "White" if worst["is_white"] else "Black"
+            ai_insight = {
+                "move_number": worst["move_number"],
+                "played": worst["san"],
+                "suggested": worst.get("best_move_san") or worst.get("best_move_uci", "?"),
+                "cp_swing": worst["cp_loss"],
+                "summary": (
+                    f"{side} played {worst['san']} (move {worst['move_number']}), "
+                    f"but the engine preferred {worst.get('best_move_san', worst.get('best_move_uci', '?'))}. "
+                    f"This cost approximately {worst['cp_loss'] / 100:.1f} pawns of advantage."
+                ),
+            }
+
+        return {
+            "game_id": game_id,
+            "total_moves": len(analysis_moves),
+            "moves": analysis_moves,
+            "eval_scores": eval_scores,
+            "ai_insight": ai_insight,
+        }
+
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(None, _run_analysis)
+    except Exception as exc:
+        return error("Analysis failed", {"detail": str(exc)})
+
+    return ok("Analysis complete", result)
+
+
+def _tag_move(cp_loss: int, played_uci: str, best_uci: str | None) -> str:
+    """Classify a move based on centipawn loss."""
+    if best_uci and played_uci == best_uci:
+        return "best"
+    if cp_loss <= -50:
+        return "brilliant"
+    if cp_loss <= 0:
+        return "great"
+    if cp_loss <= 20:
+        return "good"
+    if cp_loss <= 50:
+        return "good"
+    if cp_loss <= 100:
+        return "inaccuracy"
+    if cp_loss <= 250:
+        return "mistake"
+    return "blunder"
+@router.post("/game/undo", response_model=ApiResponse)
+async def game_undo(db=Depends(get_db)) -> ApiResponse:
+    manager = GameManager.get_instance()
+    game_id = manager.current_game_id
+    if not game_id:
+        return error("No active game to undo")
+
+    undo_count = 2 if manager.mode == "human_vs_ai" else 1
+
+    with manager.state_lock:
+        if len(manager.board.move_stack) < undo_count:
+            return error("Not enough moves to undo")
+            
+        for _ in range(undo_count):
+            manager.board.pop()
+            
+        new_fen = manager.get_fen()
+
+    from backend.db.collections import MOVES, GAMES
+    from bson import ObjectId
+    
+    game_oid = ObjectId(game_id)
+    game = await db[GAMES].find_one({"_id": game_oid})
+    if game:
+        current_version = game.get("game_version", 0)
+        await db[MOVES].delete_many({
+            "game_id": game_oid,
+            "move_number": {"$gt": current_version - undo_count}
+        })
+        
+        last_move_doc = await db[MOVES].find_one(
+            {"game_id": game_oid}, sort=[("move_number", -1)]
+        )
+        last_move_uci = last_move_doc.get("uci") if last_move_doc else None
+        new_version = max(0, current_version - undo_count)
+        
+        await db[GAMES].update_one(
+            {"_id": game_oid},
+            {"$set": {
+                "current_fen": new_fen,
+                "game_version": new_version,
+                "last_move": last_move_uci
+            }}
+        )
+
+    await ws_manager.send_to_game(
+        game_id,
+        {
+            "type": "game.state",
+            "data": {
+                "game_id": game_id,
+                "current_fen": new_fen,
+                "game_version": new_version if game else 0,
+                "last_move": last_move_uci if game else None,
+            },
+        },
+    )
+
+    return ok("Undo successful", {"fen": new_fen})
 
 
 @router.post("/game/reset", response_model=ApiResponse)

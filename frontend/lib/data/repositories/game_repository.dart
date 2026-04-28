@@ -1,4 +1,5 @@
 import '../../domain/models/game_state.dart';
+import '../../domain/models/analysis_model.dart';
 import '../datasources/game_remote.dart';
 
 class GameRepository {
@@ -28,4 +29,11 @@ class GameRepository {
     return _remote.submitMove(
         gameId: gameId, uci: uci, expectedVersion: expectedVersion);
   }
+
+  Future<AnalysisReport> fetchAnalysis(String gameId) async {
+    final data = await _remote.fetchAnalysis(gameId);
+    return AnalysisReport.fromJson(data);
+  }
+
+  Future<void> undoMove() => _remote.undoMove();
 }

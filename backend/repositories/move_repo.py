@@ -38,3 +38,13 @@ async def get_moves_after(
         {"game_id": _to_object_id(game_id), "move_number": {"$gt": move_number}}
     ).sort("move_number", 1)
     return await cursor.to_list(length=2000)
+
+
+async def get_all_moves(
+    db: AsyncIOMotorDatabase, game_id: str
+) -> list[dict]:
+    """Return every move for *game_id* ordered by move_number ascending."""
+    cursor = db[MOVES].find(
+        {"game_id": _to_object_id(game_id)}
+    ).sort("move_number", 1)
+    return await cursor.to_list(length=2000)

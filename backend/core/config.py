@@ -1,8 +1,22 @@
 from dataclasses import dataclass
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Load .env from backend folder or project root
+load_dotenv(ROOT / ".env")
+load_dotenv(ROOT / "backend" / ".env")
+
+
+def _get_env_sf_path() -> str:
+    """Check for several environment variable names for stockfish path."""
+    for key in ["ROBOCHESS_STOCKFISH_PATH", "STOCKFISH_PATH"]:
+        val = os.getenv(key, "").strip()
+        if val and Path(val).is_file():
+            return val
+    return ""
 
 
 @dataclass(frozen=True)
@@ -57,12 +71,53 @@ def _get_env_float(key: str, default: float) -> float:
         return default
 
 
+def _find_stockfish() -> str:
+    """Try to auto-discover Stockfish from common install locations."""
+    import shutil
+
+    # 1. Check env vars first
+    env_path = _get_env_sf_path()
+    if env_path:
+        return env_path
+
+    # 2. Canonical project-local path
+    candidates = [
+        ROOT / "stockfish" / "stockfish-windows-x86-64-avx2.exe",
+        ROOT / "stockfish" / "stockfish.exe",
+        ROOT / "stockfish" / "stockfish",
+        # One level up (repo root)
+        ROOT.parent / "stockfish" / "stockfish-windows-x86-64-avx2.exe",
+        ROOT.parent / "stockfish" / "stockfish.exe",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+
+    # 3. System PATH (works if installed via winget / package manager)
+    system_sf = shutil.which("stockfish")
+    if system_sf:
+        return system_sf
+
+    # 4. Common Windows install locations
+    win_candidates = [
+        Path(r"C:\Program Files\Stockfish\stockfish.exe"),
+        Path(r"C:\Program Files\Stockfish\stockfish-windows-x86-64-avx2.exe"),
+        Path(os.path.expanduser(r"~\scoop\apps\stockfish\current\stockfish.exe")),
+    ]
+    for candidate in win_candidates:
+        if candidate.is_file():
+            return str(candidate)
+
+    # Fall back to the default project path (will fail gracefully at runtime)
+    return str(ROOT / "stockfish" / "stockfish-windows-x86-64-avx2.exe")
+
+
 def load_settings() -> Settings:
     default_model = ROOT / "models" / "best.pt"
-    default_stockfish = ROOT / "stockfish" / "stockfish-windows-x86-64-avx2.exe"
+    default_stockfish = _find_stockfish()
     return Settings(
         model_path=_get_env_str("ROBOCHESS_MODEL_PATH", str(default_model)),
-        stockfish_path=_get_env_str("ROBOCHESS_STOCKFISH_PATH", str(default_stockfish)),
+        stockfish_path=default_stockfish,
         camera_index=_get_env_int("ROBOCHESS_CAMERA_INDEX", 0),
         confidence=_get_env_float("ROBOCHESS_CONFIDENCE", 0.05),
         engine_time=_get_env_float("ROBOCHESS_ENGINE_TIME", 0.50),

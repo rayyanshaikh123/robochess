@@ -37,4 +37,12 @@ class GameRemoteDataSource {
     });
     return GameStateModel.fromJson(data);
   }
+
+  Future<Map<String, dynamic>> fetchAnalysis(String gameId) async {
+    return await _client.getJson('/game/$gameId/analysis');
+  }
+
+  Future<void> undoMove() async {
+    await _client.postJson('/game/undo', body: {});
+  }
 }
