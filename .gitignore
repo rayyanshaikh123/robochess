@@ -8,7 +8,7 @@ venv/
 .env
 
 # Large ML assets and training artifacts
-models/
+
 runs/
 dataset/
 stockfish/
