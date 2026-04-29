@@ -30,12 +30,19 @@ from PIL import Image, ImageTk
 from tkinter import filedialog, messagebox, ttk
 
 try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
+
+try:
     from backend.board_recognizer import BoardRecognizer
 except ImportError:
     from board_recognizer import BoardRecognizer
 
 
 ROOT = Path(__file__).parent.resolve()
+if load_dotenv:
+    load_dotenv(ROOT / ".env")
 DEFAULT_MODEL_PATH = ROOT / "models" / "best.pt"
 DEFAULT_STOCKFISH_PATH = ROOT / "stockfish" / "stockfish-windows-x86-64-avx2.exe"
 DEFAULT_CONFIG_PATH = ROOT / "robochess_ui.json"
@@ -1363,6 +1370,20 @@ class RoboChessControlCenter(tk.Tk):
                     self.hand_present = False
 
             time.sleep(0.1)
+
+    def _tracking_loop(self) -> None:
+        """Background loop reserved for future tracking enhancements."""
+        while not self.stop_event.is_set():
+            if self.is_paused:
+                time.sleep(0.1)
+                continue
+            with self.state_lock:
+                frame = None if self.latest_frame is None else self.latest_frame.copy()
+            if frame is None:
+                time.sleep(0.1)
+                continue
+            self.tracking_prev_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            time.sleep(0.2)
 
     def begin_calibration(self) -> None:
         with self.state_lock:
