@@ -616,6 +616,17 @@ class BoardRecognizer:
             state[sq_name] = piece_label_from_piece(piece)
         return state
 
+    def to_occupancy_state(self, state: dict[str, Optional[str]]) -> dict[str, bool]:
+        """Convert a square->piece-name dict into a square->occupied dict."""
+        return {sq: bool(label) for sq, label in state.items()}
+
+    def board_to_occupancy_state(self, board: chess.Board) -> dict[str, bool]:
+        """Convert a chess.Board into a square->occupied dict."""
+        state: dict[str, bool] = {sq: False for sq in ALL_SQUARES}
+        for sq in chess.SQUARES:
+            state[chess.square_name(sq)] = board.piece_at(sq) is not None
+        return state
+
     def expected_initial_state(self) -> dict[str, Optional[str]]:
         """Return the canonical initial chess position as a state dict."""
         return self.board_to_state_dict(chess.Board())
@@ -680,6 +691,17 @@ class BoardRecognizer:
                 score += 1
         return score
 
+    def match_score_occupancy(
+        self,
+        simulated_state: dict[str, bool],
+        curr_state: dict[str, bool],
+    ) -> int:
+        score = 0
+        for sq in ALL_SQUARES:
+            if simulated_state.get(sq, False) == curr_state.get(sq, False):
+                score += 1
+        return score
+
     def infer_move_from_state(
         self,
         prev_board: chess.Board,
@@ -697,6 +719,38 @@ class BoardRecognizer:
             test_board.push(move)
             simulated_state = self.board_to_state_dict(test_board)
             score = self.match_score(simulated_state, curr_state)
+            if score > best_score:
+                second_best = best_score
+                best_score = score
+                best_move = move
+            elif score > second_best:
+                second_best = score
+
+        if best_move is None:
+            return None, best_score, second_best
+
+        if best_score < min_score or (best_score - second_best) < min_gap:
+            return None, best_score, second_best
+
+        return best_move, best_score, second_best
+
+    def infer_move_from_occupancy(
+        self,
+        prev_board: chess.Board,
+        curr_state: dict[str, bool],
+        min_score: int = 60,
+        min_gap: int = 4,
+    ) -> tuple[Optional[chess.Move], int, int]:
+        """Simulate all legal moves and return the best occupancy match."""
+        best_move: Optional[chess.Move] = None
+        best_score = -1
+        second_best = -1
+
+        for move in prev_board.legal_moves:
+            test_board = prev_board.copy(stack=False)
+            test_board.push(move)
+            simulated_state = self.board_to_occupancy_state(test_board)
+            score = self.match_score_occupancy(simulated_state, curr_state)
             if score > best_score:
                 second_best = best_score
                 best_score = score

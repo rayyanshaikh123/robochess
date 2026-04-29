@@ -29,6 +29,13 @@ import tkinter as tk
 from PIL import Image, ImageTk
 from tkinter import filedialog, messagebox, ttk
 
+# Reduce OpenCV threading to avoid sporadic GUI crashes on macOS.
+try:
+    cv2.setNumThreads(1)
+    cv2.ocl.setUseOpenCL(False)
+except Exception:
+    pass
+
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -43,6 +50,27 @@ except ImportError:
 ROOT = Path(__file__).parent.resolve()
 if load_dotenv:
     load_dotenv(ROOT / ".env")
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 DEFAULT_MODEL_PATH = ROOT / "models" / "best.pt"
 DEFAULT_STOCKFISH_PATH = ROOT / "stockfish" / "stockfish-windows-x86-64-avx2.exe"
 DEFAULT_CONFIG_PATH = ROOT / "robochess_ui.json"
@@ -51,11 +79,11 @@ PREVIEW_HEIGHT = 520
 CAPTURE_WIDTH = 820
 CAPTURE_HEIGHT = 620
 BOARD_DISPLAY_SIZE = 896
-DETECTION_CONFIDENCE_MIN = 0.45
+DETECTION_CONFIDENCE_MIN = _env_float("ROBOCHESS_DET_CONF", 0.45)
 MOVE_MATCH_MIN_SCORE = 54
 MOVE_MATCH_MIN_GAP = 2
-START_MAX_MISSING = 4
-START_MAX_EXTRA = 2
+START_MAX_MISSING = _env_int("ROBOCHESS_START_MISSING", 4)
+START_MAX_EXTRA = _env_int("ROBOCHESS_START_EXTRA", 2)
 CAPTURE_DELAY_SEC = 0.50
 HAND_ABSENCE_SECONDS = 0.60
 HAND_TRIGGER_COOLDOWN = 1.20
@@ -63,6 +91,12 @@ MOTION_DIFF_THRESHOLD = 20
 MOTION_RATIO_TRIGGER = 0.02
 MOTION_BLUR = 7
 ENGINE_AUTO_DELAY_SEC = 0.15
+ASSUME_STANDARD_START = bool(_env_int("ROBOCHESS_ASSUME_START", 1))
+AUTO_ENGINE_REPLY = bool(_env_int("ROBOCHESS_AUTO_ENGINE", 1))
+CAPTURE_SAMPLES = _env_int("ROBOCHESS_CAPTURE_SAMPLES", 2)
+CAPTURE_SAMPLE_DELAY = _env_float("ROBOCHESS_CAPTURE_SAMPLE_DELAY", 0.05)
+STABLE_LABEL_MIN_COUNT = _env_int("ROBOCHESS_STABLE_LABEL_COUNT", 2)
+OCCUPANCY_ONLY = bool(_env_int("ROBOCHESS_OCCUPANCY_ONLY", 1))
 
 
 @dataclass
@@ -70,7 +104,7 @@ class AppConfig:
     model_path: str = str(DEFAULT_MODEL_PATH)
     stockfish_path: str = str(DEFAULT_STOCKFISH_PATH)
     camera_index: int = 0
-    confidence: float = 0.10
+    confidence: float = _env_float("ROBOCHESS_CONFIDENCE", 0.10)
     engine_time: float = 0.50
     stability_frames: int = 5
     human_side: str = "white"
@@ -400,7 +434,13 @@ class RoboChessControlCenter(tk.Tk):
         ttk.Button(controls, text="Calibrate", style="Small.TButton", command=self.begin_calibration).grid(row=0, column=0, sticky="ew", padx=(0, 6))
         ttk.Button(controls, text="Clear", style="Small.TButton", command=self.clear_calibration).grid(row=0, column=1, sticky="ew", padx=6)
         ttk.Button(controls, text="Capture", style="Small.TButton", command=self.trigger_manual_capture).grid(row=0, column=2, sticky="ew", padx=6)
-        ttk.Button(controls, text="Validate start", style="Small.TButton", command=self.validate_starting_position).grid(row=0, column=3, sticky="ew", padx=6)
+        self.validate_button = ttk.Button(
+            controls,
+            text="Validate start",
+            style="Small.TButton",
+            command=self.validate_starting_position,
+        )
+        self.validate_button.grid(row=0, column=3, sticky="ew", padx=6)
         ttk.Button(controls, text="Pause", style="Small.TButton", command=self.toggle_pause).grid(row=0, column=4, sticky="ew", padx=6)
         ttk.Button(controls, text="New game", style="Small.TButton", command=self.new_game).grid(row=0, column=5, sticky="ew", padx=6)
         ttk.Button(controls, text="Engine reply", style="Small.TButton", command=self.apply_engine_move).grid(row=0, column=6, sticky="ew", padx=(6, 0))
@@ -536,6 +576,9 @@ class RoboChessControlCenter(tk.Tk):
         camera_state = "open" if self.capture is not None else "closed"
         engine_state = "loaded" if self.engine is not None else "not loaded"
         self.connection_status_var.set(f"Model: {model_state} | Camera: {camera_state} | Engine: {engine_state}")
+        if hasattr(self, "validate_button"):
+            button_state = "disabled" if ASSUME_STANDARD_START else "normal"
+            self.validate_button.configure(state=button_state)
 
     def load_settings(self) -> None:
         self.app_config = AppConfig.load(self.config_path)
@@ -572,9 +615,16 @@ class RoboChessControlCenter(tk.Tk):
         self._start_workers()
 
         if self.recognizer and self.recognizer.is_calibrated:
-            self.phase = "idle"
-            self.prev_board_fen = None
-            self.status_message = "Board calibration loaded. Click Validate start to confirm the starting position."
+            if ASSUME_STANDARD_START:
+                self.board = chess.Board()
+                self.prev_board_fen = self.board.board_fen()
+                self.initial_board_validated = True
+                self.phase = "waiting_human" if self.board.turn == self._human_color() else "awaiting_engine"
+                self.status_message = "Calibration loaded. Waiting for the first move."
+            else:
+                self.phase = "idle"
+                self.prev_board_fen = None
+                self.status_message = "Board calibration loaded. Click Validate start to confirm the starting position."
         elif self.recognizer:
             self.phase = "calibrating"
             self.status_message = "Model ready. Click Calibrate to begin board corner selection."
@@ -743,7 +793,12 @@ class RoboChessControlCenter(tk.Tk):
     def _analyze_frame(self, frame: np.ndarray, recognizer: BoardRecognizer, stability_frames: int) -> tuple[np.ndarray, str, int, np.ndarray]:
         warped = recognizer.warp_frame(frame)
         detections = recognizer.detect(warped)
-        board_state = recognizer.detections_to_board(detections, warped.shape[1], warped.shape[0])
+        filtered = [
+            det
+            for det in detections
+            if float(det.get("confidence", 0.0)) >= DETECTION_CONFIDENCE_MIN
+        ]
+        board_state = recognizer.detections_to_board(filtered, warped.shape[1], warped.shape[0])
         curr_fen = board_state.board_fen()
 
         with self.state_lock:
@@ -835,16 +890,16 @@ class RoboChessControlCenter(tk.Tk):
                 self.status_message = "Human move accepted. Click Engine reply to ask Stockfish for the next move."
 
         board_view = recognizer.draw_board_grid(warped.copy())
-        board_view = recognizer.draw_detections(board_view, detections)
-        board_view = self._draw_overlay(board_view, stable, len(detections), self.stable_count, stability_frames)
+        board_view = recognizer.draw_detections(board_view, filtered)
+        board_view = self._draw_overlay(board_view, stable, len(filtered), self.stable_count, stability_frames)
 
         # Light temporal blending reduces visual jitter in overlay boxes.
         if self.prev_board_overlay is not None and self.prev_board_overlay.shape == board_view.shape:
             board_view = cv2.addWeighted(self.prev_board_overlay, 0.35, board_view, 0.65, 0)
         self.prev_board_overlay = board_view.copy()
 
-        display = self._compose_split_view(frame, board_view, len(detections), self.stable_count, stability_frames)
-        return display, curr_fen, len(detections), board_view
+        display = self._compose_split_view(frame, board_view, len(filtered), self.stable_count, stability_frames)
+        return display, curr_fen, len(filtered), board_view
 
     def _infer_human_move(self, expected_fen: str, curr_fen: str) -> Optional[chess.Move]:
         """Infer the human move with a tolerant fallback when board FEN is slightly noisy."""
@@ -1030,6 +1085,8 @@ class RoboChessControlCenter(tk.Tk):
         turn_text = "WHITE" if self.board.turn == chess.WHITE else "BLACK"
         cv2.putText(frame, f"{('STABLE' if stable else 'SCANNING')} | DET {detection_count} | FR {stable_count}/{stability_frames}", (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.55, overlay_color, 2)
         cv2.putText(frame, f"TURN {turn_text} | MOVE {self.board.fullmove_number}", (10, 54), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        human_text = "WHITE" if self._human_color() == chess.WHITE else "BLACK"
+        cv2.putText(frame, f"YOU {human_text}", (10, 78), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
         if self.phase == "waiting_human":
             cv2.putText(frame, "YOUR MOVE", (10, BOARD_DISPLAY_SIZE - 16), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 200, 255), 2)
         elif self.phase == "awaiting_engine":
@@ -1052,6 +1109,15 @@ class RoboChessControlCenter(tk.Tk):
         self._schedule_capture("manual", force_initial=False)
 
     def validate_starting_position(self) -> None:
+        if ASSUME_STANDARD_START:
+            with self.state_lock:
+                self.board = chess.Board()
+                self.prev_board_fen = self.board.board_fen()
+                self.initial_board_validated = True
+                self.phase = "waiting_human" if self.board.turn == self._human_color() else "awaiting_engine"
+                self.status_message = "Standard start assumed. Waiting for the first move."
+            self.step_status_var.set("Step 3/4: Human move")
+            return
         self._schedule_capture("validate_start", force_initial=True)
 
     def _schedule_capture(self, reason: str, force_initial: bool) -> None:
@@ -1072,12 +1138,7 @@ class RoboChessControlCenter(tk.Tk):
             time.sleep(CAPTURE_DELAY_SEC)
 
             with self.state_lock:
-                frame = None if self.latest_frame is None else self.latest_frame.copy()
                 recognizer = self.recognizer
-
-            if frame is None:
-                self.status_message = "No camera frame available."
-                return
 
             if recognizer is None or not recognizer.is_ready:
                 self.status_message = "Load the model before capturing."
@@ -1087,33 +1148,97 @@ class RoboChessControlCenter(tk.Tk):
                 self.status_message = "Calibrate the board before capturing."
                 return
 
-            warped = recognizer.warp_frame(frame)
-            detections = recognizer.detect(warped)
-            filtered = [det for det in detections if float(det.get("confidence", 0.0)) >= DETECTION_CONFIDENCE_MIN]
-            state = recognizer.detections_to_state_dict(
-                filtered,
-                warped.shape[1],
-                warped.shape[0],
-                min_confidence=DETECTION_CONFIDENCE_MIN,
-            )
-            curr_board = recognizer.state_dict_to_board(state)
+            samples: list[dict[str, Optional[str]]] = []
+            board_view = None
+            detection_count = 0
+            for idx in range(max(1, CAPTURE_SAMPLES)):
+                with self.state_lock:
+                    frame = None if self.latest_frame is None else self.latest_frame.copy()
+
+                if frame is None:
+                    time.sleep(CAPTURE_SAMPLE_DELAY)
+                    continue
+
+                warped = recognizer.warp_frame(frame)
+                detections = recognizer.detect(warped)
+                filtered = [
+                    det
+                    for det in detections
+                    if float(det.get("confidence", 0.0)) >= DETECTION_CONFIDENCE_MIN
+                ]
+                state = recognizer.detections_to_state_dict(
+                    filtered,
+                    warped.shape[1],
+                    warped.shape[0],
+                    min_confidence=DETECTION_CONFIDENCE_MIN,
+                )
+                samples.append(state)
+                detection_count = len(filtered)
+                board_view = recognizer.draw_board_grid(warped.copy())
+                board_view = recognizer.draw_detections(board_view, filtered)
+
+                if idx < (CAPTURE_SAMPLES - 1) and CAPTURE_SAMPLE_DELAY > 0:
+                    time.sleep(CAPTURE_SAMPLE_DELAY)
+
+            if not samples:
+                self.status_message = "No camera frame available."
+                return
+
+            all_squares = [chess.square_name(sq) for sq in chess.SQUARES]
+            stable_state: dict[str, Optional[str]] = {sq: None for sq in all_squares}
+            for sq in all_squares:
+                label_counts: dict[str, int] = {}
+                for sample_state in samples:
+                    label = sample_state.get(sq)
+                    if label:
+                        label_counts[label] = label_counts.get(label, 0) + 1
+                if label_counts:
+                    best_label, best_count = max(label_counts.items(), key=lambda item: item[1])
+                    if best_count >= STABLE_LABEL_MIN_COUNT:
+                        stable_state[sq] = best_label
+
+            curr_board = recognizer.state_dict_to_board(stable_state)
             curr_fen = curr_board.board_fen()
 
-            board_view = recognizer.draw_board_grid(warped.copy())
-            board_view = recognizer.draw_detections(board_view, filtered)
+            if board_view is None:
+                board_view = np.zeros((BOARD_DISPLAY_SIZE, BOARD_DISPLAY_SIZE, 3), dtype=np.uint8)
 
             if force_initial or not self.initial_board_validated:
+                if ASSUME_STANDARD_START:
+                    self.initial_board_validated = True
+                    self.board = chess.Board()
+                    self.prev_board_fen = self.board.board_fen()
+                    self.phase = "waiting_human" if self.board.turn == self._human_color() else "awaiting_engine"
+                    self.step_status_var.set(
+                        "Step 3/4: Human move" if self.phase == "waiting_human" else "Step 4/4: Engine reply"
+                    )
+                    self.status_message = "Standard start assumed. Ready for moves."
+                    self.last_invalid_squares = []
+                    self.last_changed_squares = []
+                    self._update_detection_snapshot(
+                        stable_state,
+                        curr_fen,
+                        detection_count,
+                        board_view,
+                        reason,
+                        [],
+                        [],
+                        0,
+                        0,
+                    )
+                    return
+
                 valid, mismatches = recognizer.validate_initial_state(
-                    state,
+                    stable_state,
                     max_missing=START_MAX_MISSING,
                     max_extra=START_MAX_EXTRA,
                 )
                 if not valid:
                     board_view = self._highlight_squares(board_view, mismatches, (0, 0, 255))
                     self._update_detection_snapshot(
-                        state,
+                        stable_state,
                         curr_fen,
-                        len(filtered),
+                        detection_count,
                         board_view,
                         reason,
                         mismatches,
@@ -1128,14 +1253,16 @@ class RoboChessControlCenter(tk.Tk):
                 self.board = chess.Board()
                 self.prev_board_fen = self.board.board_fen()
                 self.phase = "waiting_human" if self.board.turn == self._human_color() else "awaiting_engine"
-                self.step_status_var.set("Step 3/4: Human move" if self.phase == "waiting_human" else "Step 4/4: Engine reply")
+                self.step_status_var.set(
+                    "Step 3/4: Human move" if self.phase == "waiting_human" else "Step 4/4: Engine reply"
+                )
                 self.status_message = "Initial board validated. Ready for moves."
                 self.last_invalid_squares = []
                 self.last_changed_squares = []
                 self._update_detection_snapshot(
-                    state,
+                    stable_state,
                     curr_fen,
-                    len(filtered),
+                    detection_count,
                     board_view,
                     reason,
                     [],
@@ -1145,22 +1272,33 @@ class RoboChessControlCenter(tk.Tk):
                 )
                 return
 
-            prev_state = recognizer.board_to_state_dict(self.board)
-            changed_squares = self._diff_squares(prev_state, state)
-            move, best_score, second_best = recognizer.infer_move_from_state(
-                self.board,
-                state,
-                min_score=MOVE_MATCH_MIN_SCORE,
-                min_gap=MOVE_MATCH_MIN_GAP,
-            )
+            if OCCUPANCY_ONLY:
+                prev_state = recognizer.board_to_occupancy_state(self.board)
+                curr_state = recognizer.to_occupancy_state(stable_state)
+                changed_squares = self._diff_squares(prev_state, curr_state)
+                move, best_score, second_best = recognizer.infer_move_from_occupancy(
+                    self.board,
+                    curr_state,
+                    min_score=MOVE_MATCH_MIN_SCORE,
+                    min_gap=MOVE_MATCH_MIN_GAP,
+                )
+            else:
+                prev_state = recognizer.board_to_state_dict(self.board)
+                changed_squares = self._diff_squares(prev_state, stable_state)
+                move, best_score, second_best = recognizer.infer_move_from_state(
+                    self.board,
+                    stable_state,
+                    min_score=MOVE_MATCH_MIN_SCORE,
+                    min_gap=MOVE_MATCH_MIN_GAP,
+                )
             board_view = self._highlight_squares(board_view, changed_squares, (0, 200, 255))
 
             if move is None:
                 board_view = self._highlight_squares(board_view, changed_squares, (0, 0, 255))
                 self._update_detection_snapshot(
-                    state,
+                    stable_state,
                     curr_fen,
-                    len(filtered),
+                    detection_count,
                     board_view,
                     reason,
                     changed_squares,
@@ -1184,9 +1322,9 @@ class RoboChessControlCenter(tk.Tk):
             ok, engine_warning = self._validate_with_engine(move)
             if not ok:
                 self._update_detection_snapshot(
-                    state,
+                    stable_state,
                     curr_fen,
-                    len(filtered),
+                    detection_count,
                     board_view,
                     reason,
                     [],
@@ -1222,9 +1360,9 @@ class RoboChessControlCenter(tk.Tk):
                 print(f"[WARN] Stockfish did not rank {move.uci()} in top PVs.")
 
             self._update_detection_snapshot(
-                state,
+                stable_state,
                 curr_fen,
-                len(filtered),
+                detection_count,
                 board_view,
                 reason,
                 [],
@@ -1232,7 +1370,8 @@ class RoboChessControlCenter(tk.Tk):
                 best_score,
                 second_best,
             )
-            self.after(int(ENGINE_AUTO_DELAY_SEC * 1000), self.apply_engine_move)
+            if AUTO_ENGINE_REPLY:
+                self.after(int(ENGINE_AUTO_DELAY_SEC * 1000), self.apply_engine_move)
         except Exception as exc:
             message = str(exc)
             if "timed out" in message.lower() or "timeout" in message.lower():
@@ -1451,10 +1590,20 @@ class RoboChessControlCenter(tk.Tk):
                     self.initial_board_validated = False
                     self.candidate_fen = None
                     self.stable_count = 0
-                    self.status_message = "Calibration complete. Validate the starting position before play."
-                    self.canvas_click_hint.set("Calibration complete. Click Validate start to confirm the board.")
-                    self.calibration_status_var.set("Calibration ready")
-                    self.step_status_var.set("Step 2/4: Validate start")
+                    if ASSUME_STANDARD_START:
+                        self.board = chess.Board()
+                        self.prev_board_fen = self.board.board_fen()
+                        self.initial_board_validated = True
+                        self.phase = "waiting_human" if self.board.turn == self._human_color() else "awaiting_engine"
+                        self.status_message = "Calibration complete. Waiting for the first move."
+                        self.canvas_click_hint.set("Calibration complete. Make a move on the board.")
+                        self.calibration_status_var.set("Calibration ready")
+                        self.step_status_var.set("Step 3/4: Human move")
+                    else:
+                        self.status_message = "Calibration complete. Validate the starting position before play."
+                        self.canvas_click_hint.set("Calibration complete. Click Validate start to confirm the board.")
+                        self.calibration_status_var.set("Calibration ready")
+                        self.step_status_var.set("Step 2/4: Validate start")
                     self.save_settings()
                 except Exception as exc:
                     self.calibration_points.pop()
@@ -1495,13 +1644,17 @@ class RoboChessControlCenter(tk.Tk):
         with self.state_lock:
             self.board = chess.Board()
             self.move_history.clear()
-            self.initial_board_validated = False
+            self.initial_board_validated = bool(ASSUME_STANDARD_START)
             self.last_detection_state = None
             self.last_detection_board_view = None
             self.last_invalid_squares = []
             self.last_changed_squares = []
-            self.phase = "idle" if not (self.recognizer and self.recognizer.is_calibrated) else "waiting_human"
-            self.prev_board_fen = self.board.board_fen()
+            if not (self.recognizer and self.recognizer.is_calibrated):
+                self.phase = "idle"
+                self.prev_board_fen = None
+            else:
+                self.phase = "waiting_human" if self.board.turn == self._human_color() else "awaiting_engine"
+                self.prev_board_fen = self.board.board_fen()
             self.candidate_fen = None
             self.candidate_move = None
             self.candidate_move_streak = 0
@@ -1511,8 +1664,12 @@ class RoboChessControlCenter(tk.Tk):
             self.move_time_var.set("Last human move time: -")
             human_side = str(self.app_config.human_side).strip().capitalize()
             engine_side = "Black" if human_side == "White" else "White"
-            self.status_message = f"New game started. You are {human_side}, engine is {engine_side}. Sync the real board."
-            self.step_status_var.set("Step 3/4: Human move" if self.phase == "waiting_human" else "Step 1/4: Setup")
+            if ASSUME_STANDARD_START and self.phase in {"waiting_human", "awaiting_engine"}:
+                self.status_message = f"New game started. You are {human_side}, engine is {engine_side}. Waiting for moves."
+                self.step_status_var.set("Step 3/4: Human move" if self.phase == "waiting_human" else "Step 4/4: Engine reply")
+            else:
+                self.status_message = f"New game started. You are {human_side}, engine is {engine_side}. Sync the real board."
+                self.step_status_var.set("Step 3/4: Human move" if self.phase == "waiting_human" else "Step 1/4: Setup")
         self._refresh_connection_text()
 
     def apply_engine_move(self) -> None:
