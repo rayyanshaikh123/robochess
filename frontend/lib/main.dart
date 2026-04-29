@@ -8,6 +8,7 @@ import 'presentation/screens/home_dashboard.dart';
 import 'presentation/screens/play_screen.dart';
 import 'presentation/screens/analysis_screen.dart';
 import 'presentation/screens/learn_section.dart';
+import 'presentation/screens/openings_screen.dart';
 import 'presentation/screens/puzzle_solve_screen.dart';
 import 'presentation/screens/cross_connect.dart';
 import 'presentation/screens/profile_settings.dart';
@@ -44,49 +45,75 @@ GoRouter _buildRouter(WidgetRef ref) {
       return null;
     },
     routes: [
-      ShellRoute(
-        navigatorKey: _shellNavigatorKey,
-        builder: (context, state, child) {
-          return MainScaffold(child: child);
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) {
+          return MainScaffold(navigationShell: navigationShell);
         },
-        routes: [
-          GoRoute(
-            path: '/home',
-            builder: (context, state) => const HomeDashboard(),
+        branches: [
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/home',
+                builder: (context, state) => const HomeDashboard(),
+              ),
+            ],
           ),
-          GoRoute(
-            path: '/play',
-            builder: (context, state) => const PlayScreen(),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/play',
+                builder: (context, state) => const PlayScreen(),
+              ),
+            ],
           ),
-          GoRoute(
-            path: '/analysis',
-            builder: (context, state) => const AnalysisScreen(),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/analysis',
+                builder: (context, state) {
+                  final gameId = state.uri.queryParameters['game_id'];
+                  return AnalysisScreen(gameId: gameId);
+                },
+              ),
+            ],
           ),
-          GoRoute(
-            path: '/learn',
-            builder: (context, state) => const LearnSection(),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/learn',
+                builder: (context, state) => const LearnSection(),
+              ),
+              GoRoute(
+                path: '/learn/openings',
+                builder: (context, state) => const OpeningsScreen(),
+              ),
+              GoRoute(
+                path: '/learn/puzzle/:puzzleId',
+                builder: (context, state) {
+                  final extra = state.extra;
+                  final puzzleId = state.pathParameters['puzzleId'] ?? '';
+                  final puzzle = extra is PuzzleModel ? extra : null;
+                  return PuzzleSolveScreen(puzzleId: puzzleId, puzzle: puzzle);
+                },
+              ),
+            ],
           ),
-          GoRoute(
-            path: '/learn/puzzle/:puzzleId',
-            builder: (context, state) {
-              final extra = state.extra;
-              final puzzleId = state.pathParameters['puzzleId'] ?? '';
-              final puzzle = extra is PuzzleModel ? extra : null;
-              return PuzzleSolveScreen(puzzleId: puzzleId, puzzle: puzzle);
-            },
-          ),
-          GoRoute(
-            path: '/connect',
-            builder: (context, state) => const CrossConnect(),
-          ),
-          GoRoute(
-            path: '/connect/link',
-            builder: (context, state) => const BoardLinkScreen(),
-          ),
-          GoRoute(
-            path: '/connect/board/:deviceId',
-            builder: (context, state) => BoardDetailsScreen(
-                deviceId: state.pathParameters['deviceId'] ?? ''),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/connect',
+                builder: (context, state) => const CrossConnect(),
+              ),
+              GoRoute(
+                path: '/connect/link',
+                builder: (context, state) => const BoardLinkScreen(),
+              ),
+              GoRoute(
+                path: '/connect/board/:deviceId',
+                builder: (context, state) => BoardDetailsScreen(
+                    deviceId: state.pathParameters['deviceId'] ?? ''),
+              ),
+            ],
           ),
         ],
       ),

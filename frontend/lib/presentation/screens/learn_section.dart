@@ -247,6 +247,7 @@ class _CategoryGrid extends StatelessWidget {
       badgeColor: kPrimary,
       iconData: Icons.memory,
       iconBg: Color(0x208ADB52),
+      route: '/learn/openings',
     ),
     _Category(
       title: 'Endgame Strategy',
@@ -287,96 +288,101 @@ class _CategoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: kSurfaceContLow,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Image placeholder with badge
-          Stack(
-            children: [
-              Container(
-                height: 120,
-                width: double.infinity,
-                color: kSurfaceContHighest,
-                child: Center(
-                  child: Icon(category.iconData,
-                      color: category.badgeColor.withOpacity(0.3), size: 56),
-                ),
-              ),
-              Positioned(
-                top: 12,
-                left: 12,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: kSurfaceContHighest.withOpacity(0.8),
-                    borderRadius: BorderRadius.circular(6),
-                    border:
-                        Border.all(color: category.badgeColor.withOpacity(0.2)),
-                  ),
-                  child: Text(category.badge.toUpperCase(),
-                      style: GoogleFonts.inter(
-                          fontSize: 8,
-                          fontWeight: FontWeight.w700,
-                          color: category.badgeColor,
-                          letterSpacing: 1)),
-                ),
-              ),
-            ],
-          ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    return GestureDetector(
+      onTap: category.route != null
+          ? () => context.push(category.route!)
+          : null,
+      child: Container(
+        decoration: BoxDecoration(
+          color: kSurfaceContLow,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Image placeholder with badge
+            Stack(
               children: [
-                Text(category.title,
-                    style: GoogleFonts.spaceGrotesk(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: kOnSurface)),
-                const SizedBox(height: 6),
-                Text(category.description,
-                    style: GoogleFonts.inter(
-                        fontSize: 12, color: kOnSurfaceVariant, height: 1.5)),
-                const SizedBox(height: 14),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Container(
-                      width: 28,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        color: category.iconBg,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(category.iconData,
-                          color: category.badgeColor, size: 14),
+                Container(
+                  height: 120,
+                  width: double.infinity,
+                  color: kSurfaceContHighest,
+                  child: Center(
+                    child: Icon(category.iconData,
+                        color: category.badgeColor.withOpacity(0.3), size: 56),
+                  ),
+                ),
+                Positioned(
+                  top: 12,
+                  left: 12,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: kSurfaceContHighest.withOpacity(0.8),
+                      borderRadius: BorderRadius.circular(6),
+                      border:
+                          Border.all(color: category.badgeColor.withOpacity(0.2)),
                     ),
-                    Row(
-                      children: [
-                        Text('INITIALIZE',
-                            style: GoogleFonts.inter(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: kPrimary,
-                                letterSpacing: 2)),
-                        const SizedBox(width: 6),
-                        const Icon(Icons.arrow_forward,
-                            color: kPrimary, size: 16),
-                      ],
-                    ),
-                  ],
+                    child: Text(category.badge.toUpperCase(),
+                        style: GoogleFonts.inter(
+                            fontSize: 8,
+                            fontWeight: FontWeight.w700,
+                            color: category.badgeColor,
+                            letterSpacing: 1)),
+                  ),
                 ),
               ],
             ),
-          ),
-        ],
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(category.title,
+                      style: GoogleFonts.spaceGrotesk(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: kOnSurface)),
+                  const SizedBox(height: 6),
+                  Text(category.description,
+                      style: GoogleFonts.inter(
+                          fontSize: 12, color: kOnSurfaceVariant, height: 1.5)),
+                  const SizedBox(height: 14),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: category.iconBg,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(category.iconData,
+                            color: category.badgeColor, size: 14),
+                      ),
+                      Row(
+                        children: [
+                          Text('INITIALIZE',
+                              style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: kPrimary,
+                                  letterSpacing: 2)),
+                          const SizedBox(width: 6),
+                          const Icon(Icons.arrow_forward,
+                              color: kPrimary, size: 16),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -386,6 +392,7 @@ class _Category {
   final String title, description, badge;
   final Color badgeColor, iconBg;
   final IconData iconData;
+  final String? route;
   const _Category({
     required this.title,
     required this.description,
@@ -393,6 +400,7 @@ class _Category {
     required this.badgeColor,
     required this.iconBg,
     required this.iconData,
+    this.route,
   });
 }
 
@@ -695,7 +703,7 @@ class _PuzzleCard extends StatelessWidget {
                 foregroundColor: kPrimary,
               ),
               onPressed: () {
-                context.go('/learn/puzzle/${puzzle.puzzleId}', extra: puzzle);
+                context.push('/learn/puzzle/${puzzle.puzzleId}', extra: puzzle);
               },
               child: Row(
                 mainAxisSize: MainAxisSize.min,

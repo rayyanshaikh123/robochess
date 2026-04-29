@@ -2,17 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 class MainScaffold extends StatelessWidget {
-  final Widget child;
+  final StatefulNavigationShell navigationShell;
 
-  const MainScaffold({super.key, required this.child});
+  const MainScaffold({super.key, required this.navigationShell});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: child,
+      body: navigationShell,
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _calculateSelectedIndex(context),
-        onTap: (int idx) => _onItemTapped(idx, context),
+        currentIndex: navigationShell.currentIndex,
+        onTap: (int idx) => navigationShell.goBranch(
+          idx,
+          initialLocation: idx == navigationShell.currentIndex,
+        ),
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: 'Home'),
           BottomNavigationBarItem(icon: Icon(Icons.videogame_asset), label: 'Play'),
@@ -22,35 +25,5 @@ class MainScaffold extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  static int _calculateSelectedIndex(BuildContext context) {
-    final String location = GoRouterState.of(context).uri.path;
-    if (location.startsWith('/home')) return 0;
-    if (location.startsWith('/play')) return 1;
-    if (location.startsWith('/analysis')) return 2;
-    if (location.startsWith('/learn')) return 3;
-    if (location.startsWith('/connect')) return 4;
-    return 0;
-  }
-
-  void _onItemTapped(int index, BuildContext context) {
-    switch (index) {
-      case 0:
-        context.go('/home');
-        break;
-      case 1:
-        context.go('/play');
-        break;
-      case 2:
-        context.go('/analysis');
-        break;
-      case 3:
-        context.go('/learn');
-        break;
-      case 4:
-        context.go('/connect');
-        break;
-    }
   }
 }
