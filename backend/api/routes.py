@@ -1,6 +1,8 @@
 import asyncio
 import base64
 from collections import Counter
+import time
+from typing import Optional
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, BackgroundTasks
 import chess
@@ -89,6 +91,88 @@ def _state_signature(state: dict) -> tuple:
     return tuple((k, state.get(k)) for k in sorted(state.keys()))
 
 
+def _diff_state(prev_state: dict, curr_state: dict) -> list[str]:
+    changed: list[str] = []
+    for sq, prev_val in prev_state.items():
+        if prev_val != curr_state.get(sq):
+            changed.append(str(sq))
+    return changed
+
+
+def _merge_stable_state(
+    samples: list[dict[str, Optional[str]]],
+    min_count: int,
+) -> dict[str, Optional[str]]:
+    all_squares = [chess.square_name(sq) for sq in chess.SQUARES]
+    stable_state: dict[str, Optional[str]] = {sq: None for sq in all_squares}
+    threshold = max(1, int(min_count))
+    for sq in all_squares:
+        counts: Counter[str] = Counter()
+        for sample_state in samples:
+            label = sample_state.get(sq)
+            if label:
+                counts[label] += 1
+        if counts:
+            best_label, best_count = counts.most_common(1)[0]
+            if best_count >= threshold:
+                stable_state[sq] = best_label
+    return stable_state
+
+
+async def _collect_stable_state_samples(
+    manager: GameManager,
+    attempts: int,
+    delay_sec: float,
+    min_count: int,
+    initial_frame=None,
+) -> tuple[Optional[dict[str, Optional[str]]], dict]:
+    recognizer = manager.recognizer
+    if recognizer is None or not recognizer.is_ready:
+        return None, {"error": "Model not ready"}
+
+    samples: list[dict[str, Optional[str]]] = []
+    det_counts: list[int] = []
+    last_frame = None
+    total_attempts = max(1, int(attempts))
+
+    if initial_frame is not None:
+        try:
+            state, detections = detect_board_state_from_frame(manager, initial_frame)
+        except Exception as exc:
+            return None, {"error": f"Detection failed: {exc}"}
+        samples.append(state)
+        det_counts.append(detections)
+        last_frame = initial_frame
+
+    for idx in range(len(samples), total_attempts):
+        try:
+            frame = manager.capture_frame()
+        except Exception as exc:
+            return None, {"error": f"Camera capture failed: {exc}"}
+
+        last_frame = frame
+        try:
+            state, detections = detect_board_state_from_frame(manager, frame)
+        except Exception as exc:
+            return None, {"error": f"Detection failed: {exc}"}
+
+        samples.append(state)
+        det_counts.append(detections)
+
+        if idx < (total_attempts - 1) and delay_sec > 0:
+            await asyncio.sleep(delay_sec)
+
+    if not samples:
+        return None, {"error": "No samples"}
+
+    stable_state = _merge_stable_state(samples, min_count)
+    return stable_state, {
+        "samples": len(samples),
+        "detections": max(det_counts) if det_counts else 0,
+        "last_frame": last_frame,
+    }
+
+
 async def _collect_stable_state(manager: GameManager,
                                 attempts: int = 5,
                                 delay_sec: float = 0.12):
@@ -138,6 +222,36 @@ async def _collect_stable_state(manager: GameManager,
         "samples": len(samples),
         "detections": max(det_counts) if det_counts else 0,
     }
+
+
+def _engine_top_moves(engine: chess.engine.SimpleEngine, board: chess.Board, engine_time: float) -> list[chess.Move]:
+    info = engine.analyse(board, chess.engine.Limit(time=engine_time), multipv=5)
+    if isinstance(info, dict):
+        info = [info]
+    top_moves = []
+    for entry in info:
+        pv = entry.get("pv") if isinstance(entry, dict) else None
+        if pv:
+            top_moves.append(pv[0])
+    return top_moves
+
+
+async def _validate_with_engine(manager: GameManager, move: chess.Move) -> tuple[bool, bool]:
+    if move not in manager.board.legal_moves:
+        return False, False
+    if manager.engine is None:
+        return True, False
+    try:
+        engine_time = float(manager.settings.engine_time)
+        top_moves = await asyncio.to_thread(
+            _engine_top_moves, manager.engine, manager.board, engine_time
+        )
+    except Exception:
+        return True, False
+    if not top_moves:
+        return True, False
+    in_top = any(move.uci() == top.uci() for top in top_moves)
+    return True, (not in_top)
 
 
 @router.get("/health", response_model=ApiResponse)
@@ -402,7 +516,15 @@ async def detect_move_if_clear(
 ) -> ApiResponse:
     manager = GameManager.get_instance()
     if not manager.calibrated:
-        return error("Not calibrated", {"detail": "Run /calibrate first"})
+        return ok(
+            "Not calibrated",
+            {
+                "analysis_status": "waiting",
+                "reason": "not_calibrated",
+                "analysis_message": "Calibrate the board first.",
+                "retry": False,
+            },
+        )
 
     try:
         frame = manager.capture_frame()
@@ -411,7 +533,15 @@ async def detect_move_if_clear(
 
     recognizer = manager.recognizer
     if recognizer is None or not recognizer.is_ready:
-        return error("Model not ready — call /model/load first")
+        return ok(
+            "Model not ready",
+            {
+                "analysis_status": "waiting",
+                "reason": "model_not_ready",
+                "analysis_message": "Load the model before detection.",
+                "retry": False,
+            },
+        )
 
     warped = recognizer.warp_frame(frame)
     hand_present, hand_ratio, curr_gray, warmup = _is_hand_present(
@@ -496,6 +626,204 @@ async def detect_move_if_clear(
         manager.board.push(move)
         manager.prev_state = curr_state
 
+    game_version = None
+    if manager.current_game_id:
+        game_state, err = await record_move(
+            db, manager.current_game_id, move.uci(), manager.get_fen()
+        )
+        if err:
+            return error("Failed to persist move", {"detail": err})
+        game_version = game_state.get("game_version")
+        await ws_manager.send_to_game(
+            manager.current_game_id,
+            {
+                "type": "game.move",
+                "data": {
+                    "game_id": manager.current_game_id,
+                    "uci": move.uci(),
+                    "fen": manager.get_fen(),
+                    "game_version": game_version,
+                },
+            },
+        )
+
+    if manager.mode == "human_vs_ai" and not manager.board.is_game_over():
+        background_tasks.add_task(_trigger_ai_move, db)
+
+    data = {
+        "uci": move.uci(),
+        "san": san,
+        "fen": manager.get_fen(),
+        "score": best_score,
+        "second_best": second_best,
+        "detections": detections,
+        "fallback": used_fallback,
+    }
+    return ok("Move detected", data)
+
+
+@router.post("/move/analyze", response_model=ApiResponse)
+async def analyze_move_snapshot(
+    background_tasks: BackgroundTasks, db=Depends(get_db)
+) -> ApiResponse:
+    manager = GameManager.get_instance()
+    if not manager.calibrated:
+        return ok(
+            "Not calibrated",
+            {
+                "analysis_status": "waiting",
+                "reason": "not_calibrated",
+                "analysis_message": "Calibrate the board first.",
+                "retry": False,
+            },
+        )
+
+    recognizer = manager.recognizer
+    if recognizer is None or not recognizer.is_ready:
+        return ok(
+            "Model not ready",
+            {
+                "analysis_status": "waiting",
+                "reason": "model_not_ready",
+                "analysis_message": "Load the model before detection.",
+                "retry": False,
+            },
+        )
+
+    settings = manager.settings
+    try:
+        frame = manager.capture_frame()
+    except Exception as exc:
+        return ok(
+            "Camera capture failed",
+            {
+                "analysis_status": "red",
+                "reason": "camera_error",
+                "analysis_message": f"Camera capture failed: {exc}",
+                "retry": True,
+            },
+        )
+
+    stable_state, meta = await _collect_stable_state_samples(
+        manager,
+        attempts=max(1, int(settings.capture_samples)),
+        delay_sec=float(settings.capture_sample_delay),
+        min_count=int(settings.stable_label_min_count),
+        initial_frame=frame,
+    )
+
+    now = time.time()
+    if stable_state is None:
+        manager.recapture_until = now + float(settings.recapture_delay_seconds)
+        return ok(
+            "Detection failed",
+            {
+                "analysis_status": "red",
+                "reason": "detection_failed",
+                "analysis_message": meta.get("error", "Detection failed. Try again."),
+                "retry": True,
+            },
+        )
+
+    if manager.prev_state is None:
+        with manager.state_lock:
+            manager.board.reset()
+            manager.prev_state = recognizer.expected_initial_state()
+        return ok(
+            "Starting position assumed",
+            {
+                "analysis_status": "waiting",
+                "reason": "assumed_start",
+                "analysis_message": "Starting position assumed. Make a move to begin.",
+                "retry": False,
+            },
+        )
+
+    curr_board = recognizer.state_dict_to_board(stable_state)
+    curr_fen = curr_board.board_fen()
+
+    if settings.occupancy_only:
+        prev_state = recognizer.board_to_occupancy_state(manager.board)
+        curr_state = recognizer.to_occupancy_state(stable_state)
+        changed_squares = _diff_state(prev_state, curr_state)
+        move, best_score, second_best = recognizer.infer_move_from_occupancy(
+            manager.board,
+            curr_state,
+            min_score=settings.move_match_min_score,
+            min_gap=settings.move_match_min_gap,
+        )
+    else:
+        prev_state = recognizer.board_to_state_dict(manager.board)
+        changed_squares = _diff_state(prev_state, stable_state)
+        move, best_score, second_best = recognizer.infer_move_from_state(
+            manager.board,
+            stable_state,
+            min_score=settings.move_match_min_score,
+            min_gap=settings.move_match_min_gap,
+        )
+
+    detections = int(meta.get("detections", 0))
+    pieces_detected = sum(1 for v in stable_state.values() if v is not None)
+
+    if move is None:
+        squares_text = ", ".join(changed_squares[:6])
+        if len(changed_squares) > 6:
+            squares_text += "..."
+        message = "No legal move matched."
+        if squares_text:
+            message = f"No legal move matched. Changed: {squares_text} | Score {best_score}/{second_best}."
+        manager.recapture_until = now + float(settings.recapture_delay_seconds)
+        return ok(
+            "No legal move matched",
+            {
+                "analysis_status": "red",
+                "reason": "no_legal_move",
+                "analysis_message": message,
+                "retry": True,
+                "changed_squares": changed_squares,
+                "score": best_score,
+                "second_best": second_best,
+                "detections": detections,
+                "pieces_detected": pieces_detected,
+                "fen": curr_fen,
+                "samples": meta.get("samples", 0),
+            },
+        )
+
+    ok_move, engine_warning = await _validate_with_engine(manager, move)
+    if not ok_move:
+        manager.recapture_until = now + float(settings.recapture_delay_seconds)
+        return ok(
+            "Illegal move",
+            {
+                "analysis_status": "red",
+                "reason": "illegal_move",
+                "analysis_message": f"Illegal move: {move.uci()}.",
+                "retry": True,
+                "uci": move.uci(),
+                "changed_squares": changed_squares,
+            },
+        )
+
+    with manager.state_lock:
+        if move not in manager.board.legal_moves:
+            manager.recapture_until = now + float(settings.recapture_delay_seconds)
+            return ok(
+                "Illegal move",
+                {
+                    "analysis_status": "red",
+                    "reason": "illegal_move",
+                    "analysis_message": f"Illegal move: {move.uci()}.",
+                    "retry": True,
+                    "uci": move.uci(),
+                    "changed_squares": changed_squares,
+                },
+            )
+        san = manager.board.san(move)
+        manager.board.push(move)
+        manager.prev_state = stable_state
+        manager.recapture_until = 0.0
+
     if manager.current_game_id:
         game_state, err = await record_move(
             db, manager.current_game_id, move.uci(), manager.get_fen()
@@ -519,13 +847,20 @@ async def detect_move_if_clear(
         background_tasks.add_task(_trigger_ai_move, db)
 
     data = {
+        "analysis_status": "green",
+        "analysis_message": f"Move: {move.uci()}" + (" (engine warning)" if engine_warning else ""),
         "uci": move.uci(),
         "san": san,
         "fen": manager.get_fen(),
         "score": best_score,
         "second_best": second_best,
         "detections": detections,
-        "fallback": used_fallback,
+        "pieces_detected": pieces_detected,
+        "changed_squares": changed_squares,
+        "engine_warning": engine_warning,
+        "samples": meta.get("samples", 0),
+        "fallback": bool(meta.get("samples", 0) > 1),
+        "game_version": game_version,
     }
     return ok("Move detected", data)
 
@@ -682,6 +1017,10 @@ async def start_game(payload: GameStartRequest, db=Depends(get_db)) -> ApiRespon
         manager.prev_state = None
         manager.calibrated = False
         manager.hand_prev_gray = None
+        manager.hand_present = False
+        manager.hand_last_seen = 0.0
+        manager.last_capture_time = 0.0
+        manager.recapture_until = 0.0
 
     game = await create_game(db, manager.get_fen(), players=payload.players)
     manager.current_game_id = game.get("game_id")

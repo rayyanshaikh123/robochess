@@ -11,6 +11,7 @@ import '../providers/device_provider.dart';
 import '../providers/board_provider.dart';
 import '../providers/game_provider.dart';
 import '../providers/session_provider.dart';
+import '../../core/config/app_config.dart';
 import '../../domain/models/device_model.dart';
 import '../../domain/models/game_state.dart';
 import '../../domain/models/calibration_frame.dart';
@@ -89,6 +90,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   bool _inGameValidating = false;
   bool _inGameValidated = false;
   String? _inGameValidationNote;
+  Timer? _autoDetectTimer;
 
   @override
   void initState() {
@@ -138,6 +140,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   @override
   void dispose() {
+    _autoDetectTimer?.cancel();
     _gameSub?.close();
     _statusSub?.cancel();
     _resultSub?.cancel();
@@ -244,16 +247,19 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       _legalDestinations = [];
       _snapshotNote = null;
     });
+    _autoDetectTimer?.cancel();
     try {
       await ref.read(gameControllerProvider.notifier).createGame(
             mode: result.mode,
             difficulty: result.difficulty,
-            players: result.useBoard && device != null ? [device.deviceId] : null,
+            players:
+                result.useBoard && device != null ? [device.deviceId] : null,
           );
       if (result.useBoard) {
         _fetchLiveFrame();
       } else {
         _clearSnapshot();
+        _autoDetectTimer?.cancel();
       }
     } catch (err) {
       if (mounted) {
@@ -299,6 +305,14 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     });
   }
 
+  void _startAutoDetect() {
+    if (_autoDetectTimer != null) return;
+    _autoDetectTimer = Timer.periodic(const Duration(milliseconds: 900), (_) {
+      if (!_gameUsesBoard || _snapshotDetecting || _syncing) return;
+      _detectSnapshotMove();
+    });
+  }
+
   Future<void> _detectSnapshotMove() async {
     if (_snapshotDetecting) return;
     setState(() {
@@ -306,26 +320,44 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       _snapshotNote = 'Waiting for clear board...';
     });
     try {
-      const maxAttempts = 6;
+      const maxAttempts = 8;
       for (int attempt = 0; attempt < maxAttempts; attempt++) {
         final result =
-            await ref.read(boardRepositoryProvider).detectMoveSnapshotIfClear();
-        final handPresent = result['hand_present'] == true;
-        final warmup = result['warmup'] == true;
+            await ref.read(boardRepositoryProvider).analyzeMoveSnapshot();
+        final status = result['analysis_status']?.toString() ?? 'unknown';
+        final message = result['analysis_message']?.toString();
+        final reason = result['reason']?.toString();
+        final retry = result['retry'] == true;
         final uci = result['uci']?.toString();
+        final versionRaw = result['game_version'];
+        final version = int.tryParse(versionRaw?.toString() ?? '');
         final fallback = result['fallback'] == true;
 
-        if (warmup || handPresent) {
-          if (attempt < maxAttempts - 1) {
+        if (status == 'waiting') {
+          if (mounted) {
+            setState(() {
+              _snapshotNote = message ??
+                  (reason == 'hand_present'
+                      ? 'Hand detected. Move away to detect.'
+                      : 'Hold steady and try again.');
+            });
+          }
+          if (retry && attempt < maxAttempts - 1) {
             await Future.delayed(const Duration(milliseconds: 400));
             continue;
           }
+          break;
+        }
+
+        if (status == 'red') {
           if (mounted) {
             setState(() {
-              _snapshotNote = warmup
-                  ? 'Hold steady and try again.'
-                  : 'Hand detected. Move away to detect.';
+              _snapshotNote = message ?? 'No legal move matched. Try again.';
             });
+          }
+          if (retry && attempt < maxAttempts - 1) {
+            await Future.delayed(const Duration(milliseconds: 400));
+            continue;
           }
           break;
         }
@@ -333,10 +365,18 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         if (mounted) {
           setState(() {
             if (uci == null || uci.isEmpty) {
-              _snapshotNote = 'Snapshot captured.';
+              _snapshotNote = message ?? 'Snapshot captured.';
             } else {
-              _snapshotNote =
-                  fallback ? 'Move: $uci (stabilized)' : 'Move: $uci';
+              _snapshotNote = message ??
+                  (fallback ? 'Move: $uci (stabilized)' : 'Move: $uci');
+              if (_gameUsesBoard) {
+                final applied = _applyUciMove(uci);
+                if (applied && version != null) {
+                  _pendingLocalUci = uci;
+                  _pendingLocalVersion = version;
+                  _linkedGameVersion = version;
+                }
+              }
             }
           });
         }
@@ -380,6 +420,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         _inGameValidationNote = note;
         _inGameValidating = false;
       });
+      // Manual validation no longer auto-starts detection.
     } catch (err) {
       if (!mounted) return;
       setState(() {
@@ -404,6 +445,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
             'Force validated. Using assumed initial position.';
         _inGameValidating = false;
       });
+      // Manual force-validate does not auto-start detection.
     } catch (err) {
       if (!mounted) return;
       setState(() {
@@ -416,10 +458,10 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   // ── Undo last move ──
   Future<void> _undoMove() async {
     if (_game.history.isEmpty && _linkedGameId == null) return;
-    
+
     // Optimistically undo local state, then let server dictate final state
     _game.undo();
-    
+
     if (_linkedGameId != null) {
       try {
         await ref.read(gameControllerProvider.notifier).undoMove();
@@ -577,6 +619,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         if (version != null) {
           _linkedGameVersion = version;
         }
+        _snapshotNote = 'Engine move: $uci';
       });
       return;
     }
@@ -616,6 +659,15 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           }
           if (toVersion != null) {
             _linkedGameVersion = toVersion;
+          }
+          if (moves.isNotEmpty) {
+            final last = moves.last;
+            if (last is Map<String, dynamic>) {
+              final uci = last['uci']?.toString();
+              if (uci != null && uci.isNotEmpty) {
+                _snapshotNote = 'Engine move: $uci';
+              }
+            }
           }
         });
       }
@@ -785,8 +837,6 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           if (_gameUsesBoard && _linkedGameId != null) ...[
             const SizedBox(height: 12),
             _buildLiveBoardPreview(),
-            const SizedBox(height: 12),
-            _buildBoardValidationActions(),
           ],
 
           // ── Board ──
@@ -1299,7 +1349,9 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
 
   Future<void> _loadModel() async {
     await _runStep(() async {
-      await ref.read(boardRepositoryProvider).loadModel();
+      await ref.read(boardRepositoryProvider).loadModel(
+            modelPath: AppConfig.boardModelRef,
+          );
       setState(() => _modelLoaded = true);
     });
   }
@@ -1439,7 +1491,8 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
                           fontWeight: FontWeight.w600,
                           color: kOnSurface)),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: kSurfaceContHighest,
                       borderRadius: BorderRadius.circular(99),
@@ -1460,7 +1513,8 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
                   thumbColor: kPrimary,
                   overlayColor: kPrimary.withOpacity(0.2),
                   trackHeight: 4,
-                  valueIndicatorTextStyle: GoogleFonts.inter(fontWeight: FontWeight.w700),
+                  valueIndicatorTextStyle:
+                      GoogleFonts.inter(fontWeight: FontWeight.w700),
                 ),
                 child: Slider(
                   value: _difficulty.toDouble(),
@@ -2123,7 +2177,10 @@ class _GameControls extends StatelessWidget {
           icon: Icons.undo, label: 'Undo', color: kOnSurface, onTap: onUndo),
       const SizedBox(width: 12),
       _ControlBtn(
-          icon: Icons.analytics, label: 'Analyze', color: kSecondary, onTap: onAnalyze),
+          icon: Icons.analytics,
+          label: 'Analyze',
+          color: kSecondary,
+          onTap: onAnalyze),
       const SizedBox(width: 12),
       _ControlBtn(icon: Icons.flag, label: 'Resign', color: kError),
       const SizedBox(width: 12),

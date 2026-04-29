@@ -27,6 +27,10 @@ class GameManager:
         self.difficulty = 5
         self.current_game_id: Optional[str] = None
         self.hand_prev_gray = None
+        self.hand_present = False
+        self.hand_last_seen = 0.0
+        self.last_capture_time = 0.0
+        self.recapture_until = 0.0
 
         self.recognizer = BoardRecognizer(settings.model_path, confidence=settings.confidence)
         self.engine = self._load_engine(settings.stockfish_path)

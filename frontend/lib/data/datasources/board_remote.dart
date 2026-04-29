@@ -49,4 +49,8 @@ class BoardRemoteDataSource {
   Future<Map<String, dynamic>> detectMoveSnapshotIfClear() async {
     return _client.postJson('/move/detect_if_clear');
   }
+
+  Future<Map<String, dynamic>> analyzeMoveSnapshot() async {
+    return _client.postJson('/move/analyze');
+  }
 }

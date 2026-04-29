@@ -36,8 +36,18 @@ class Settings:
     start_max_extra: int
     capture_width: int
     capture_height: int
+    capture_samples: int
+    capture_sample_delay: float
+    stable_label_min_count: int
+    occupancy_only: bool
+    hand_absence_seconds: float
+    hand_trigger_cooldown_seconds: float
+    recapture_delay_seconds: float
     mongodb_uri: str
     mongodb_db: str
+    mongodb_connect_timeout_ms: int
+    mongodb_socket_timeout_ms: int
+    mongodb_server_selection_timeout_ms: int
     jwt_secret: str
     jwt_algorithm: str
     access_token_minutes: int
@@ -131,8 +141,18 @@ def load_settings() -> Settings:
         start_max_extra=_get_env_int("ROBOCHESS_START_EXTRA", 6),
         capture_width=_get_env_int("ROBOCHESS_CAPTURE_WIDTH", 820),
         capture_height=_get_env_int("ROBOCHESS_CAPTURE_HEIGHT", 620),
+        capture_samples=_get_env_int("ROBOCHESS_CAPTURE_SAMPLES", 2),
+        capture_sample_delay=_get_env_float("ROBOCHESS_CAPTURE_SAMPLE_DELAY", 0.05),
+        stable_label_min_count=_get_env_int("ROBOCHESS_STABLE_LABEL_COUNT", 2),
+        occupancy_only=bool(_get_env_int("ROBOCHESS_OCCUPANCY_ONLY", 1)),
+        hand_absence_seconds=_get_env_float("ROBOCHESS_HAND_ABSENCE", 0.35),
+        hand_trigger_cooldown_seconds=_get_env_float("ROBOCHESS_HAND_COOLDOWN", 0.8),
+        recapture_delay_seconds=_get_env_float("ROBOCHESS_RECAPTURE_DELAY", 0.4),
         mongodb_uri=_get_env_str("ROBOCHESS_MONGODB_URI", "mongodb://localhost:27017"),
         mongodb_db=_get_env_str("ROBOCHESS_MONGODB_DB", "robochess"),
+        mongodb_connect_timeout_ms=_get_env_int("ROBOCHESS_MONGO_CONNECT_TIMEOUT_MS", 10000),
+        mongodb_socket_timeout_ms=_get_env_int("ROBOCHESS_MONGO_SOCKET_TIMEOUT_MS", 20000),
+        mongodb_server_selection_timeout_ms=_get_env_int("ROBOCHESS_MONGO_SERVER_SELECTION_TIMEOUT_MS", 10000),
         jwt_secret=_get_env_str("ROBOCHESS_JWT_SECRET", "change-me"),
         jwt_algorithm=_get_env_str("ROBOCHESS_JWT_ALG", "HS256"),
         access_token_minutes=_get_env_int("ROBOCHESS_ACCESS_MINUTES", 30),

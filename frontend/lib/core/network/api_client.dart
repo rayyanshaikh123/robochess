@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
@@ -9,17 +11,22 @@ class ApiClient {
   final String baseUrl;
   final TokenStore tokenStore;
   final http.Client _client;
+  final Duration timeout;
 
   ApiClient(
-      {required this.baseUrl, required this.tokenStore, http.Client? client})
-      : _client = client ?? http.Client();
+      {required this.baseUrl,
+      required this.tokenStore,
+      http.Client? client,
+      Duration? timeout})
+      : _client = client ?? http.Client(),
+        timeout = timeout ?? const Duration(seconds: 20);
 
   Future<Map<String, dynamic>> getJson(String path,
       {Map<String, String>? queryParameters, bool auth = true}) async {
     final uri =
         Uri.parse('$baseUrl$path').replace(queryParameters: queryParameters);
     final headers = await _headers(auth: auth);
-    final response = await _client.get(uri, headers: headers);
+    final response = await _send(_client.get(uri, headers: headers));
     return _handleResponse(response);
   }
 
@@ -27,9 +34,20 @@ class ApiClient {
       {Map<String, dynamic>? body, bool auth = true}) async {
     final uri = Uri.parse('$baseUrl$path');
     final headers = await _headers(auth: auth);
-    final response =
-        await _client.post(uri, headers: headers, body: jsonEncode(body ?? {}));
+    final response = await _send(
+      _client.post(uri, headers: headers, body: jsonEncode(body ?? {})),
+    );
     return _handleResponse(response);
+  }
+
+  Future<http.Response> _send(Future<http.Response> request) async {
+    try {
+      return await request.timeout(timeout);
+    } on TimeoutException {
+      throw ApiException('Request timed out. Check your connection and retry.');
+    } on SocketException {
+      throw ApiException('Network error. Check your connection and retry.');
+    }
   }
 
   Future<Map<String, String>> _headers({required bool auth}) async {

@@ -84,12 +84,13 @@ MOVE_MATCH_MIN_SCORE = 54
 MOVE_MATCH_MIN_GAP = 2
 START_MAX_MISSING = _env_int("ROBOCHESS_START_MISSING", 4)
 START_MAX_EXTRA = _env_int("ROBOCHESS_START_EXTRA", 2)
-CAPTURE_DELAY_SEC = 0.50
-HAND_ABSENCE_SECONDS = 0.60
-HAND_TRIGGER_COOLDOWN = 1.20
-MOTION_DIFF_THRESHOLD = 20
-MOTION_RATIO_TRIGGER = 0.02
-MOTION_BLUR = 7
+CAPTURE_DELAY_SEC = _env_float("ROBOCHESS_CAPTURE_DELAY", 0.25)
+RECAPTURE_DELAY_SEC = _env_float("ROBOCHESS_RECAPTURE_DELAY", 0.4)
+HAND_ABSENCE_SECONDS = _env_float("ROBOCHESS_HAND_ABSENCE", 0.35)
+HAND_TRIGGER_COOLDOWN = _env_float("ROBOCHESS_HAND_COOLDOWN", 0.8)
+MOTION_DIFF_THRESHOLD = _env_int("ROBOCHESS_MOTION_DIFF", 20)
+MOTION_RATIO_TRIGGER = _env_float("ROBOCHESS_MOTION_RATIO", 0.02)
+MOTION_BLUR = _env_int("ROBOCHESS_MOTION_BLUR", 7)
 ENGINE_AUTO_DELAY_SEC = 0.15
 ASSUME_STANDARD_START = bool(_env_int("ROBOCHESS_ASSUME_START", 1))
 AUTO_ENGINE_REPLY = bool(_env_int("ROBOCHESS_AUTO_ENGINE", 1))
@@ -243,6 +244,7 @@ class RoboChessControlCenter(tk.Tk):
         self.last_invalid_squares: list[str] = []
         self.capture_in_flight = False
         self.last_trigger_time = 0.0
+        self.last_recapture_time = 0.0
         self.hand_present = False
         self.hand_last_seen = 0.0
         self.tracked_state: Optional[dict[str, Optional[str]]] = None
@@ -1133,6 +1135,18 @@ class RoboChessControlCenter(tk.Tk):
         )
         worker.start()
 
+    def _schedule_recapture(self, reason: str, force_initial: bool) -> None:
+        if self.is_paused:
+            return
+        now = time.time()
+        if (now - self.last_recapture_time) < RECAPTURE_DELAY_SEC:
+            return
+        self.last_recapture_time = now
+        self.after(
+            int(RECAPTURE_DELAY_SEC * 1000),
+            lambda: self._schedule_capture(f"{reason}_retry", force_initial=force_initial),
+        )
+
     def _capture_and_process(self, reason: str, force_initial: bool) -> None:
         try:
             time.sleep(CAPTURE_DELAY_SEC)
@@ -1247,6 +1261,7 @@ class RoboChessControlCenter(tk.Tk):
                         0,
                     )
                     self.status_message = "Board not in valid starting position. Reset pieces and retry."
+                    self._schedule_recapture(reason, force_initial=True)
                     return
 
                 self.initial_board_validated = True
@@ -1317,6 +1332,7 @@ class RoboChessControlCenter(tk.Tk):
                     f"[WARN] No legal move matched. Changed={changed_squares} "
                     f"Score={best_score} Second={second_best}"
                 )
+                self._schedule_recapture(reason, force_initial=False)
                 return
 
             ok, engine_warning = self._validate_with_engine(move)

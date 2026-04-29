@@ -16,7 +16,9 @@ final tokenStoreProvider = Provider<TokenStore>((ref) => TokenStore());
 
 final apiClientProvider = Provider<ApiClient>((ref) {
   return ApiClient(
-      baseUrl: AppConfig.apiBaseUrl, tokenStore: ref.read(tokenStoreProvider));
+      baseUrl: AppConfig.apiBaseUrl,
+      tokenStore: ref.read(tokenStoreProvider),
+      timeout: Duration(seconds: AppConfig.apiTimeoutSeconds));
 });
 
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
@@ -55,21 +57,31 @@ class SessionController extends StateNotifier<AsyncValue<AuthSession?>> {
     String? displayName,
   }) async {
     state = const AsyncValue.loading();
-    final session = await _authRepository.register(
-      email: email,
-      password: password,
-      displayName: displayName,
-    );
-    await _tokenStore.saveSession(session);
-    state = AsyncValue.data(session);
+    try {
+      final session = await _authRepository.register(
+        email: email,
+        password: password,
+        displayName: displayName,
+      );
+      await _tokenStore.saveSession(session);
+      state = AsyncValue.data(session);
+    } catch (err, stack) {
+      state = AsyncValue.error(err, stack);
+      rethrow;
+    }
   }
 
   Future<void> login({required String email, required String password}) async {
     state = const AsyncValue.loading();
-    final session =
-        await _authRepository.login(email: email, password: password);
-    await _tokenStore.saveSession(session);
-    state = AsyncValue.data(session);
+    try {
+      final session =
+          await _authRepository.login(email: email, password: password);
+      await _tokenStore.saveSession(session);
+      state = AsyncValue.data(session);
+    } catch (err, stack) {
+      state = AsyncValue.error(err, stack);
+      rethrow;
+    }
   }
 
   Future<void> logout() async {

@@ -29,4 +29,7 @@ class BoardRepository {
 
   Future<Map<String, dynamic>> detectMoveSnapshotIfClear() =>
       _remote.detectMoveSnapshotIfClear();
+
+  Future<Map<String, dynamic>> analyzeMoveSnapshot() =>
+      _remote.analyzeMoveSnapshot();
 }

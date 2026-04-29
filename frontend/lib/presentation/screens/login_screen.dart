@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -51,7 +54,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     } catch (err) {
       final message = err is ApiException
           ? err.message
-          : 'Login failed. Check credentials.';
+          : err is TimeoutException
+              ? 'Login timed out. Check your connection and retry.'
+              : err is SocketException
+                  ? 'Network error. Check your connection and retry.'
+                  : 'Login failed. Check credentials.';
       setState(() => _error = message);
     } finally {
       if (mounted) setState(() => _submitting = false);
