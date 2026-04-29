@@ -9,6 +9,7 @@ pillow
 
 # Server
 fastapi
+python-dotenv
 uvicorn[standard]
 python-multipart
 pydantic

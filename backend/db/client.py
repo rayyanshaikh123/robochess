@@ -2,6 +2,7 @@ from typing import Optional
 
 from fastapi import FastAPI
 from starlette.requests import HTTPConnection
+import certifi
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
 from backend.core.config import load_settings
@@ -10,7 +11,7 @@ from backend.db.indexes import ensure_indexes
 
 async def init_db(app: FastAPI) -> None:
     settings = load_settings()
-    client = AsyncIOMotorClient(settings.mongodb_uri)
+    client = AsyncIOMotorClient(settings.mongodb_uri, tlsCAFile=certifi.where())
     db = client[settings.mongodb_db]
     app.state.mongo_client = client
     app.state.mongo_db = db
