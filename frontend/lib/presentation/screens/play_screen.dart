@@ -11,6 +11,7 @@ import '../providers/device_provider.dart';
 import '../providers/board_provider.dart';
 import '../providers/game_provider.dart';
 import '../providers/session_provider.dart';
+import '../../core/errors/api_exception.dart';
 import '../../core/config/app_config.dart';
 import '../../domain/models/device_model.dart';
 import '../../domain/models/game_state.dart';
@@ -241,7 +242,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       _syncing = true;
       _syncError = null;
       _gameUsesBoard = result.useBoard;
-      _inGameValidated = false;
+      _inGameValidated = result.useBoard; // Board was validated in modal
       _inGameValidationNote = null;
       _selectedSquare = null;
       _legalDestinations = [];
@@ -307,10 +308,34 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   void _startAutoDetect() {
     if (_autoDetectTimer != null) return;
-    _autoDetectTimer = Timer.periodic(const Duration(milliseconds: 900), (_) {
-      if (!_gameUsesBoard || _snapshotDetecting || _syncing) return;
-      _detectSnapshotMove();
+    _autoDetectTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (!_gameUsesBoard || _snapshotDetecting || _syncing || !_inGameValidated) return;
+      _checkAutoDetectReady();
     });
+  }
+
+  Future<void> _checkAutoDetectReady() async {
+    if (_snapshotDetecting) return;
+    try {
+      final result = await ref.read(boardRepositoryProvider).checkAutoDetect();
+      final data = result['data'] as Map<String, dynamic>? ?? {};
+      final ready = data['ready'] == true;
+      final reason = data['reason']?.toString() ?? '';
+      
+      if (ready) {
+        // Auto-detect triggered successfully!
+        final uci = data['uci']?.toString();
+        final san = data['san']?.toString();
+        if (uci != null && uci.isNotEmpty) {
+          setState(() {
+            _snapshotNote = 'Auto-detected: $san ($uci)';
+          });
+          await _fetchLiveFrame();
+        }
+      }
+    } catch (err) {
+      // Silently fail on auto-detect check errors
+    }
   }
 
   Future<void> _detectSnapshotMove() async {
@@ -324,14 +349,15 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       for (int attempt = 0; attempt < maxAttempts; attempt++) {
         final result =
             await ref.read(boardRepositoryProvider).analyzeMoveSnapshot();
-        final status = result['analysis_status']?.toString() ?? 'unknown';
-        final message = result['analysis_message']?.toString();
-        final reason = result['reason']?.toString();
-        final retry = result['retry'] == true;
-        final uci = result['uci']?.toString();
-        final versionRaw = result['game_version'];
+        final data = result['data'] as Map<String, dynamic>? ?? {};
+        final status = data['analysis_status']?.toString() ?? 'unknown';
+        final message = data['analysis_message']?.toString();
+        final reason = data['reason']?.toString();
+        final retry = data['retry'] == true;
+        final uci = data['uci']?.toString();
+        final versionRaw = data['game_version'];
         final version = int.tryParse(versionRaw?.toString() ?? '');
-        final fallback = result['fallback'] == true;
+        final fallback = data['fallback'] == true;
 
         if (status == 'waiting') {
           if (mounted) {
@@ -402,9 +428,10 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     });
     try {
       final result = await ref.read(boardRepositoryProvider).validateStart();
-      final valid = result['valid'] == true;
-      final detected = result['pieces_detected'] as int? ?? 0;
-      final summary = result['summary'] as Map<String, dynamic>? ?? {};
+      final data = result['data'] as Map<String, dynamic>? ?? {};
+      final valid = data['valid'] == true;
+      final detected = data['pieces_detected'] as int? ?? 0;
+      final summary = data['summary'] as Map<String, dynamic>? ?? {};
       final missing = summary['missing'] as int? ?? 0;
       final extra = summary['extra'] as int? ?? 0;
       final wrongColor = summary['wrong_color'] as int? ?? 0;
@@ -1340,6 +1367,8 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
     });
     try {
       await action();
+    } on ApiException catch (err) {
+      setState(() => _error = err.message);
     } catch (err) {
       setState(() => _error = 'Step failed. Check backend connection.');
     } finally {
@@ -1379,14 +1408,19 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
   }
 
   Future<void> _validateBoard() async {
+    if (_busy) return; // Prevent multiple simultaneous validations
     await _runStep(() async {
       final result = await ref.read(boardRepositoryProvider).validateStart();
-      final valid = result['valid'] == true;
-      final detected = result['pieces_detected'] as int? ?? 0;
-      final summary = result['summary'] as Map<String, dynamic>? ?? {};
+      final data = result['data'] as Map<String, dynamic>? ?? {};
+      final valid = data['valid'] == true;
+      final detected = data['pieces_detected'] as int? ?? 0;
+      final summary = data['summary'] as Map<String, dynamic>? ?? {};
       final missing = summary['missing'] as int? ?? 0;
       final extra = summary['extra'] as int? ?? 0;
       final wrongColor = summary['wrong_color'] as int? ?? 0;
+      
+      if (!mounted) return;
+      
       setState(() {
         _validated = valid;
         if (valid) {
@@ -1417,8 +1451,9 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
   Future<void> _debugCalibration() async {
     await _runStep(() async {
       final result = await ref.read(boardRepositoryProvider).debugCalibration();
-      final total = result['raw_detections_total'];
-      final tip = result['tip'];
+      final data = result['data'] as Map<String, dynamic>? ?? {};
+      final total = data['raw_detections_total'];
+      final tip = data['tip'];
       setState(() {
         _validationNote = 'Diagnostic: $total raw detections.\n$tip';
       });

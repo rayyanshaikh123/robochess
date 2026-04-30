@@ -24,6 +24,8 @@ class BoardRepository {
 
   Future<CalibrationFrame> capturePreview() => _remote.capturePreview();
 
+  Future<Map<String, dynamic>> pollCameraFeed() => _remote.pollCameraFeed();
+
   Future<Map<String, dynamic>> detectMoveSnapshot() =>
       _remote.detectMoveSnapshot();
 
@@ -32,4 +34,7 @@ class BoardRepository {
 
   Future<Map<String, dynamic>> analyzeMoveSnapshot() =>
       _remote.analyzeMoveSnapshot();
+
+  Future<Map<String, dynamic>> checkAutoDetect() =>
+      _remote.checkAutoDetect();
 }

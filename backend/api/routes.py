@@ -510,6 +510,65 @@ def calibrate_preview() -> ApiResponse:
     )
 
 
+@router.get("/camera/poll_feed", response_model=ApiResponse)
+def poll_camera_feed() -> ApiResponse:
+    manager = GameManager.get_instance()
+    
+    if manager.camera is not None and manager.camera.isOpened():
+        for _ in range(2):
+            manager.camera.grab()
+            
+    try:
+        frame = manager.capture_frame()
+    except Exception as exc:
+        return error("Camera capture failed", {"detail": str(exc)})
+        
+    recognizer = manager.recognizer
+    if recognizer is None or not recognizer.is_ready:
+        ok_encode, buffer = cv2.imencode(".jpg", frame)
+        payload = base64.b64encode(buffer.tobytes()).decode("ascii") if ok_encode else ""
+        return ok("ok", {"image_base64": payload, "status": "model_not_ready"})
+        
+    if not manager.calibrated:
+        ok_encode, buffer = cv2.imencode(".jpg", frame)
+        payload = base64.b64encode(buffer.tobytes()).decode("ascii") if ok_encode else ""
+        return ok("ok", {"image_base64": payload, "status": "not_calibrated"})
+        
+    warped = recognizer.warp_frame(frame)
+    hand_present, hand_ratio, curr_gray, warmup = _is_hand_present(warped, manager.hand_prev_gray)
+    manager.hand_prev_gray = curr_gray
+    
+    if hand_present or warmup:
+        # Hand present: don't run AI detections to save CPU, just draw grid with a visual cue
+        board_view = recognizer.draw_board_grid(warped.copy(), color=(180, 180, 180), thickness=2)
+        # Draw a red tint or border to indicate hand present
+        cv2.rectangle(board_view, (0, 0), (board_view.shape[1], board_view.shape[0]), (0, 0, 255), 6)
+        
+        ok_encode, buffer = cv2.imencode(".jpg", board_view)
+        payload = base64.b64encode(buffer.tobytes()).decode("ascii") if ok_encode else ""
+        return ok("ok", {"image_base64": payload, "status": "hand_present"})
+        
+    # Hand clear: run full detection
+    try:
+        detections = recognizer.detect(warped)
+    except Exception:
+        detections = []
+        
+    conf_min = float(manager.settings.detection_confidence_min)
+    preview_min = max(0.05, conf_min * 0.3)
+    filtered = [det for det in detections if float(det.get("confidence", 0.0)) >= preview_min]
+    
+    board_view = recognizer.draw_board_grid(warped.copy(), color=(180, 180, 180), thickness=2)
+    board_view = recognizer.draw_detections(
+        board_view, filtered, line_thickness=2, label_scale=0.45, label_thickness=2
+    )
+    
+    ok_encode, buffer = cv2.imencode(".jpg", board_view)
+    payload = base64.b64encode(buffer.tobytes()).decode("ascii") if ok_encode else ""
+    return ok("ok", {"image_base64": payload, "status": "clear", "detections": len(filtered)})
+
+
+
 @router.post("/move/detect_if_clear", response_model=ApiResponse)
 async def detect_move_if_clear(
     background_tasks: BackgroundTasks, db=Depends(get_db)
@@ -725,22 +784,35 @@ async def analyze_move_snapshot(
             },
         )
 
+    curr_board = recognizer.state_dict_to_board(stable_state)
+    curr_fen = curr_board.board_fen()
+
     if manager.prev_state is None:
+        # First snapshot: validate it matches standard starting position
+        expected_start_state = recognizer.expected_initial_state()
+        is_valid_start, _ = validate_initial_board(stable_state, recognizer, settings)
+        if not is_valid_start:
+            return ok(
+                "Starting position not detected",
+                {
+                    "analysis_status": "yellow",
+                    "reason": "invalid_start",
+                    "analysis_message": "Board not in starting position. Adjust and try again.",
+                    "retry": True,
+                },
+            )
         with manager.state_lock:
             manager.board.reset()
-            manager.prev_state = recognizer.expected_initial_state()
+            manager.prev_state = stable_state
         return ok(
-            "Starting position assumed",
+            "Starting position validated",
             {
                 "analysis_status": "waiting",
-                "reason": "assumed_start",
-                "analysis_message": "Starting position assumed. Make a move to begin.",
+                "reason": "validated_start",
+                "analysis_message": "Starting position validated. Make your first move.",
                 "retry": False,
             },
         )
-
-    curr_board = recognizer.state_dict_to_board(stable_state)
-    curr_fen = curr_board.board_fen()
 
     if settings.occupancy_only:
         prev_state = recognizer.board_to_occupancy_state(manager.board)
@@ -805,6 +877,7 @@ async def analyze_move_snapshot(
             },
         )
 
+    game_version = None
     with manager.state_lock:
         if move not in manager.board.legal_moves:
             manager.recapture_until = now + float(settings.recapture_delay_seconds)
@@ -823,6 +896,7 @@ async def analyze_move_snapshot(
         manager.board.push(move)
         manager.prev_state = stable_state
         manager.recapture_until = 0.0
+        print(f"[MOVE] {move.uci()} | SAN: {san} | FEN: {manager.get_fen()}")
 
     if manager.current_game_id:
         game_state, err = await record_move(
@@ -830,6 +904,7 @@ async def analyze_move_snapshot(
         )
         if err:
             return error("Failed to persist move", {"detail": err})
+        game_version = game_state.get("game_version")
         await ws_manager.send_to_game(
             manager.current_game_id,
             {
@@ -838,7 +913,7 @@ async def analyze_move_snapshot(
                     "game_id": manager.current_game_id,
                     "uci": move.uci(),
                     "fen": manager.get_fen(),
-                    "game_version": game_state.get("game_version"),
+                    "game_version": game_version,
                 },
             },
         )
@@ -863,6 +938,159 @@ async def analyze_move_snapshot(
         "game_version": game_version,
     }
     return ok("Move detected", data)
+
+
+@router.get("/move/auto_detect_ready", response_model=ApiResponse)
+async def check_auto_detect_ready(background_tasks: BackgroundTasks, db=Depends(get_db)) -> ApiResponse:
+    """Check if auto-detect should trigger based on hand absence. If yes, automatically analyze."""
+    manager = GameManager.get_instance()
+    
+    if not manager.auto_detect_enabled or manager.prev_state is None:
+        return ok(
+            "Auto-detect not ready",
+            {
+                "ready": False,
+                "reason": "auto_detect_disabled" if not manager.auto_detect_enabled else "no_prev_state",
+            },
+        )
+    
+    # Check if hand is absent and cooldown elapsed
+    if not manager.should_auto_detect():
+        return ok(
+            "Waiting for hand to move away",
+            {
+                "ready": False,
+                "reason": "hand_present",
+                "hand_present": manager.hand_present,
+            },
+        )
+    
+    # Hand is absent long enough - trigger auto-analysis
+    manager.last_auto_detect_time = time.time()
+    
+    try:
+        stable_state, meta = await _collect_stable_state_samples(
+            manager,
+            attempts=max(1, int(manager.settings.capture_samples)),
+            delay_sec=float(manager.settings.capture_sample_delay),
+            min_count=int(manager.settings.stable_label_min_count),
+            initial_frame=None,
+        )
+        
+        if stable_state is None:
+            return ok(
+                "Auto-detect analysis failed",
+                {
+                    "ready": False,
+                    "reason": "detection_failed",
+                    "message": meta.get("error", "Detection failed"),
+                },
+            )
+        
+        recognizer = manager.recognizer
+        curr_board = recognizer.state_dict_to_board(stable_state)
+        curr_fen = curr_board.board_fen()
+        
+        if manager.settings.occupancy_only:
+            prev_state = recognizer.board_to_occupancy_state(manager.board)
+            curr_state = recognizer.to_occupancy_state(stable_state)
+            changed_squares = _diff_state(prev_state, curr_state)
+            move, best_score, second_best = recognizer.infer_move_from_occupancy(
+                manager.board,
+                curr_state,
+                min_score=manager.settings.move_match_min_score,
+                min_gap=manager.settings.move_match_min_gap,
+            )
+        else:
+            prev_state = recognizer.board_to_state_dict(manager.board)
+            changed_squares = _diff_state(prev_state, stable_state)
+            move, best_score, second_best = recognizer.infer_move_from_state(
+                manager.board,
+                stable_state,
+                min_score=manager.settings.move_match_min_score,
+                min_gap=manager.settings.move_match_min_gap,
+            )
+        
+        detections = int(meta.get("detections", 0))
+        
+        if move is None:
+            return ok(
+                "No legal move matched (auto-detect)",
+                {
+                    "ready": False,
+                    "reason": "no_legal_move",
+                    "score": best_score,
+                    "second_best": second_best,
+                },
+            )
+        
+        ok_move, engine_warning = await _validate_with_engine(manager, move)
+        if not ok_move:
+            return ok(
+                "Illegal move (auto-detect)",
+                {
+                    "ready": False,
+                    "reason": "illegal_move",
+                    "uci": move.uci(),
+                },
+            )
+        
+        with manager.state_lock:
+            if move not in manager.board.legal_moves:
+                return ok(
+                    "Illegal move (auto-detect)",
+                    {
+                        "ready": False,
+                        "reason": "illegal_move",
+                        "uci": move.uci(),
+                    },
+                )
+            san = manager.board.san(move)
+            manager.board.push(move)
+            manager.prev_state = stable_state
+            print(f"[MOVE AUTO-DETECT] {move.uci()} | SAN: {san} | FEN: {manager.get_fen()}")
+        
+        if manager.current_game_id:
+            game_state, err = await record_move(
+                db, manager.current_game_id, move.uci(), manager.get_fen()
+            )
+            if not err:
+                await ws_manager.send_to_game(
+                    manager.current_game_id,
+                    {
+                        "type": "game.move",
+                        "data": {
+                            "game_id": manager.current_game_id,
+                            "uci": move.uci(),
+                            "fen": manager.get_fen(),
+                            "game_version": game_state.get("game_version"),
+                        },
+                    },
+                )
+        
+        if manager.mode == "human_vs_ai" and not manager.board.is_game_over():
+            background_tasks.add_task(_trigger_ai_move, db)
+        
+        return ok(
+            "Move auto-detected",
+            {
+                "ready": True,
+                "uci": move.uci(),
+                "san": san,
+                "fen": manager.get_fen(),
+                "detections": detections,
+            },
+        )
+    
+    except Exception as exc:
+        return ok(
+            "Auto-detect error",
+            {
+                "ready": False,
+                "reason": "exception",
+                "error": str(exc),
+            },
+        )
 
 
 @router.post("/calibrate/validate", response_model=ApiResponse)
@@ -1022,8 +1250,15 @@ async def start_game(payload: GameStartRequest, db=Depends(get_db)) -> ApiRespon
         manager.last_capture_time = 0.0
         manager.recapture_until = 0.0
 
+    # Stop any existing auto-detect
+    manager.stop_auto_detect()
+    
     game = await create_game(db, manager.get_fen(), players=payload.players)
     manager.current_game_id = game.get("game_id")
+    
+    # Start auto-detect if using a board (players list provided)
+    if payload.players and len(payload.players) > 0:
+        manager.start_auto_detect()
 
     data = {
         "fen": manager.get_fen(),

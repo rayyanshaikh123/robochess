@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/board_provider.dart';
 import '../widgets/animated_profile_avatar.dart';
+import 'dart:convert';
+import 'dart:async';
 
 // ── Colour tokens (from Stitch design) ──────────────────────────────────────
 const kBackground = Color(0xFF151311);
@@ -219,7 +223,52 @@ class HomeDashboard extends StatelessWidget {
 }
 
 // ── Live Board Card ──────────────────────────────────────────────────────────
-class _LiveBoardCard extends StatelessWidget {
+class _LiveBoardCard extends ConsumerStatefulWidget {
+  const _LiveBoardCard();
+
+  @override
+  ConsumerState<_LiveBoardCard> createState() => _LiveBoardCardState();
+}
+
+class _LiveBoardCardState extends ConsumerState<_LiveBoardCard> {
+  Timer? _timer;
+  String? _base64Image;
+  String _status = 'initiating';
+  int _detections = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _startPolling();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _startPolling() {
+    _timer = Timer.periodic(const Duration(milliseconds: 300), (timer) async {
+      if (!mounted) return;
+      try {
+        final result = await ref.read(boardRepositoryProvider).pollCameraFeed();
+        if (!mounted) return;
+        setState(() {
+          _base64Image = result['image_base64'];
+          _status = result['status'] ?? 'unknown';
+          _detections = result['detections'] ?? 0;
+        });
+      } catch (_) {
+        // Silent fail on polling to prevent UI jitter
+        if (!mounted) return;
+        setState(() {
+          _status = 'error';
+        });
+      }
+    });
+  }
+
   String _pieceSymbol(String? piece) {
     if (piece == null) return '';
     final isWhite = piece == piece.toUpperCase();
@@ -286,77 +335,88 @@ class _LiveBoardCard extends StatelessWidget {
                 border: Border.all(color: kOutlineVariant.withOpacity(0.1)),
               ),
               padding: const EdgeInsets.all(8),
-              child: GridView.builder(
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 8,
-                  crossAxisSpacing: 1,
-                  mainAxisSpacing: 1,
-                ),
-                itemCount: 64,
-                itemBuilder: (context, index) {
-                  final row = index ~/ 8;
-                  final col = index % 8;
-                  final isLight = (row + col) % 2 == 0;
-                  final piece = _initialBoard[row][col];
-                  return Container(
-                    decoration: BoxDecoration(
-                      color: isLight
-                          ? kPrimary.withOpacity(0.15)
-                          : kSurfaceContHighest,
-                      borderRadius: BorderRadius.circular(1),
+              child: _base64Image != null && _base64Image!.isNotEmpty
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(2),
+                      child: Image.memory(
+                        base64Decode(_base64Image!),
+                        fit: BoxFit.cover,
+                        gaplessPlayback: true,
+                      ),
+                    )
+                  : GridView.builder(
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 8,
+                        crossAxisSpacing: 1,
+                        mainAxisSpacing: 1,
+                      ),
+                      itemCount: 64,
+                      itemBuilder: (context, index) {
+                        final row = index ~/ 8;
+                        final col = index % 8;
+                        final isLight = (row + col) % 2 == 0;
+                        final piece = _initialBoard[row][col];
+                        return Container(
+                          decoration: BoxDecoration(
+                            color: isLight
+                                ? kPrimary.withOpacity(0.15)
+                                : kSurfaceContHighest,
+                            borderRadius: BorderRadius.circular(1),
+                          ),
+                          child: Stack(
+                            children: [
+                              if (piece != null)
+                                Center(
+                                  child: Text(
+                                    _pieceSymbol(piece),
+                                    style: TextStyle(
+                                      fontSize: 24,
+                                      color: _pieceColor(piece),
+                                      shadows: [
+                                        Shadow(
+                                          color: _pieceColor(piece).withOpacity(0.4),
+                                          blurRadius: 8,
+                                        )
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              if (col == 0)
+                                Positioned(
+                                  top: 2,
+                                  left: 4,
+                                  child: Text(
+                                    '${8 - row}',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 8,
+                                      fontWeight: FontWeight.w700,
+                                      color: isLight
+                                          ? kOnSurfaceVariant
+                                          : kOutlineVariant,
+                                    ),
+                                  ),
+                                ),
+                              if (row == 7)
+                                Positioned(
+                                  bottom: 2,
+                                  right: 4,
+                                  child: Text(
+                                    String.fromCharCode('a'.codeUnitAt(0) + col),
+                                    style: GoogleFonts.inter(
+                                      fontSize: 8,
+                                      fontWeight: FontWeight.w700,
+                                      color: isLight
+                                          ? kOnSurfaceVariant
+                                          : kOutlineVariant,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
-                    child: Stack(
-                      children: [
-                        if (piece != null)
-                          Center(
-                            child: Text(
-                              _pieceSymbol(piece),
-                              style: TextStyle(
-                                fontSize: 24,
-                                color: _pieceColor(piece),
-                                shadows: [
-                                  Shadow(
-                                    color: _pieceColor(piece).withOpacity(0.4),
-                                    blurRadius: 8,
-                                  )
-                                ],
-                              ),
-                            ),
-                          ),
-                        // Row notation (1-8)
-                        if (col == 0)
-                          Positioned(
-                            top: 2,
-                            left: 4,
-                            child: Text(
-                              '${8 - row}',
-                              style: GoogleFonts.inter(
-                                fontSize: 8,
-                                fontWeight: FontWeight.w700,
-                                color: isLight ? kOnSurfaceVariant : kOutlineVariant,
-                              ),
-                            ),
-                          ),
-                        // Col notation (a-h)
-                        if (row == 7)
-                          Positioned(
-                            bottom: 2,
-                            right: 4,
-                            child: Text(
-                              String.fromCharCode('a'.codeUnitAt(0) + col),
-                              style: GoogleFonts.inter(
-                                fontSize: 8,
-                                fontWeight: FontWeight.w700,
-                                color: isLight ? kOnSurfaceVariant : kOutlineVariant,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  );
-                },
-              ),
             ),
           ),
         ],

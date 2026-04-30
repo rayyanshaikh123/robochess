@@ -63,9 +63,15 @@ class Settings:
     log_level: str
 
 
+def _strip_env_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
 def _get_env_str(key: str, default: str) -> str:
     value = os.getenv(key)
-    return value.strip() if value else default
+    return _strip_env_quotes(value.strip()) if value else default
 
 
 def _get_env_int(key: str, default: int) -> int:
@@ -98,6 +104,7 @@ def _find_stockfish() -> str:
         ROOT / "stockfish" / "stockfish-windows-x86-64-avx2.exe",
         ROOT / "stockfish" / "stockfish.exe",
         ROOT / "stockfish" / "stockfish",
+        ROOT / "stockfish" / "src" / "stockfish",
         # One level up (repo root)
         ROOT.parent / "stockfish" / "stockfish-windows-x86-64-avx2.exe",
         ROOT.parent / "stockfish" / "stockfish.exe",
