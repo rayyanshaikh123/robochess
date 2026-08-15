@@ -940,6 +940,53 @@ async def analyze_move_snapshot(
     return ok("Move detected", data)
 
 
+@router.post("/move/analyze-and-reply", response_model=ApiResponse)
+async def analyze_and_reply(db=Depends(get_db)) -> ApiResponse:
+    """Detect a human move from camera snapshots, then immediately play a Stockfish reply."""
+    detect_result = await analyze_move_snapshot(BackgroundTasks(), db)
+    if detect_result.get("status") != "ok":
+        return detect_result
+
+    detect_data = detect_result.get("data") or {}
+    detected_uci = str(detect_data.get("uci") or "").strip()
+    analysis_status = str(detect_data.get("analysis_status") or "")
+
+    # Bubble up non-final analysis states (waiting/red) unchanged.
+    if not detected_uci or analysis_status != "green":
+        return detect_result
+
+    manager = GameManager.get_instance()
+    if manager.board.is_game_over():
+        return ok(
+            "Move detected. Game is over, no engine reply.",
+            {
+                "human_move": detect_data,
+                "engine_move": None,
+                "fen": manager.get_fen(),
+            },
+        )
+
+    ai_result = await ai_move(MoveAiRequest(), db)
+    if ai_result.get("status") != "ok":
+        return error(
+            "Human move detected but engine reply failed",
+            {
+                "human_move": detect_data,
+                "engine_error": ai_result.get("data"),
+            },
+        )
+
+    ai_data = ai_result.get("data") or {}
+    return ok(
+        "Move detected and Stockfish replied",
+        {
+            "human_move": detect_data,
+            "engine_move": ai_data,
+            "fen": ai_data.get("fen", detect_data.get("fen")),
+        },
+    )
+
+
 @router.get("/move/auto_detect_ready", response_model=ApiResponse)
 async def check_auto_detect_ready(background_tasks: BackgroundTasks, db=Depends(get_db)) -> ApiResponse:
     """Check if auto-detect should trigger based on hand absence. If yes, automatically analyze."""
@@ -1242,8 +1289,8 @@ async def start_game(payload: GameStartRequest, db=Depends(get_db)) -> ApiRespon
         manager.mode = payload.mode
         manager.difficulty = payload.difficulty
         manager.board.reset()
-        manager.prev_state = None
-        manager.calibrated = False
+        # Keep calibration and baseline board state from setup/validation.
+        # Resetting these here causes move detection to fail right after game start.
         manager.hand_prev_gray = None
         manager.hand_present = False
         manager.hand_last_seen = 0.0

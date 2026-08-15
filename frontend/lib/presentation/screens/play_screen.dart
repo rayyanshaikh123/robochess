@@ -288,12 +288,48 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         _livePreviewError = null;
         _livePreviewLoading = false;
       });
-    } catch (err) {
-      if (!mounted) return;
-      setState(() {
-        _livePreviewError = 'Snapshot unavailable.';
-        _livePreviewLoading = false;
-      });
+    } catch (_) {
+      // Fallback: keep preview usable even if calibrated preview endpoint fails.
+      try {
+        final feed = await ref.read(boardRepositoryProvider).pollCameraFeed();
+        if (!mounted) return;
+        final imageBase64 = feed['image_base64']?.toString() ?? '';
+        final width = int.tryParse(feed['width']?.toString() ?? '') ??
+            _liveFrame?.width ??
+            0;
+        final height = int.tryParse(feed['height']?.toString() ?? '') ??
+            _liveFrame?.height ??
+            0;
+        final status = feed['status']?.toString() ?? '';
+
+        if (imageBase64.isNotEmpty) {
+          setState(() {
+            _liveFrame = CalibrationFrame(
+              imageBase64: imageBase64,
+              width: width,
+              height: height,
+            );
+            _livePreviewError = null;
+            _livePreviewLoading = false;
+          });
+          return;
+        }
+
+        setState(() {
+          _livePreviewError = status == 'not_calibrated'
+              ? 'Camera is live, but board is not calibrated yet.'
+              : status == 'model_not_ready'
+                  ? 'Camera is live, but model is not loaded yet.'
+                  : 'Snapshot unavailable.';
+          _livePreviewLoading = false;
+        });
+      } catch (_) {
+        if (!mounted) return;
+        setState(() {
+          _livePreviewError = 'Snapshot unavailable.';
+          _livePreviewLoading = false;
+        });
+      }
     }
   }
 
@@ -330,6 +366,24 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           setState(() {
             _snapshotNote = 'Auto-detected: $san ($uci)';
           });
+
+          try {
+            final aiResult = await ref.read(boardRepositoryProvider).aiMove();
+            final aiData = aiResult['data'] as Map<String, dynamic>? ?? {};
+            final aiUci = aiData['uci']?.toString();
+            if (aiUci != null && aiUci.isNotEmpty && mounted) {
+              setState(() {
+                _snapshotNote = 'Auto-detected: $san ($uci). Engine: $aiUci';
+              });
+            }
+          } catch (_) {
+            if (mounted) {
+              setState(() {
+                _snapshotNote = 'Auto-detected: $san ($uci). Engine reply failed.';
+              });
+            }
+          }
+
           await _fetchLiveFrame();
         }
       }
@@ -348,16 +402,18 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       const maxAttempts = 8;
       for (int attempt = 0; attempt < maxAttempts; attempt++) {
         final result =
-            await ref.read(boardRepositoryProvider).analyzeMoveSnapshot();
+            await ref.read(boardRepositoryProvider).analyzeAndReplySnapshot();
         final data = result['data'] as Map<String, dynamic>? ?? {};
-        final status = data['analysis_status']?.toString() ?? 'unknown';
-        final message = data['analysis_message']?.toString();
-        final reason = data['reason']?.toString();
-        final retry = data['retry'] == true;
-        final uci = data['uci']?.toString();
-        final versionRaw = data['game_version'];
+        final humanData = data['human_move'] as Map<String, dynamic>? ?? data;
+        final engineData = data['engine_move'] as Map<String, dynamic>?;
+        final status = humanData['analysis_status']?.toString() ?? 'unknown';
+        final message = humanData['analysis_message']?.toString();
+        final reason = humanData['reason']?.toString();
+        final retry = humanData['retry'] == true;
+        final uci = humanData['uci']?.toString();
+        final versionRaw = humanData['game_version'];
         final version = int.tryParse(versionRaw?.toString() ?? '');
-        final fallback = data['fallback'] == true;
+        final fallback = humanData['fallback'] == true;
 
         if (status == 'waiting') {
           if (mounted) {
@@ -405,6 +461,26 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
               }
             }
           });
+        }
+
+        if (_gameUsesBoard && engineData != null) {
+          final aiUci = engineData['uci']?.toString();
+          if (aiUci != null && aiUci.isNotEmpty && mounted) {
+            setState(() {
+              final aiApplied = _applyUciMove(aiUci);
+              if (aiApplied) {
+                final aiVersionRaw = engineData['game_version'];
+                final aiVersion = int.tryParse(aiVersionRaw?.toString() ?? '');
+                if (aiVersion != null) {
+                  _pendingLocalUci = aiUci;
+                  _pendingLocalVersion = aiVersion;
+                  _linkedGameVersion = aiVersion;
+                }
+                _snapshotNote =
+                    '${_snapshotNote ?? 'Move detected.'} Engine: $aiUci';
+              }
+            });
+          }
         }
         break;
       }

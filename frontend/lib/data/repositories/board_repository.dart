@@ -35,6 +35,12 @@ class BoardRepository {
   Future<Map<String, dynamic>> analyzeMoveSnapshot() =>
       _remote.analyzeMoveSnapshot();
 
+  Future<Map<String, dynamic>> analyzeAndReplySnapshot() =>
+      _remote.analyzeAndReplySnapshot();
+
   Future<Map<String, dynamic>> checkAutoDetect() =>
       _remote.checkAutoDetect();
+
+  Future<Map<String, dynamic>> aiMove({int? difficulty}) =>
+      _remote.aiMove(difficulty: difficulty);
 }
