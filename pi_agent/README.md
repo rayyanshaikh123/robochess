@@ -15,6 +15,9 @@ ROBOCHESS_HEARTBEAT_SECONDS=10
 ROBOCHESS_BLE_ENABLED=0
 ROBOCHESS_BLE_ADVERTISE_MODE=bluez
 ROBOCHESS_BLE_SERVICE_UUID=0000f00d-0000-1000-8000-00805f9b34fb
+ROBOCHESS_BLE_RX_UUID=0000f00e-0000-1000-8000-00805f9b34fb
+ROBOCHESS_BLE_TX_UUID=0000f00f-0000-1000-8000-00805f9b34fb
+ROBOCHESS_BLE_STATUS_UUID=0000f010-0000-1000-8000-00805f9b34fb
 ROBOCHESS_BLE_TOKEN_REFRESH_SECONDS=120
 ```
 
@@ -34,3 +37,7 @@ Edit `vision_adapter.py` to call your existing detection code and return `(uci_m
 - The agent requests a short-lived token from `/device/ble/token` and advertises it.
 - `ROBOCHESS_BLE_ADVERTISE_MODE=bluez` uses `bluetoothctl` for advertising.
 - For PC/dev mode, keep using pairing codes instead of BLE.
+- The session protocol is defined in `ble_protocol.py`; a BlueZ GATT adapter
+  should forward RX writes to `GattSession.on_write` and publish its returned
+  bytes through TX. UUIDs remain configurable until the hardware contract is
+  finalized.

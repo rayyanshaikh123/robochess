@@ -16,6 +16,7 @@ import 'presentation/screens/login_screen.dart';
 import 'presentation/screens/register_screen.dart';
 import 'presentation/screens/board_link_screen.dart';
 import 'presentation/screens/board_details_screen.dart';
+import 'presentation/screens/local_board_screen.dart';
 import 'presentation/providers/session_provider.dart';
 import 'domain/models/puzzle_model.dart';
 import 'domain/models/auth_session.dart';
@@ -39,7 +40,8 @@ GoRouter _buildRouter(WidgetRef ref) {
       final currentSession = ref.read(sessionProvider).valueOrNull;
       final loggingIn = state.matchedLocation == '/login' ||
           state.matchedLocation == '/register';
-      if (currentSession == null && !loggingIn) {
+      final localMode = state.matchedLocation == '/local';
+      if (currentSession == null && !loggingIn && !localMode) {
         return '/login';
       }
       return null;
@@ -116,6 +118,10 @@ GoRouter _buildRouter(WidgetRef ref) {
             ],
           ),
         ],
+      ),
+      GoRoute(
+        path: '/local',
+        builder: (context, state) => const LocalBoardScreen(),
       ),
       GoRoute(
         path: '/login',

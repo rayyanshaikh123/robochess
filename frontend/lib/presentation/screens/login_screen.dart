@@ -172,6 +172,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ),
                         ],
                       ),
+                      Center(
+                        child: TextButton.icon(
+                          onPressed: () => context.go('/local'),
+                          icon: const Icon(Icons.bluetooth, size: 16),
+                          label: const Text('PLAY LOCALLY WITHOUT INTERNET'),
+                        ),
+                      ),
                     ],
                   ),
                 ),

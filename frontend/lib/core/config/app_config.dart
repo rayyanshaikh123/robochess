@@ -18,4 +18,24 @@ class AppConfig {
     'BOARD_MODEL_REF',
     defaultValue: 'rf://chess-bprbi-ffewq/1',
   );
+
+  static const roboChessServiceUuid = String.fromEnvironment(
+    'ROBOCHESS_SERVICE_UUID',
+    defaultValue: '0000f00d-0000-1000-8000-00805f9b34fb',
+  );
+
+  static const roboChessRxUuid = String.fromEnvironment(
+    'ROBOCHESS_RX_UUID',
+    defaultValue: '0000f00e-0000-1000-8000-00805f9b34fb',
+  );
+
+  static const roboChessTxUuid = String.fromEnvironment(
+    'ROBOCHESS_TX_UUID',
+    defaultValue: '0000f00f-0000-1000-8000-00805f9b34fb',
+  );
+
+  static const roboChessStatusUuid = String.fromEnvironment(
+    'ROBOCHESS_STATUS_UUID',
+    defaultValue: '0000f010-0000-1000-8000-00805f9b34fb',
+  );
 }
