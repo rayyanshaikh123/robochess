@@ -11,6 +11,7 @@ import '../providers/device_provider.dart';
 import '../providers/board_provider.dart';
 import '../providers/game_provider.dart';
 import '../providers/session_provider.dart';
+import '../../core/errors/api_exception.dart';
 import '../../core/config/app_config.dart';
 import '../../domain/models/device_model.dart';
 import '../../domain/models/game_state.dart';
@@ -241,7 +242,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       _syncing = true;
       _syncError = null;
       _gameUsesBoard = result.useBoard;
-      _inGameValidated = false;
+      _inGameValidated = result.useBoard; // Board was validated in modal
       _inGameValidationNote = null;
       _selectedSquare = null;
       _legalDestinations = [];
@@ -287,12 +288,48 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         _livePreviewError = null;
         _livePreviewLoading = false;
       });
-    } catch (err) {
-      if (!mounted) return;
-      setState(() {
-        _livePreviewError = 'Snapshot unavailable.';
-        _livePreviewLoading = false;
-      });
+    } catch (_) {
+      // Fallback: keep preview usable even if calibrated preview endpoint fails.
+      try {
+        final feed = await ref.read(boardRepositoryProvider).pollCameraFeed();
+        if (!mounted) return;
+        final imageBase64 = feed['image_base64']?.toString() ?? '';
+        final width = int.tryParse(feed['width']?.toString() ?? '') ??
+            _liveFrame?.width ??
+            0;
+        final height = int.tryParse(feed['height']?.toString() ?? '') ??
+            _liveFrame?.height ??
+            0;
+        final status = feed['status']?.toString() ?? '';
+
+        if (imageBase64.isNotEmpty) {
+          setState(() {
+            _liveFrame = CalibrationFrame(
+              imageBase64: imageBase64,
+              width: width,
+              height: height,
+            );
+            _livePreviewError = null;
+            _livePreviewLoading = false;
+          });
+          return;
+        }
+
+        setState(() {
+          _livePreviewError = status == 'not_calibrated'
+              ? 'Camera is live, but board is not calibrated yet.'
+              : status == 'model_not_ready'
+                  ? 'Camera is live, but model is not loaded yet.'
+                  : 'Snapshot unavailable.';
+          _livePreviewLoading = false;
+        });
+      } catch (_) {
+        if (!mounted) return;
+        setState(() {
+          _livePreviewError = 'Snapshot unavailable.';
+          _livePreviewLoading = false;
+        });
+      }
     }
   }
 
@@ -307,10 +344,52 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   void _startAutoDetect() {
     if (_autoDetectTimer != null) return;
-    _autoDetectTimer = Timer.periodic(const Duration(milliseconds: 900), (_) {
-      if (!_gameUsesBoard || _snapshotDetecting || _syncing) return;
-      _detectSnapshotMove();
+    _autoDetectTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (!_gameUsesBoard || _snapshotDetecting || _syncing || !_inGameValidated) return;
+      _checkAutoDetectReady();
     });
+  }
+
+  Future<void> _checkAutoDetectReady() async {
+    if (_snapshotDetecting) return;
+    try {
+      final result = await ref.read(boardRepositoryProvider).checkAutoDetect();
+      final data = result['data'] as Map<String, dynamic>? ?? {};
+      final ready = data['ready'] == true;
+      final reason = data['reason']?.toString() ?? '';
+      
+      if (ready) {
+        // Auto-detect triggered successfully!
+        final uci = data['uci']?.toString();
+        final san = data['san']?.toString();
+        if (uci != null && uci.isNotEmpty) {
+          setState(() {
+            _snapshotNote = 'Auto-detected: $san ($uci)';
+          });
+
+          try {
+            final aiResult = await ref.read(boardRepositoryProvider).aiMove();
+            final aiData = aiResult['data'] as Map<String, dynamic>? ?? {};
+            final aiUci = aiData['uci']?.toString();
+            if (aiUci != null && aiUci.isNotEmpty && mounted) {
+              setState(() {
+                _snapshotNote = 'Auto-detected: $san ($uci). Engine: $aiUci';
+              });
+            }
+          } catch (_) {
+            if (mounted) {
+              setState(() {
+                _snapshotNote = 'Auto-detected: $san ($uci). Engine reply failed.';
+              });
+            }
+          }
+
+          await _fetchLiveFrame();
+        }
+      }
+    } catch (err) {
+      // Silently fail on auto-detect check errors
+    }
   }
 
   Future<void> _detectSnapshotMove() async {
@@ -323,15 +402,18 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       const maxAttempts = 8;
       for (int attempt = 0; attempt < maxAttempts; attempt++) {
         final result =
-            await ref.read(boardRepositoryProvider).analyzeMoveSnapshot();
-        final status = result['analysis_status']?.toString() ?? 'unknown';
-        final message = result['analysis_message']?.toString();
-        final reason = result['reason']?.toString();
-        final retry = result['retry'] == true;
-        final uci = result['uci']?.toString();
-        final versionRaw = result['game_version'];
+            await ref.read(boardRepositoryProvider).analyzeAndReplySnapshot();
+        final data = result['data'] as Map<String, dynamic>? ?? {};
+        final humanData = data['human_move'] as Map<String, dynamic>? ?? data;
+        final engineData = data['engine_move'] as Map<String, dynamic>?;
+        final status = humanData['analysis_status']?.toString() ?? 'unknown';
+        final message = humanData['analysis_message']?.toString();
+        final reason = humanData['reason']?.toString();
+        final retry = humanData['retry'] == true;
+        final uci = humanData['uci']?.toString();
+        final versionRaw = humanData['game_version'];
         final version = int.tryParse(versionRaw?.toString() ?? '');
-        final fallback = result['fallback'] == true;
+        final fallback = humanData['fallback'] == true;
 
         if (status == 'waiting') {
           if (mounted) {
@@ -380,6 +462,26 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
             }
           });
         }
+
+        if (_gameUsesBoard && engineData != null) {
+          final aiUci = engineData['uci']?.toString();
+          if (aiUci != null && aiUci.isNotEmpty && mounted) {
+            setState(() {
+              final aiApplied = _applyUciMove(aiUci);
+              if (aiApplied) {
+                final aiVersionRaw = engineData['game_version'];
+                final aiVersion = int.tryParse(aiVersionRaw?.toString() ?? '');
+                if (aiVersion != null) {
+                  _pendingLocalUci = aiUci;
+                  _pendingLocalVersion = aiVersion;
+                  _linkedGameVersion = aiVersion;
+                }
+                _snapshotNote =
+                    '${_snapshotNote ?? 'Move detected.'} Engine: $aiUci';
+              }
+            });
+          }
+        }
         break;
       }
     } catch (err) {
@@ -402,9 +504,10 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     });
     try {
       final result = await ref.read(boardRepositoryProvider).validateStart();
-      final valid = result['valid'] == true;
-      final detected = result['pieces_detected'] as int? ?? 0;
-      final summary = result['summary'] as Map<String, dynamic>? ?? {};
+      final data = result['data'] as Map<String, dynamic>? ?? {};
+      final valid = data['valid'] == true;
+      final detected = data['pieces_detected'] as int? ?? 0;
+      final summary = data['summary'] as Map<String, dynamic>? ?? {};
       final missing = summary['missing'] as int? ?? 0;
       final extra = summary['extra'] as int? ?? 0;
       final wrongColor = summary['wrong_color'] as int? ?? 0;
@@ -1340,6 +1443,8 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
     });
     try {
       await action();
+    } on ApiException catch (err) {
+      setState(() => _error = err.message);
     } catch (err) {
       setState(() => _error = 'Step failed. Check backend connection.');
     } finally {
@@ -1379,14 +1484,19 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
   }
 
   Future<void> _validateBoard() async {
+    if (_busy) return; // Prevent multiple simultaneous validations
     await _runStep(() async {
       final result = await ref.read(boardRepositoryProvider).validateStart();
-      final valid = result['valid'] == true;
-      final detected = result['pieces_detected'] as int? ?? 0;
-      final summary = result['summary'] as Map<String, dynamic>? ?? {};
+      final data = result['data'] as Map<String, dynamic>? ?? {};
+      final valid = data['valid'] == true;
+      final detected = data['pieces_detected'] as int? ?? 0;
+      final summary = data['summary'] as Map<String, dynamic>? ?? {};
       final missing = summary['missing'] as int? ?? 0;
       final extra = summary['extra'] as int? ?? 0;
       final wrongColor = summary['wrong_color'] as int? ?? 0;
+      
+      if (!mounted) return;
+      
       setState(() {
         _validated = valid;
         if (valid) {
@@ -1417,8 +1527,9 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
   Future<void> _debugCalibration() async {
     await _runStep(() async {
       final result = await ref.read(boardRepositoryProvider).debugCalibration();
-      final total = result['raw_detections_total'];
-      final tip = result['tip'];
+      final data = result['data'] as Map<String, dynamic>? ?? {};
+      final total = data['raw_detections_total'];
+      final tip = data['tip'];
       setState(() {
         _validationNote = 'Diagnostic: $total raw detections.\n$tip';
       });

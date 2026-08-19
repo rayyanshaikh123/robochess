@@ -42,6 +42,10 @@ class BoardRemoteDataSource {
     return CalibrationFrame.fromJson(data);
   }
 
+  Future<Map<String, dynamic>> pollCameraFeed() async {
+    return _client.getJson('/camera/poll_feed');
+  }
+
   Future<Map<String, dynamic>> detectMoveSnapshot() async {
     return _client.postJson('/move/detect');
   }
@@ -52,5 +56,19 @@ class BoardRemoteDataSource {
 
   Future<Map<String, dynamic>> analyzeMoveSnapshot() async {
     return _client.postJson('/move/analyze');
+  }
+
+  Future<Map<String, dynamic>> analyzeAndReplySnapshot() async {
+    return _client.postJson('/move/analyze-and-reply');
+  }
+
+  Future<Map<String, dynamic>> checkAutoDetect() async {
+    return _client.getJson('/move/auto_detect_ready');
+  }
+
+  Future<Map<String, dynamic>> aiMove({int? difficulty}) async {
+    return _client.postJson('/move/ai', body: {
+      if (difficulty != null) 'difficulty': difficulty,
+    });
   }
 }

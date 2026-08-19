@@ -29,6 +29,7 @@ async def init_db(app: FastAPI) -> None:
         "serverSelectionTimeoutMS": settings.mongodb_server_selection_timeout_ms,
     }
     if _requires_tls(settings.mongodb_uri):
+        client_kwargs["tls"] = True
         client_kwargs["tlsCAFile"] = certifi.where()
     client = AsyncIOMotorClient(settings.mongodb_uri, **client_kwargs)
     db = client[settings.mongodb_db]
