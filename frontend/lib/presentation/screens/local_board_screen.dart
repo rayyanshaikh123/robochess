@@ -1,5 +1,8 @@
+import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../data/repositories/pi_local_api.dart';
 import '../../domain/models/robochess_device.dart';
 import '../providers/local_board_provider.dart';
 
@@ -116,9 +119,96 @@ class _SessionView extends ConsumerWidget {
       if (state.network == null || !state.network!.internetAvailable)
         const _WifiPanel(),
       const SizedBox(height: 24),
+      if (state.localApiBaseUrl != null)
+        _LiveCameraView(baseUrl: state.localApiBaseUrl!),
       const _CameraCalibrationPanel(),
       if (state.error != null) Padding(padding: const EdgeInsets.only(top: 16), child: Text(state.error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
     ]);
+  }
+}
+
+class _LiveCameraView extends StatefulWidget {
+  final String baseUrl;
+  const _LiveCameraView({required this.baseUrl});
+
+  @override
+  State<_LiveCameraView> createState() => _LiveCameraViewState();
+}
+
+class _LiveCameraViewState extends State<_LiveCameraView> {
+  late PiLocalApi _api;
+  Timer? _timer;
+  Uint8List? _frame;
+  String? _error;
+  bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _api = PiLocalApi(baseUrl: widget.baseUrl);
+    _startPolling();
+  }
+
+  @override
+  void didUpdateWidget(covariant _LiveCameraView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.baseUrl != widget.baseUrl) {
+      _timer?.cancel();
+      _api = PiLocalApi(baseUrl: widget.baseUrl);
+      _frame = null;
+      _startPolling();
+    }
+  }
+
+  void _startPolling() {
+    _loadFrame();
+    _timer = Timer.periodic(const Duration(milliseconds: 400), (_) => _loadFrame());
+  }
+
+  Future<void> _loadFrame() async {
+    if (_loading || !mounted) return;
+    _loading = true;
+    try {
+      final frame = await _api.cameraFrame(preview: true);
+      if (mounted) setState(() { _frame = frame; _error = null; });
+    } catch (error) {
+      if (mounted && _frame == null) setState(() => _error = 'Pi camera unavailable: $error');
+    } finally {
+      _loading = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _api.client.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        ListTile(
+          leading: const Icon(Icons.videocam),
+          title: const Text('Live board view'),
+          subtitle: Text('Pi camera • ${widget.baseUrl}'),
+          trailing: IconButton(onPressed: _loadFrame, icon: const Icon(Icons.refresh)),
+        ),
+        AspectRatio(
+          aspectRatio: 1,
+          child: _frame != null
+              ? Image.memory(_frame!, fit: BoxFit.cover, gaplessPlayback: true)
+              : Center(child: _error == null ? const CircularProgressIndicator() : Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(_error!, textAlign: TextAlign.center),
+                )),
+        ),
+        if (_error != null && _frame != null)
+          Padding(padding: const EdgeInsets.all(8), child: Text(_error!, textAlign: TextAlign.center)),
+      ]),
+    );
   }
 }
 

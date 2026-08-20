@@ -179,7 +179,9 @@ class BoardRecognizer:
         self.roboflow_enabled = os.getenv("ROBOCHESS_ROBOFLOW_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
         self.roboflow_model_url = os.getenv("ROBOCHESS_ROBOFLOW_MODEL_URL", "").strip()
         self.cloud_model_id = parse_cloud_model_id(self.model_ref) if self.roboflow_enabled and self.roboflow_model_url else None
-        self.model_path: Optional[Path] = None if self.cloud_model_id else Path(self.model_ref)
+        self.model_path: Optional[Path] = (
+            None if self.cloud_model_id or not self.model_ref else Path(self.model_ref)
+        )
         self.confidence = confidence
         self.infer_iou = 0.45
         self.infer_max_det = 96
@@ -199,7 +201,7 @@ class BoardRecognizer:
             self._load_model()
         elif parse_cloud_model_id(self.model_ref) is not None:
             print("[WARN] Roboflow model reference ignored; enable ROBOCHESS_ROBOFLOW_ENABLED and provide ROBOCHESS_ROBOFLOW_MODEL_URL.")
-        elif self.model_path and self.model_path.exists():
+        elif self.model_path and self.model_path.is_file():
             self._load_model()
         else:
             print(f"[WARN] Model not found at {self.model_ref}. "

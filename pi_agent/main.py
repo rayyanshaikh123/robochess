@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 
 from pi_agent.api_client import DeviceApiClient
 from pi_agent.gatt_server import GattServer
@@ -23,9 +24,15 @@ from pi_agent.config import (
     CAMERA_WIDTH,
     CAMERA_HEIGHT,
     CAMERA_JPEG_QUALITY,
+    MODEL_PATH,
+    DETECTION_CONFIDENCE,
+    AUTO_DETECT_ENABLED,
+    DETECT_INTERVAL_SECONDS,
+    STABLE_LABEL_COUNT,
 )
 from pi_agent.heartbeat import HeartbeatWorker
 from pi_agent.vision_adapter import VisionAdapter
+from pi_agent.camera_detector import PiCameraDetector
 from pi_agent.config import (
     ENGINE_SKILL_LEVEL, ENGINE_TIME_SECONDS, STOCKFISH_PATH, UNO_BAUDRATE,
     UNO_PORT, UNO_SIMULATOR, UNO_TIMEOUT_SECONDS,
@@ -92,7 +99,15 @@ def main() -> None:
     uno = UnoController(transport, UNO_TIMEOUT_SECONDS)
     engine = StockfishEngine(STOCKFISH_PATH, ENGINE_TIME_SECONDS, ENGINE_SKILL_LEVEL)
     game = GameController(engine, uno, SessionStore())
-    start_local_api(LOCAL_API_HOST, LOCAL_API_PORT, game, network, network_config)
+    # BLE camera commands and the local HTTP calibration UI must share one
+    # persisted calibration file used by the detector.
+    game.calibration_path = Path(LOCAL_STATE_PATH) / "camera_calibration.json"
+    detector = PiCameraDetector(
+        CAMERA_INDEX, CAMERA_WIDTH, CAMERA_HEIGHT,
+        Path(LOCAL_STATE_PATH) / "camera_calibration.json",
+        MODEL_PATH, DETECTION_CONFIDENCE,
+    )
+    start_local_api(LOCAL_API_HOST, LOCAL_API_PORT, game, network, network_config, detector)
 
     current_network = network.status(
         INTERNET_CHECK_ENABLED,
@@ -140,18 +155,22 @@ def main() -> None:
         )
         heartbeat.start()
 
-    vision = VisionAdapter(game.session)
+    vision = VisionAdapter(game.session, stability_frames=STABLE_LABEL_COUNT)
 
     print("Pi agent running. Waiting for moves...")
     try:
         while True:
-            # Future OpenCV integration supplies stable candidates through
-            # vision.observe_candidates(); polling remains harmless without a camera.
             vision.session = game.session
-            uci, expected_version = vision.detect_move()
-            if uci:
-                game.handle({"type": "move.propose", "data": {"uci": uci, "expected_version": expected_version}})
-            time.sleep(0.1)
+            if AUTO_DETECT_ENABLED and game.session and game.session.phase.value == "player_turn":
+                candidates = detector.detect_candidates(game.session)
+                uci, expected_version = vision.observe_candidates(candidates)
+                if uci:
+                    result = game.handle({"type": "move.propose", "data": {"uci": uci, "expected_version": expected_version}})
+                    if result.get("status") == "error":
+                        print(f"Automatic move rejected: {result.get('error')}", flush=True)
+                time.sleep(DETECT_INTERVAL_SECONDS)
+            else:
+                time.sleep(0.5)
     except KeyboardInterrupt:
         if heartbeat:
             heartbeat.stop()

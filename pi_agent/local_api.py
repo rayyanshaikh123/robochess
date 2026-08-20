@@ -25,10 +25,11 @@ class MoveRequest(BaseModel):
 
 
 class LocalApiHost:
-    def __init__(self, game, network: NetworkManager, config: dict[str, Any]) -> None:
+    def __init__(self, game, network: NetworkManager, config: dict[str, Any], detector=None) -> None:
         self.game = game
         self.network = network
         self.config = config
+        self.detector = detector
         self.state_path = Path(config["state_path"])
         self.calibration_path = self.state_path / "camera_calibration.json"
         self._camera = None
@@ -44,6 +45,11 @@ class LocalApiHost:
         ).to_dict()
 
     def _capture(self):
+        if self.detector is not None:
+            try:
+                return self.detector.capture_frame()
+            except RuntimeError as exc:
+                raise HTTPException(503, str(exc)) from exc
         try:
             import cv2
         except ImportError as exc:
@@ -84,6 +90,7 @@ class LocalApiHost:
                 "local_service_available": True,
                 "network": {**network, "backend_available": self.config.get("backend_available", False)},
                 "calibrated": self.calibration_path.exists(),
+                "vision": self.detector.status() if self.detector else {"model_available": False},
                 "game": self.game.session.snapshot() if self.game.session else None,
             }}
 
@@ -97,6 +104,11 @@ class LocalApiHost:
 
         @self.app.get("/local/camera/preview")
         def camera_preview():
+            if self.detector is not None:
+                try:
+                    return self._jpeg(self.detector.preview_frame())
+                except RuntimeError as exc:
+                    raise HTTPException(503, str(exc)) from exc
             frame = self._capture()
             calibration = self._read_calibration()
             if calibration:
@@ -125,6 +137,8 @@ class LocalApiHost:
             self.state_path.mkdir(parents=True, exist_ok=True)
             data = {"corners": corners, "board_orientation": payload.board_orientation}
             self.calibration_path.write_text(json.dumps(data, indent=2))
+            if self.detector is not None:
+                self.detector.last_error = None
             return {"status": "ok", "message": "Calibration saved", "data": data}
 
         @self.app.post("/local/calibration/auto")
@@ -157,15 +171,15 @@ class LocalApiHost:
 
         @self.app.post("/local/move/detect-if-clear")
         def detect_move_if_clear():
-            raise HTTPException(503, "Camera model integration is not configured")
+            return self._detect_result()
 
         @self.app.post("/local/move/analyze")
         def analyze_move():
-            raise HTTPException(503, "Camera model integration is not configured")
+            return self._detect_result()
 
         @self.app.post("/local/move/analyze-and-reply")
         def analyze_and_reply():
-            raise HTTPException(503, "Camera model integration is not configured")
+            return self._detect_result(apply_move=True)
 
         @self.post_gantry("/local/gantry/home")
         def gantry_home():
@@ -185,14 +199,27 @@ class LocalApiHost:
 
         @self.app.post("/local/move/detect")
         def detect_move():
-            raise HTTPException(503, "Camera model integration is not configured")
-
-    def post_gantry(self, path: str):
-        return self.app.post(path)
+            return self._detect_result()
 
         @self.app.get("/local/game/state")
         def game_state():
             return {"status": "ok", "data": self.game.session.snapshot() if self.game.session else None}
+
+    def post_gantry(self, path: str):
+        return self.app.post(path)
+
+    def _detect_result(self, apply_move: bool = False):
+        if self.detector is None:
+            raise HTTPException(503, "Camera detector is not configured")
+        if not self.game.session:
+            raise HTTPException(409, "Start a local game session first")
+        candidates = self.detector.detect_candidates(self.game.session)
+        if not candidates:
+            return {"status": "no_move", "data": {"vision": self.detector.status()}}
+        if not apply_move:
+            return {"status": "move_detected", "data": {"candidates": candidates, "vision": self.detector.status()}}
+        result = self.game.handle({"type": "move.propose", "data": {"uci": candidates[0], "expected_version": self.game.session.version}})
+        return {"status": "ok", "data": result}
 
     def _read_calibration(self) -> dict:
         try:
@@ -201,9 +228,9 @@ class LocalApiHost:
             return {}
 
 
-def start_local_api(host: str, port: int, game, network: NetworkManager, config: dict) -> threading.Thread:
+def start_local_api(host: str, port: int, game, network: NetworkManager, config: dict, detector=None) -> threading.Thread:
     import uvicorn
-    api = LocalApiHost(game, network, config)
+    api = LocalApiHost(game, network, config, detector)
     thread = threading.Thread(
         target=uvicorn.run,
         kwargs={"app": api.app, "host": host, "port": port, "log_level": "warning"},

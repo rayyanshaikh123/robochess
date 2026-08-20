@@ -32,10 +32,11 @@ sends motion plans to an Arduino Uno gantry controller.
   and recovery state.
 - BLE game-command protocol and optional BlueZ GATT server.
 - Acknowledged JSON-lines Uno protocol with a default simulator.
-- A camera seam that accepts only stable, legal candidate moves.
+- Shared OpenCV camera capture, saved four-corner calibration, and optional
+  local YOLO automatic move detection with stable legal-move filtering.
 
-The OpenCV piece-detection model and Flutter/backend implementations are not
-included yet. Their required interface is in [PROTOCOL.md](PROTOCOL.md).
+Automatic detection is local-only. Roboflow remains disabled unless explicitly
+configured; a missing local model never prevents camera preview or calibration.
 
 ## Fast start: offline Stockfish
 
@@ -52,6 +53,8 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r pi_agent/requirements.txt
+# For automatic piece detection, also install the optional vision dependencies:
+python -m pip install -r pi_agent/requirements-vision.txt
 
 ROBOCHESS_STOCKFISH_PATH=/usr/local/bin/stockfish \
   python -m pi_agent.terminal_game
@@ -92,6 +95,8 @@ board.
 | `ROBOCHESS_UNO_BAUDRATE` | Arduino serial speed | `115200` |
 | `ROBOCHESS_API_BASE` | Optional backend API | `http://localhost:8000` |
 | `ROBOCHESS_DEVICE_ID` / `ROBOCHESS_DEVICE_SECRET` | Device credentials | required for full agent |
+| `ROBOCHESS_MODEL_PATH` | Local YOLO `.pt` weights; empty means calibration-only | empty |
+| `ROBOCHESS_AUTO_DETECT_ENABLED` | Run automatic move detection in the agent loop | `1` |
 
 Always install Python packages inside `.venv`. Do not use `sudo pip` or
 `--break-system-packages`.
@@ -111,8 +116,9 @@ separate `/etc/robochess/pi-agent.env` file instead.
 
 The agent starts BLE/board control even when the backend is down. It reconnects
 and uploads the Pi-authoritative session snapshot when the network returns.
-Until the camera is available, every game starts from the standard position and
-requires manual physical-board confirmation from the app.
+When `ROBOCHESS_MODEL_PATH` is empty, camera preview/calibration still work but
+automatic move detection reports `model unavailable`. Set it to a local `.pt`
+file after installing `requirements-vision.txt`.
 
 The Pi also starts a local HTTP service on port `8765`. It remains available
 without internet or MongoDB:
@@ -122,6 +128,8 @@ GET  http://<pi-ip>:8765/local/health
 GET  http://<pi-ip>:8765/local/network/status
 GET  http://<pi-ip>:8765/local/camera/frame
 POST http://<pi-ip>:8765/local/calibration/manual
+POST http://<pi-ip>:8765/local/move/detect
+POST http://<pi-ip>:8765/local/move/analyze-and-reply
 ```
 
 Wi-Fi credentials are only needed when the network status is `no_wifi` or
