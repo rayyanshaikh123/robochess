@@ -176,7 +176,9 @@ class BoardRecognizer:
             confidence: Minimum detection confidence threshold.
         """
         self.model_ref = str(model_path).strip()
-        self.cloud_model_id = parse_cloud_model_id(self.model_ref)
+        self.roboflow_enabled = os.getenv("ROBOCHESS_ROBOFLOW_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+        self.roboflow_model_url = os.getenv("ROBOCHESS_ROBOFLOW_MODEL_URL", "").strip()
+        self.cloud_model_id = parse_cloud_model_id(self.model_ref) if self.roboflow_enabled and self.roboflow_model_url else None
         self.model_path: Optional[Path] = None if self.cloud_model_id else Path(self.model_ref)
         self.confidence = confidence
         self.infer_iou = 0.45
@@ -187,14 +189,16 @@ class BoardRecognizer:
         self.infer_augment = False
         self.model: Optional[object] = None
         self.cloud_model = None
-        self.cloud_api_key = os.getenv("ROBOFLOW_API_KEY", "").strip()
-        self.cloud_base_url = os.getenv("ROBOFLOW_DETECT_URL", "https://serverless.roboflow.com").strip().rstrip("/")
+        self.cloud_api_key = os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip() or os.getenv("ROBOFLOW_API_KEY", "").strip()
+        self.cloud_base_url = (self.roboflow_model_url or os.getenv("ROBOFLOW_DETECT_URL", "")).strip().rstrip("/")
         self.warp_matrix: Optional[np.ndarray] = None
         self.model_names: dict[int, str] = {}
 
         # Load local or cloud model.
-        if self.cloud_model_id is not None:
+        if self.roboflow_enabled and self.roboflow_model_url and self.cloud_model_id is not None:
             self._load_model()
+        elif parse_cloud_model_id(self.model_ref) is not None:
+            print("[WARN] Roboflow model reference ignored; enable ROBOCHESS_ROBOFLOW_ENABLED and provide ROBOCHESS_ROBOFLOW_MODEL_URL.")
         elif self.model_path and self.model_path.exists():
             self._load_model()
         else:
@@ -204,9 +208,9 @@ class BoardRecognizer:
     def _load_model(self):
         """Load a local YOLO model or a Roboflow cloud model."""
         if self.cloud_model_id is not None:
-            if not self.cloud_api_key:
+            if not self.cloud_api_key or not self.cloud_base_url:
                 raise RuntimeError(
-                    "ROBOFLOW_API_KEY is not set. Set it in your environment before using cloud model IDs."
+                    "Roboflow is enabled but ROBOCHESS_ROBOFLOW_MODEL_URL/API_KEY is missing."
                 )
             self.cloud_model = {
                 "model_id": self.cloud_model_id,
@@ -248,7 +252,11 @@ class BoardRecognizer:
         """Explicitly load or reload the model."""
         if path:
             self.model_ref = str(path).strip()
-            self.cloud_model_id = parse_cloud_model_id(self.model_ref)
+            self.cloud_model_id = (
+                parse_cloud_model_id(self.model_ref)
+                if self.roboflow_enabled and self.roboflow_model_url
+                else None
+            )
             self.model_path = None if self.cloud_model_id else Path(self.model_ref)
         if self.cloud_model_id is None:
             if self.model_path is None or not self.model_path.exists():
@@ -406,8 +414,8 @@ class BoardRecognizer:
         # Try multipart first, then raw bytes fallback for compatibility.
         response = None
         last_error = None
-        timeout_sec = float(os.getenv("ROBOFLOW_TIMEOUT", "20"))
-        max_retries = max(0, int(os.getenv("ROBOFLOW_RETRIES", "2")))
+        timeout_sec = float(os.getenv("ROBOCHESS_ROBOFLOW_TIMEOUT_SECONDS", os.getenv("ROBOFLOW_TIMEOUT", "20")))
+        max_retries = max(0, int(os.getenv("ROBOCHESS_ROBOFLOW_RETRIES", os.getenv("ROBOFLOW_RETRIES", "0"))))
         for attempt in range(max_retries + 1):
             for params in param_options:
                 for send_mode in ("multipart", "raw"):

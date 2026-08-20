@@ -114,6 +114,20 @@ and uploads the Pi-authoritative session snapshot when the network returns.
 Until the camera is available, every game starts from the standard position and
 requires manual physical-board confirmation from the app.
 
+The Pi also starts a local HTTP service on port `8765`. It remains available
+without internet or MongoDB:
+
+```text
+GET  http://<pi-ip>:8765/local/health
+GET  http://<pi-ip>:8765/local/network/status
+GET  http://<pi-ip>:8765/local/camera/frame
+POST http://<pi-ip>:8765/local/calibration/manual
+```
+
+Wi-Fi credentials are only needed when the network status is `no_wifi` or
+`wifi_connected_no_internet`. Local camera calibration and game state do not
+require cloud access.
+
 ## BLE setup (optional)
 
 BLE is optional because `bluezero` requires native GTK/GLib dependencies. Only

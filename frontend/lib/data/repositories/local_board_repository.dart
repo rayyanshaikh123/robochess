@@ -49,6 +49,7 @@ class LocalBoardRepository {
 
   Future<void> startSession() => send('session.start');
   Future<void> requestState() => send('state.request');
+  Future<void> requestNetworkStatus() => send('network.status');
   Future<void> resumeSession() => send('session.resume');
   Future<void> resetSession() => send('session.reset');
   Future<void> homeGantry() => send('gantry.home');

@@ -1,7 +1,8 @@
 """NetworkManager integration for Raspberry Pi provisioning."""
 
-import json
 import subprocess
+import socket
+import requests
 from dataclasses import dataclass
 
 
@@ -13,7 +14,20 @@ class NetworkManagerError(RuntimeError):
 class NetworkStatus:
     connected: bool
     ssid: str | None = None
+    ip_address: str | None = None
+    internet_available: bool = False
+    state: str = "network_error"
     error: str | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "wifi_connected": self.connected,
+            "internet_available": self.internet_available,
+            "ssid": self.ssid,
+            "ip_address": self.ip_address,
+            "state": self.state,
+            "error": self.error,
+        }
 
 
 class NetworkManager:
@@ -31,17 +45,40 @@ class NetworkManager:
             raise NetworkManagerError(result.stderr.strip() or "nmcli command failed")
         return result.stdout.strip()
 
-    def status(self) -> NetworkStatus:
+    def status(
+        self,
+        internet_check_enabled: bool = True,
+        internet_check_url: str = "https://connectivitycheck.gstatic.com/generate_204",
+        internet_timeout: float = 5.0,
+    ) -> NetworkStatus:
         try:
-            output = self._run(["-t", "-f", "GENERAL.STATE,GENERAL.CONNECTION", "device", "show"])
+            output = self._run(["-t", "-f", "GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS", "device", "show"])
         except NetworkManagerError as exc:
-            return NetworkStatus(False, error=str(exc))
+            return NetworkStatus(False, state="network_error", error=str(exc))
         connected = "connected" in output.lower()
         ssid = None
+        ip_address = None
         for line in output.splitlines():
             if "GENERAL.CONNECTION:" in line:
                 ssid = line.split(":", 1)[1] or None
-        return NetworkStatus(connected, ssid=ssid)
+            if "IP4.ADDRESS" in line:
+                value = line.split(":", 1)[1].split("/", 1)[0]
+                if value:
+                    ip_address = value
+        if not connected:
+            return NetworkStatus(False, ssid=ssid, ip_address=ip_address, state="no_wifi")
+        internet_available = False
+        if internet_check_enabled:
+            try:
+                response = requests.get(internet_check_url, timeout=internet_timeout)
+                internet_available = 200 <= response.status_code < 400
+            except (requests.RequestException, socket.gaierror):
+                internet_available = False
+        state = "internet_available" if internet_available else "wifi_connected_no_internet"
+        return NetworkStatus(
+            True, ssid=ssid, ip_address=ip_address,
+            internet_available=internet_available, state=state,
+        )
 
     def configure(self, ssid: str, password: str) -> NetworkStatus:
         if not ssid.strip() or not password:

@@ -22,6 +22,8 @@ class LocalBoardState {
   final List<RoboChessDevice> devices;
   final RoboChessDevice? selected;
   final PiState? piState;
+  final PiNetworkStatus? network;
+  final String? localApiBaseUrl;
   final LocalConnectionState connection;
   final bool scanning;
   final String? error;
@@ -30,6 +32,8 @@ class LocalBoardState {
     this.devices = const [],
     this.selected,
     this.piState,
+    this.network,
+    this.localApiBaseUrl,
     this.connection = LocalConnectionState.disconnected,
     this.scanning = false,
     this.error,
@@ -39,6 +43,8 @@ class LocalBoardState {
     List<RoboChessDevice>? devices,
     RoboChessDevice? selected,
     PiState? piState,
+    PiNetworkStatus? network,
+    String? localApiBaseUrl,
     LocalConnectionState? connection,
     bool? scanning,
     String? error,
@@ -47,6 +53,8 @@ class LocalBoardState {
         devices: devices ?? this.devices,
         selected: selected ?? this.selected,
         piState: piState ?? this.piState,
+        network: network ?? this.network,
+        localApiBaseUrl: localApiBaseUrl ?? this.localApiBaseUrl,
         connection: connection ?? this.connection,
         scanning: scanning ?? this.scanning,
         error: clearError ? null : (error ?? this.error),
@@ -80,6 +88,16 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
     try {
       final message = repository.parse(value);
       final stateData = message.data['state'] ?? message.data['engine_state'];
+      final networkData = message.data['network'];
+      if (message.data['status'] == 'network_status' && networkData is Map) {
+        final network = PiNetworkStatus.fromMap(Map<String, dynamic>.from(networkData));
+        state = state.copyWith(
+          network: network,
+          localApiBaseUrl: network.ipAddress == null ? null : 'http://${network.ipAddress}:8765',
+          clearError: true,
+        );
+        return;
+      }
       if ((message.type == 'control.result' || message.type == 'game.state') && stateData is Map) {
         final next = PiState.fromMessage(message);
         if (repository.acceptState(next)) {
@@ -122,6 +140,7 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
       await store.saveDevice(id);
       state = state.copyWith(selected: device.copyWith(deviceId: id, state: LocalConnectionState.connected), connection: LocalConnectionState.paired);
       await repository.requestState();
+      await repository.requestNetworkStatus();
     } catch (error) {
       state = state.copyWith(error: 'Board connection failed: $error', connection: LocalConnectionState.disconnected);
     }

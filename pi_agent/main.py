@@ -4,6 +4,7 @@ from pi_agent.api_client import DeviceApiClient
 from pi_agent.gatt_server import GattServer
 from pi_agent.network_manager import NetworkManager, NetworkManagerError
 from pi_agent.provisioning_store import ProvisioningStore
+from pi_agent.local_api import start_local_api
 from pi_agent.config import (
     BLE_ENABLED,
     BLE_ADAPTER,
@@ -12,6 +13,16 @@ from pi_agent.config import (
     DEVICE_ID,
     DEVICE_SECRET,
     HEARTBEAT_SECONDS,
+    LOCAL_API_HOST,
+    LOCAL_API_PORT,
+    LOCAL_STATE_PATH,
+    INTERNET_CHECK_ENABLED,
+    INTERNET_CHECK_URL,
+    INTERNET_CHECK_TIMEOUT_SECONDS,
+    CAMERA_INDEX,
+    CAMERA_WIDTH,
+    CAMERA_HEIGHT,
+    CAMERA_JPEG_QUALITY,
 )
 from pi_agent.heartbeat import HeartbeatWorker
 from pi_agent.vision_adapter import VisionAdapter
@@ -32,6 +43,17 @@ def main() -> None:
     api = DeviceApiClient()
     network = NetworkManager()
     store = ProvisioningStore()
+    network_config = {
+        "state_path": LOCAL_STATE_PATH,
+        "camera_index": CAMERA_INDEX,
+        "width": CAMERA_WIDTH,
+        "height": CAMERA_HEIGHT,
+        "jpeg_quality": CAMERA_JPEG_QUALITY,
+        "internet_check_enabled": INTERNET_CHECK_ENABLED,
+        "internet_check_url": INTERNET_CHECK_URL,
+        "internet_check_timeout": INTERNET_CHECK_TIMEOUT_SECONDS,
+        "backend_available": False,
+    }
 
     def on_control(message: dict) -> dict:
         data = message.get("data") or {}
@@ -39,13 +61,20 @@ def main() -> None:
         if token:
             store.set_onboarding_token(token)
             return {"status": "token_saved"}
+        if message.get("type") == "network.status":
+            return {"status": "network_status", "network": network.status(
+                INTERNET_CHECK_ENABLED,
+                INTERNET_CHECK_URL,
+                INTERNET_CHECK_TIMEOUT_SECONDS,
+            ).to_dict() | {"backend_available": api.device_token is not None}}
         return {"status": "ready"}
 
     def on_wifi(message: dict) -> dict:
         data = message.get("data") or {}
         try:
             api.update_status("provisioning_wifi", wifi_status="connecting") if api.device_token else None
-            result = network.configure(str(data.get("ssid", "")), str(data.get("password", "")))
+            network.configure(str(data.get("ssid", "")), str(data.get("password", "")))
+            result = network.wait_until_connected()
             if not result.connected:
                 raise NetworkManagerError(result.error or "Wi-Fi connection failed")
             if api.device_token:
@@ -63,6 +92,14 @@ def main() -> None:
     uno = UnoController(transport, UNO_TIMEOUT_SECONDS)
     engine = StockfishEngine(STOCKFISH_PATH, ENGINE_TIME_SECONDS, ENGINE_SKILL_LEVEL)
     game = GameController(engine, uno, SessionStore())
+    start_local_api(LOCAL_API_HOST, LOCAL_API_PORT, game, network, network_config)
+
+    current_network = network.status(
+        INTERNET_CHECK_ENABLED,
+        INTERNET_CHECK_URL,
+        INTERNET_CHECK_TIMEOUT_SECONDS,
+    )
+    print(f"Network state: {current_network.state} ({current_network.ip_address or 'no IP'})")
     gatt = GattServer(
         DEVICE_ID, on_control=on_control, on_wifi=on_wifi,
         adapter_address=BLE_ADAPTER or None, name=BLE_NAME or None,
@@ -75,6 +112,7 @@ def main() -> None:
     if DEVICE_SECRET:
         try:
             api.connect(DEVICE_ID, DEVICE_SECRET)
+            network_config["backend_available"] = True
         except Exception as exc:
             # BLE gameplay and the physical board deliberately remain usable offline.
             print(f"Backend unavailable; starting in offline mode: {exc}")

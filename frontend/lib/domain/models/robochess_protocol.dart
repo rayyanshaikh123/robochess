@@ -50,3 +50,35 @@ class PiState {
 
   Map<String, dynamic> toJson() => {'version': version, 'state': state, if (fen != null) 'fen': fen, if (sessionId != null) 'session_id': sessionId, 'moves': moveHistory, if (recoveryReason != null) 'last_error': recoveryReason, 'game_over': gameOver, if (result != null) 'result': result};
 }
+
+class PiNetworkStatus {
+  final bool wifiConnected;
+  final bool internetAvailable;
+  final bool backendAvailable;
+  final bool localServiceAvailable;
+  final String? ssid;
+  final String? ipAddress;
+  final String state;
+
+  const PiNetworkStatus({
+    required this.wifiConnected,
+    required this.internetAvailable,
+    required this.backendAvailable,
+    required this.localServiceAvailable,
+    required this.ssid,
+    required this.ipAddress,
+    required this.state,
+  });
+
+  factory PiNetworkStatus.fromMap(Map<String, dynamic> data) {
+    return PiNetworkStatus(
+      wifiConnected: data['wifi_connected'] == true,
+      internetAvailable: data['internet_available'] == true,
+      backendAvailable: data['backend_available'] == true,
+      localServiceAvailable: data['local_service_available'] != false,
+      ssid: data['ssid']?.toString(),
+      ipAddress: data['ip_address']?.toString(),
+      state: data['state']?.toString() ?? 'unknown',
+    );
+  }
+}

@@ -73,6 +73,22 @@ class _SessionView extends ConsumerWidget {
         subtitle: Text('${state.connection.name}  •  ${state.selected?.deviceId ?? state.selected?.remoteId}'),
         trailing: Icon(Icons.circle, size: 12, color: state.connection == LocalConnectionState.ready ? Colors.green : Colors.orange),
       ),
+      if (state.network != null)
+        Card(
+          child: ListTile(
+            leading: Icon(
+              state.network!.internetAvailable ? Icons.cloud_done : Icons.cloud_off,
+              color: state.network!.internetAvailable ? Colors.green : Colors.orange,
+            ),
+            title: Text(state.network!.internetAvailable
+                ? 'Board has internet'
+                : 'Board is offline/local-only'),
+            subtitle: Text(
+              '${state.network!.state} • ${state.network!.ssid ?? 'No Wi-Fi'}'
+              '${state.network!.ipAddress == null ? '' : '\n${state.network!.ipAddress}:8765'}',
+            ),
+          ),
+        ),
       const Divider(),
       const Text('Board Command Dashboard', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
       const SizedBox(height: 8),
@@ -97,7 +113,8 @@ class _SessionView extends ConsumerWidget {
       const SizedBox(height: 16),
       MoveProposal(onSubmit: (move) => ref.read(localBoardProvider.notifier).proposeMove(move)),
       const SizedBox(height: 24),
-      const _WifiPanel(),
+      if (state.network == null || !state.network!.internetAvailable)
+        const _WifiPanel(),
       const SizedBox(height: 24),
       const _CameraCalibrationPanel(),
       if (state.error != null) Padding(padding: const EdgeInsets.only(top: 16), child: Text(state.error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
@@ -163,7 +180,9 @@ class ChessPosition extends StatelessWidget {
         cells.addAll(count == null ? [char] : List.filled(count, ''));
       }
     }
-    while (cells.length < 64) cells.add('');
+    while (cells.length < 64) {
+      cells.add('');
+    }
     return AspectRatio(aspectRatio: 1, child: GridView.builder(
       physics: const NeverScrollableScrollPhysics(), itemCount: 64,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 8),

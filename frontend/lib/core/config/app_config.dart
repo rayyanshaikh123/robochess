@@ -16,7 +16,7 @@ class AppConfig {
 
   static const boardModelRef = String.fromEnvironment(
     'BOARD_MODEL_REF',
-    defaultValue: 'rf://chess-bprbi-ffewq/1',
+    defaultValue: '',
   );
 
   static const roboChessServiceUuid = String.fromEnvironment(
