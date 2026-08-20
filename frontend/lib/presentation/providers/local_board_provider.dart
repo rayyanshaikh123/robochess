@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/config/app_config.dart';
 import '../../core/ble/robochess_ble.dart';
 import '../../data/repositories/local_board_repository.dart';
 import '../../data/repositories/local_state_store.dart';
@@ -93,7 +94,9 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
         final network = PiNetworkStatus.fromMap(Map<String, dynamic>.from(networkData));
         state = state.copyWith(
           network: network,
-          localApiBaseUrl: network.ipAddress == null ? null : 'http://${network.ipAddress}:8765',
+          localApiBaseUrl: network.ipAddress == null
+              ? AppConfig.piLocalApiBaseUrl
+              : 'http://${network.ipAddress}:8765',
           clearError: true,
         );
         return;

@@ -1,4 +1,9 @@
 class AppConfig {
+  static const piLocalApiBaseUrl = String.fromEnvironment(
+    'PI_LOCAL_API_BASE_URL',
+    defaultValue: 'http://172.20.10.2:8765',
+  );
+
   static const apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'http://10.0.2.2:8000',
