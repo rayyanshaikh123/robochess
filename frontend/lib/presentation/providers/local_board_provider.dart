@@ -1,13 +1,13 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../data/datasources/ble_service.dart';
+import '../../core/ble/robochess_ble.dart';
 import '../../data/repositories/local_board_repository.dart';
 import '../../data/repositories/local_state_store.dart';
 import '../../domain/models/robochess_device.dart';
 import '../../domain/models/robochess_protocol.dart';
 
-final localBleServiceProvider = Provider<BleService>((ref) {
-  final service = BleService();
+final localBleServiceProvider = Provider<RoboChessBleClient>((ref) {
+  final service = RoboChessBleClient();
   ref.onDispose(service.dispose);
   return service;
 });
@@ -56,16 +56,16 @@ class LocalBoardState {
 class LocalBoardController extends StateNotifier<LocalBoardState> {
   final LocalBoardRepository repository;
   final LocalStateStore store;
-  StreamSubscription<RoboChessDevice>? _devices;
-  StreamSubscription<List<int>>? _notifications;
+  StreamSubscription<RoboChessBleDevice>? _devices;
+  StreamSubscription<Map<String, dynamic>>? _notifications;
 
   LocalBoardController(this.repository, this.store) : super(const LocalBoardState()) {
-    _devices = repository.discoveredDevices.listen(_onDevice);
     _notifications = repository.notifications.listen(_onMessage);
     _restoreState();
   }
 
-  void _onDevice(RoboChessDevice device) {
+  void _onDevice(RoboChessBleDevice item) {
+    final device = RoboChessDevice(remoteId: item.result.device.remoteId.str, displayName: item.name, deviceId: null, rssi: item.rssi);
     final devices = [...state.devices];
     final index = devices.indexWhere((item) => item.remoteId == device.remoteId);
     if (index == -1) {
@@ -73,23 +73,24 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
     } else {
       devices[index] = device;
     }
-    state = state.copyWith(devices: devices);
+    state = state.copyWith(devices: devices, scanning: false);
   }
 
-  void _onMessage(List<int> bytes) {
+  void _onMessage(Map<String, dynamic> value) {
     try {
-      final message = repository.parse(bytes);
-      if (message.type == 'state' || message.type == 'session.started' || message.type == 'move.accepted') {
+      final message = repository.parse(value);
+      final stateData = message.data['state'] ?? message.data['engine_state'];
+      if ((message.type == 'control.result' || message.type == 'game.state') && stateData is Map) {
         final next = PiState.fromMessage(message);
         if (repository.acceptState(next)) {
           state = state.copyWith(piState: next, connection: LocalConnectionState.ready, clearError: true);
           store.saveState(next);
         }
-      } else if (message.type == 'recovery.required') {
-        final next = PiState.fromMessage(message);
-        state = state.copyWith(piState: next, connection: LocalConnectionState.recovering);
-      } else if (message.type == 'move.rejected' || message.type == 'error') {
-        state = state.copyWith(error: message.payload['reason']?.toString() ?? message.type);
+        if (next.state == 'recovery') {
+          state = state.copyWith(connection: LocalConnectionState.recovering);
+        }
+      } else if (message.data['status'] == 'error' || message.type == 'error') {
+        state = state.copyWith(error: message.data['error']?.toString() ?? message.type);
       }
     } catch (error) {
       state = state.copyWith(error: 'Invalid board message: $error');
@@ -104,8 +105,11 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
   Future<void> scan() async {
     state = state.copyWith(scanning: true, connection: LocalConnectionState.scanning, clearError: true);
     try {
-      await repository.ble.scan();
-      state = state.copyWith(scanning: false, connection: LocalConnectionState.scanning);
+      await _devices?.cancel();
+      _devices = repository.scan().listen(_onDevice, onError: (Object error) {
+        state = state.copyWith(error: 'Bluetooth scan failed: $error', scanning: false, connection: LocalConnectionState.disconnected);
+      });
+      // Scan results are streamed; retain the scanning state until a board appears.
     } catch (error) {
       state = state.copyWith(error: 'Bluetooth scan failed: $error', scanning: false, connection: LocalConnectionState.disconnected);
     }
@@ -114,9 +118,9 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
   Future<void> connect(RoboChessDevice device) async {
     state = state.copyWith(selected: device, connection: LocalConnectionState.connecting, clearError: true);
     try {
-      await repository.ble.connect(device);
-      await store.saveDevice(device.deviceId ?? device.remoteId);
-      state = state.copyWith(selected: device.copyWith(state: LocalConnectionState.connected), connection: LocalConnectionState.paired);
+      final id = await repository.connectRemote(device.remoteId);
+      await store.saveDevice(id);
+      state = state.copyWith(selected: device.copyWith(deviceId: id, state: LocalConnectionState.connected), connection: LocalConnectionState.paired);
       await repository.requestState();
     } catch (error) {
       state = state.copyWith(error: 'Board connection failed: $error', connection: LocalConnectionState.disconnected);
@@ -124,7 +128,7 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
   }
 
   Future<void> confirmSetup() => repository.startSession();
-  Future<void> proposeMove(String move) => repository.proposeMove(move);
+  Future<void> proposeMove(String move) => repository.proposeMove(move, state.piState?.version ?? 0);
   Future<void> reset() => repository.resetSession();
   Future<void> resume() => repository.resumeSession();
 

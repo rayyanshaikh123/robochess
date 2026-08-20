@@ -1,89 +1,65 @@
-"""Offline RoboChess BLE protocol primitives.
-
-The Pi is authoritative. This module deliberately contains no chess rules; it
-validates transport envelopes and delegates commands to the board controller.
-"""
+"""Canonical RoboChess BLE GATT envelope and long-message framing."""
 
 from __future__ import annotations
 
+import base64
 import json
-from dataclasses import dataclass
-from typing import Any, Callable
-from uuid import uuid4
+import uuid
+from typing import Any
 
-PROTOCOL_VERSION = 1
+SERVICE_UUID = "0000f00d-0000-1000-8000-00805f9b34fb"
+DEVICE_INFO_UUID = "0000f00e-0000-1000-8000-00805f9b34fb"
+CONTROL_UUID = "0000f00f-0000-1000-8000-00805f9b34fb"
+WIFI_UUID = "0000f010-0000-1000-8000-00805f9b34fb"
+STATUS_UUID = "0000f011-0000-1000-8000-00805f9b34fb"
+PROTOCOL_VERSION = "1"
+MAX_CHUNK_BYTES = 180
+CHUNK_PAYLOAD_BYTES = 42
 
-
-class ProtocolError(ValueError):
-    pass
-
-
-@dataclass(frozen=True)
-class Message:
-    type: str
-    version: int = PROTOCOL_VERSION
-    seq: int | None = None
-    request_id: str | None = None
-    payload: dict[str, Any] | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        value = {
-            "version": self.version,
-            "type": self.type,
-            **({"seq": self.seq} if self.seq is not None else {}),
-            **({"id": self.request_id} if self.request_id else {}),
-        }
-        value.update(self.payload or {})
-        return value
-
-    def encode(self) -> bytes:
-        return json.dumps(self.to_dict(), separators=(",", ":")).encode("utf-8")
-
-    @classmethod
-    def decode(cls, raw: bytes | str) -> "Message":
-        try:
-            value = json.loads(raw)
-        except (TypeError, json.JSONDecodeError) as exc:
-            raise ProtocolError("malformed JSON") from exc
-        if not isinstance(value, dict) or not isinstance(value.get("version"), int):
-            raise ProtocolError("version is required")
-        if value["version"] != PROTOCOL_VERSION:
-            raise ProtocolError(f"unsupported protocol version: {value['version']}")
-        if not isinstance(value.get("type"), str) or not value["type"]:
-            raise ProtocolError("type is required")
-        seq = value.get("seq")
-        if seq is not None and (not isinstance(seq, int) or seq < 1):
-            raise ProtocolError("seq must be a positive integer")
-        payload = dict(value)
-        for key in ("version", "type", "seq", "id"):
-            payload.pop(key, None)
-        return cls(value["type"], value["version"], seq, value.get("id"), payload)
+GAME_MESSAGE_TYPES = {"session.start", "session.reset", "session.resume", "state.request", "move.propose", "gantry.home", "gantry.status"}
 
 
-class SessionProtocol:
-    """Idempotent command gate for a single authorized BLE client."""
-
-    def __init__(self, handler: Callable[[Message], Message]) -> None:
-        self.handler = handler
-        self.last_seq = 0
-        self._responses: dict[str, Message] = {}
-
-    def handle(self, raw: bytes | str) -> bytes:
-        try:
-            message = Message.decode(raw)
-            if message.request_id and message.request_id in self._responses:
-                return self._responses[message.request_id].encode()
-            if message.seq is not None and message.seq <= self.last_seq:
-                raise ProtocolError("out-of-order or duplicate sequence")
-            if message.seq is not None:
-                self.last_seq = message.seq
-            response = self.handler(message)
-            if message.request_id:
-                self._responses[message.request_id] = response
-            return response.encode()
-        except ProtocolError as exc:
-            return Message("error", payload={"reason": str(exc)}).encode()
+def envelope(message_type: str, device_id: str, **data: Any) -> dict[str, Any]:
+    return {"version": PROTOCOL_VERSION, "request_id": str(uuid.uuid4()), "type": message_type, "device_id": device_id, "data": data}
 
 
-def command(message_type: str, seq: int, **payload: Any) -> Message:
-    return Message(message_type, seq=seq, request_id=str(uuid4()), payload=payload)
+def encode_chunks(message: dict[str, Any]) -> list[bytes]:
+    raw = json.dumps(message, separators=(",", ":")).encode("utf-8")
+    if len(raw) <= MAX_CHUNK_BYTES:
+        return [raw]
+    pieces = [raw[offset:offset + CHUNK_PAYLOAD_BYTES] for offset in range(0, len(raw), CHUNK_PAYLOAD_BYTES)]
+    request_id = str(message.get("request_id") or uuid.uuid4())
+    device_id = str(message.get("device_id", ""))
+    return [json.dumps({"v": PROTOCOL_VERSION, "t": "chunk", "id": request_id, "d": device_id, "i": index, "n": len(pieces), "p": base64.b64encode(piece).decode("ascii")}, separators=(",", ":")).encode("utf-8") for index, piece in enumerate(pieces)]
+
+
+def decode_chunk(frame: bytes | str) -> tuple[str, int, int, bytes] | None:
+    try:
+        value = json.loads(frame.decode("utf-8") if isinstance(frame, bytes) else frame)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(value, dict) or value.get("t") != "chunk" or value.get("v") != PROTOCOL_VERSION:
+        return None
+    try:
+        return str(value["id"]), int(value["i"]), int(value["n"]), base64.b64decode(value["p"], validate=True)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Invalid RoboChess BLE chunk") from exc
+
+
+def decode_message(raw: bytes | str) -> dict[str, Any]:
+    message = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+    if not isinstance(message, dict) or message.get("version") != PROTOCOL_VERSION or not isinstance(message.get("data"), dict):
+        raise ValueError("Unsupported RoboChess BLE protocol")
+    return message
+
+
+def validate_game_message(message: dict[str, Any]) -> None:
+    if message.get("type") not in GAME_MESSAGE_TYPES:
+        raise ValueError("Unsupported game message")
+    data = message.get("data")
+    if not isinstance(data, dict):
+        raise ValueError("Game message data must be an object")
+    if message["type"] == "move.propose" and not isinstance(data.get("uci"), str):
+        raise ValueError("move.propose requires a UCI move")
+    if "client_seq" in data and (not isinstance(data["client_seq"], int) or data["client_seq"] < 0):
+        raise ValueError("client_seq must be a non-negative integer")

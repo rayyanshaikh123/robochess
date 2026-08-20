@@ -69,6 +69,18 @@ class DeviceStatusUpdateRequest(BaseModel):
     last_error: Optional[str] = Field(default=None, max_length=512)
 
 
+class BoardSessionSyncRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=128)
+    initial_fen: str = Field(min_length=1, max_length=256)
+    moves: list[str] = Field(default_factory=list, max_length=1000)
+    version: int = Field(ge=0)
+    state_hash: str = Field(min_length=16, max_length=128)
+    fen: Optional[str] = Field(default=None, max_length=256)
+    phase: Optional[str] = Field(default=None, max_length=64)
+    game_over: bool = False
+    result: Optional[str] = Field(default=None, max_length=32)
+
+
 class DeviceConnectRequest(BaseModel):
     device_id: str
     device_secret: str

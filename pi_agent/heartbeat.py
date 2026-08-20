@@ -36,9 +36,9 @@ class HeartbeatWorker:
                     if not self.device_secret:
                         raise RuntimeError("No device secret configured")
                     self.api.connect(self.device_id, self.device_secret)
-                    snapshot = self.session_snapshot() if self.session_snapshot else None
-                    if snapshot:
-                        self.api.sync_session(snapshot)
+                snapshot = self.session_snapshot() if self.session_snapshot else None
+                if snapshot:
+                    self.api.sync_session(snapshot)
                 self.api.heartbeat(self.device_id)
             except Exception:
                 # Token is refreshed on the next interval after a network loss.

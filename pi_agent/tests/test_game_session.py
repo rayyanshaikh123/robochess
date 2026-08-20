@@ -1,4 +1,5 @@
 import unittest
+import json
 from tempfile import TemporaryDirectory
 
 import chess
@@ -7,6 +8,8 @@ from pi_agent.game_session import GameSession, SessionError, SessionPhase
 from pi_agent.uno_controller import SimulatedTransport, UnoController, UnoError, motion_plan
 from pi_agent.session_store import SessionStore
 from pi_agent.ble_protocol import decode_chunk, encode_chunks
+from pi_agent.ble_protocol import decode_message, envelope
+from pi_agent.gatt_server import GattServer
 
 
 class GameSessionTests(unittest.TestCase):
@@ -70,6 +73,15 @@ class BleProtocolTests(unittest.TestCase):
         self.assertTrue(all(value is not None for value in decoded))
         payload = b"".join(value[3] for value in sorted(decoded, key=lambda value: value[1]))
         self.assertEqual(payload, __import__("json").dumps(message, separators=(",", ":")).encode())
+
+    def test_wifi_response_routes_to_f010_and_updates_status(self):
+        gatt = GattServer("board-001", on_wifi=lambda _: {"status": "wifi_connected", "ssid": "RoboNet"})
+        replies = gatt.handle_wifi(json.dumps(envelope("wifi.provision", "board-001", ssid="RoboNet", password="secret")).encode())
+        response = decode_message(replies[0])
+        self.assertEqual(response["type"], "wifi.result")
+        self.assertEqual(response["data"]["status"], "wifi_connected")
+        status = decode_message(gatt.status_payload())
+        self.assertEqual(status["data"]["status"], "wifi_connected")
 
 
 if __name__ == "__main__":

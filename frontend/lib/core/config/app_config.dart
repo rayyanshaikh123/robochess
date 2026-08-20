@@ -24,18 +24,23 @@ class AppConfig {
     defaultValue: '0000f00d-0000-1000-8000-00805f9b34fb',
   );
 
-  static const roboChessRxUuid = String.fromEnvironment(
-    'ROBOCHESS_RX_UUID',
+  static const roboChessDeviceInfoUuid = String.fromEnvironment(
+    'ROBOCHESS_DEVICE_INFO_UUID',
     defaultValue: '0000f00e-0000-1000-8000-00805f9b34fb',
   );
 
-  static const roboChessTxUuid = String.fromEnvironment(
-    'ROBOCHESS_TX_UUID',
+  static const roboChessControlUuid = String.fromEnvironment(
+    'ROBOCHESS_CONTROL_UUID',
     defaultValue: '0000f00f-0000-1000-8000-00805f9b34fb',
+  );
+
+  static const roboChessWifiUuid = String.fromEnvironment(
+    'ROBOCHESS_WIFI_UUID',
+    defaultValue: '0000f010-0000-1000-8000-00805f9b34fb',
   );
 
   static const roboChessStatusUuid = String.fromEnvironment(
     'ROBOCHESS_STATUS_UUID',
-    defaultValue: '0000f010-0000-1000-8000-00805f9b34fb',
+    defaultValue: '0000f011-0000-1000-8000-00805f9b34fb',
   );
 }

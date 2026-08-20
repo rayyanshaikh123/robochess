@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:math';
 
 class ProtocolException implements Exception {
   final String message;
@@ -8,70 +7,25 @@ class ProtocolException implements Exception {
   String toString() => 'ProtocolException: $message';
 }
 
+/// Canonical wire envelope used by the Pi GATT server.
 class RoboChessMessage {
-  static const supportedVersion = 1;
-  final int version;
+  static const supportedVersion = '1';
   final String type;
-  final int? seq;
-  final String? id;
-  final Map<String, dynamic> payload;
+  final String requestId;
+  final String deviceId;
+  final Map<String, dynamic> data;
 
-  const RoboChessMessage({
-    required this.version,
-    required this.type,
-    this.seq,
-    this.id,
-    this.payload = const {},
-  });
+  const RoboChessMessage({required this.type, required this.requestId, required this.deviceId, this.data = const {}});
 
   factory RoboChessMessage.fromJson(Map<String, dynamic> json) {
-    final version = json['version'];
-    final type = json['type'];
-    if (version is! int || type is! String || type.isEmpty) {
-      throw ProtocolException('Message requires integer version and type');
+    if (json['version']?.toString() != supportedVersion || json['type'] is! String || json['data'] is! Map) {
+      throw ProtocolException('Invalid RoboChess Pi envelope');
     }
-    if (version != supportedVersion) {
-      throw ProtocolException('Unsupported protocol version: $version');
-    }
-    final payload = Map<String, dynamic>.from(json);
-    payload.removeWhere((key, _) => {'version', 'type', 'seq', 'id'}.contains(key));
-    return RoboChessMessage(
-      version: version,
-      type: type,
-      seq: json['seq'] is int ? json['seq'] as int : null,
-      id: json['id']?.toString(),
-      payload: payload,
-    );
+    return RoboChessMessage(type: json['type'] as String, requestId: json['request_id']?.toString() ?? '', deviceId: json['device_id']?.toString() ?? '', data: Map<String, dynamic>.from(json['data'] as Map));
   }
 
-  Map<String, dynamic> toJson() => {
-        'version': version,
-        'type': type,
-        if (seq != null) 'seq': seq,
-        if (id != null) 'id': id,
-        ...payload,
-      };
-
+  Map<String, dynamic> toJson() => {'version': supportedVersion, 'request_id': requestId, 'type': type, 'device_id': deviceId, 'data': data};
   String encode() => jsonEncode(toJson());
-}
-
-class ProtocolCommand {
-  static final _random = Random();
-  final String type;
-  final int seq;
-  final String id;
-  final Map<String, dynamic> payload;
-
-  ProtocolCommand(this.type, this.seq, this.payload)
-      : id = '${DateTime.now().microsecondsSinceEpoch}-${_random.nextInt(1 << 20)}';
-
-  RoboChessMessage toMessage() => RoboChessMessage(
-        version: RoboChessMessage.supportedVersion,
-        type: type,
-        seq: seq,
-        id: id,
-        payload: payload,
-      );
 }
 
 class PiState {
@@ -79,48 +33,20 @@ class PiState {
   final String state;
   final String? fen;
   final String? sessionId;
-  final String? lastMove;
   final List<String> moveHistory;
-  final String? engineState;
-  final String? motionState;
   final String? recoveryReason;
+  final bool gameOver;
+  final String? result;
 
-  const PiState({
-    required this.version,
-    required this.state,
-    this.fen,
-    this.sessionId,
-    this.lastMove,
-    this.moveHistory = const [],
-    this.engineState,
-    this.motionState,
-    this.recoveryReason,
-  });
+  const PiState({required this.version, required this.state, this.fen, this.sessionId, this.moveHistory = const [], this.recoveryReason, this.gameOver = false, this.result});
+
+  String? get lastMove => moveHistory.isEmpty ? null : moveHistory.last;
 
   factory PiState.fromMessage(RoboChessMessage message) {
-    final p = message.payload;
-    return PiState(
-      version: (p['version_number'] as num?)?.toInt() ?? 0,
-      state: p['state']?.toString() ?? message.type,
-      fen: p['fen']?.toString(),
-      sessionId: p['session_id']?.toString(),
-      lastMove: p['last_move']?.toString(),
-      moveHistory: (p['move_history'] as List? ?? const []).map((e) => '$e').toList(),
-      engineState: p['engine_state']?.toString(),
-      motionState: p['motion_state']?.toString(),
-      recoveryReason: p['reason']?.toString(),
-    );
+    final nested = message.data['engine_state'] ?? message.data['state'];
+    final raw = nested is Map ? Map<String, dynamic>.from(nested) : message.data;
+    return PiState(version: (raw['version'] as num?)?.toInt() ?? 0, state: raw['phase']?.toString() ?? message.data['status']?.toString() ?? message.type, fen: raw['fen']?.toString(), sessionId: raw['session_id']?.toString(), moveHistory: (raw['moves'] as List? ?? const []).map((item) => '$item').toList(), recoveryReason: raw['last_error']?.toString(), gameOver: raw['game_over'] == true, result: raw['result']?.toString());
   }
 
-  Map<String, dynamic> toJson() => {
-        'version': version,
-        'state': state,
-        if (fen != null) 'fen': fen,
-        if (sessionId != null) 'session_id': sessionId,
-        if (lastMove != null) 'last_move': lastMove,
-        'move_history': moveHistory,
-        if (engineState != null) 'engine_state': engineState,
-        if (motionState != null) 'motion_state': motionState,
-        if (recoveryReason != null) 'reason': recoveryReason,
-      };
+  Map<String, dynamic> toJson() => {'version': version, 'state': state, if (fen != null) 'fen': fen, if (sessionId != null) 'session_id': sessionId, 'moves': moveHistory, if (recoveryReason != null) 'last_error': recoveryReason, 'game_over': gameOver, if (result != null) 'result': result};
 }

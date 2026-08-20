@@ -35,7 +35,11 @@ class RoboChessBleClient {
   BluetoothCharacteristic? _control;
   BluetoothCharacteristic? _wifi;
   BluetoothCharacteristic? _status;
+  StreamSubscription<List<int>>? _controlSubscription;
   StreamSubscription<List<int>>? _statusSubscription;
+  final _messages = StreamController<Map<String, dynamic>>.broadcast();
+  final Map<String, List<List<int>>> _chunks = {};
+  final Map<String, Timer> _chunkExpiry = {};
 
   Stream<List<ScanResult>> scan({Duration timeout = const Duration(seconds: 8)}) async* {
     if (await FlutterBluePlus.adapterState.first != BluetoothAdapterState.on) {
@@ -50,11 +54,8 @@ class RoboChessBleClient {
 
   Future<String> connectAndReadDeviceId(BluetoothDevice device) async {
     await device.connect(timeout: const Duration(seconds: 15), autoConnect: false);
-    try {
-      await device.createBond();
-    } catch (_) {
-      // Some Android devices bond automatically during the first secure write.
-    }
+    // iOS owns the pairing UI; Android also bonds automatically on the first
+    // authenticated write. Do not force a platform-specific bond dialog here.
     _device = device;
     final services = await device.discoverServices();
     final service = services.firstWhere(
@@ -69,16 +70,53 @@ class RoboChessBleClient {
     _control = find(controlUuid);
     _wifi = find(wifiUuid);
     _status = find(statusUuid);
+    if (_control!.properties.notify) {
+      await _control!.setNotifyValue(true);
+      _controlSubscription = _control!.onValueReceived.listen(_handleFrame);
+    }
     if (_status!.properties.notify) {
       await _status!.setNotifyValue(true);
+      _statusSubscription = _status!.onValueReceived.listen(_handleFrame);
     }
     final bytes = await info.read();
     return utf8.decode(bytes, allowMalformed: true);
   }
 
-  Stream<String> get statusStream => _status == null
-      ? const Stream.empty()
-      : _status!.lastValueStream.map((bytes) => utf8.decode(bytes, allowMalformed: true));
+  Stream<Map<String, dynamic>> get messages => _messages.stream;
+  Stream<String> get statusStream => messages.map(jsonEncode);
+
+  void _handleFrame(List<int> bytes) {
+    try {
+      final frame = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+      if (frame['t'] == 'chunk' && frame['v']?.toString() == bleProtocolVersion) {
+        final id = frame['id']?.toString();
+        final index = frame['i'];
+        final total = frame['n'];
+        final payload = frame['p'];
+        if (id == null || index is! int || total is! int || payload is! String || index < 0 || index >= total) return;
+        final chunks = _chunks.putIfAbsent(id, () => List<List<int>>.filled(total, const []));
+        _chunkExpiry.putIfAbsent(id, () => Timer(const Duration(seconds: 10), () {
+              _chunks.remove(id);
+              _chunkExpiry.remove(id);
+            }));
+        if (chunks.length != total) {
+          _chunks.remove(id);
+          _chunkExpiry.remove(id)?.cancel();
+          return;
+        }
+        chunks[index] = base64Decode(payload);
+        if (chunks.every((item) => item.isNotEmpty)) {
+          _chunks.remove(id);
+          _chunkExpiry.remove(id)?.cancel();
+          _messages.add(jsonDecode(utf8.decode(chunks.expand((item) => item).toList())) as Map<String, dynamic>);
+        }
+        return;
+      }
+      _messages.add(frame);
+    } catch (_) {
+      // Ignore malformed/partial notifications; caller can request state again.
+    }
+  }
 
   Future<void> sendOnboardingToken(String deviceId, String token) async {
     await _writeChunks(_control, {
@@ -100,21 +138,50 @@ class RoboChessBleClient {
     });
   }
 
+  Future<void> sendControl(Map<String, dynamic> value) => _writeChunks(_control, value);
+
   Future<void> _writeChunks(BluetoothCharacteristic? characteristic, Map<String, dynamic> value) async {
     if (characteristic == null) throw StateError('BLE characteristic is unavailable');
+    // BlueZ can expose the RoboChess secure-write characteristic as either
+    // WRITE or WRITE WITHOUT RESPONSE, depending on the Android Bluetooth
+    // stack.  Requesting a response unconditionally makes
+    // flutter_blue_plus reject the latter *before* the message reaches Pi.
+    final supportsWrite = characteristic.properties.write;
+    final supportsWriteWithoutResponse = characteristic.properties.writeWithoutResponse;
+    if (!supportsWrite && !supportsWriteWithoutResponse) {
+      throw StateError(
+        'BLE characteristic ${characteristic.uuid} is not writable. '
+        'Reconnect to the RoboChess board and try again.',
+      );
+    }
+    final withoutResponse = !supportsWrite && supportsWriteWithoutResponse;
     final bytes = utf8.encode(jsonEncode(value));
     for (var offset = 0; offset < bytes.length; offset += maxBleChunkBytes) {
       final end = math.min(offset + maxBleChunkBytes, bytes.length);
-      await characteristic.write(bytes.sublist(offset, end), withoutResponse: false);
+      await characteristic.write(
+        bytes.sublist(offset, end),
+        withoutResponse: withoutResponse,
+      );
     }
   }
 
   Future<void> disconnect() async {
+    await _controlSubscription?.cancel();
     await _statusSubscription?.cancel();
     await _device?.disconnect();
     _device = null;
     _control = null;
     _wifi = null;
     _status = null;
+  }
+
+  Future<void> dispose() async {
+    await disconnect();
+    for (final timer in _chunkExpiry.values) {
+      timer.cancel();
+    }
+    _chunkExpiry.clear();
+    _chunks.clear();
+    await _messages.close();
   }
 }

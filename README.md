@@ -1,5 +1,13 @@
 # RoboChess
 
+## Physical board / Pi agent
+
+The Raspberry Pi agent lives in [`pi_agent/`](pi_agent/README.md). It runs a
+local Stockfish game and exposes the board over BLE; the Flutter application
+must run on a physical Android or iPhone device near the Pi for BLE testing.
+The Pi remains the authority for offline moves and synchronizes dedicated board
+sessions when it reconnects to the backend.
+
 RoboChess is a connected chess platform that combines a Flutter mobile application, a FastAPI backend, computer vision, Stockfish analysis, and an optional Raspberry Pi edge agent. Players can play games, solve puzzles, analyze positions, use voice commands, and connect the app to a physical chessboard.
 
 ## Features

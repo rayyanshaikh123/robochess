@@ -88,6 +88,8 @@ class _SessionView extends ConsumerWidget {
         Text('Version: ${pi.version}'),
         if (pi.lastMove != null) Text('Last move: ${pi.lastMove}'),
         const SizedBox(height: 12),
+        if (state.connection == LocalConnectionState.recovering)
+          const Text('Physical board recovery is required. Reset or resume only after confirming the board position.'),
         MoveProposal(onSubmit: (move) => ref.read(localBoardProvider.notifier).proposeMove(move)),
         const SizedBox(height: 12),
         OutlinedButton(onPressed: () => ref.read(localBoardProvider.notifier).reset(), child: const Text('RESET SESSION')),

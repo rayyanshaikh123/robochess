@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 
 from backend.api.schemas import (
     ApiResponse,
+    BoardSessionSyncRequest,
     DeviceBleLinkRequest,
     DeviceClaimRequest,
     DeviceConnectRequest,
@@ -10,6 +11,7 @@ from backend.api.schemas import (
     DeviceRegisterRequest,
     DeviceStatusUpdateRequest,
 )
+from backend.services.board_session_service import sync_board_session
 from backend.core.dependencies import get_current_device_id, get_current_user_id, rate_limit
 from backend.db.client import get_db
 from backend.services.device_service import (
@@ -101,6 +103,18 @@ async def update_status(
     if err:
         return error(err)
     return ok("Device status updated", data)
+
+
+@router.post("/session/sync", response_model=ApiResponse)
+async def sync_session(
+    payload: BoardSessionSyncRequest,
+    db=Depends(get_db),
+    device_id: str = Depends(get_current_device_id),
+) -> ApiResponse:
+    data, err = await sync_board_session(db, device_id, payload.model_dump())
+    if err:
+        return error(err)
+    return ok("Board session synchronized", data)
 
 
 @router.post("/ble/link", response_model=ApiResponse)

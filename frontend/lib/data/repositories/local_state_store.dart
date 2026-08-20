@@ -20,11 +20,10 @@ class LocalStateStore {
       state: data['state']?.toString() ?? 'unknown',
       fen: data['fen']?.toString(),
       sessionId: data['session_id']?.toString(),
-      lastMove: data['last_move']?.toString(),
-      moveHistory: (data['move_history'] as List? ?? const []).map((e) => '$e').toList(),
-      engineState: data['engine_state']?.toString(),
-      motionState: data['motion_state']?.toString(),
-      recoveryReason: data['reason']?.toString(),
+      moveHistory: (data['moves'] as List? ?? const []).map((e) => '$e').toList(),
+      recoveryReason: data['last_error']?.toString(),
+      gameOver: data['game_over'] == true,
+      result: data['result']?.toString(),
     );
   }
 }

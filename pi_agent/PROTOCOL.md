@@ -22,3 +22,8 @@ Before accepting a game, the Flutter/iPhone app must send `gantry.home`; the Uno
 ## Backend reconciliation endpoint
 
 Implement `POST /device/session/sync` authenticated as the Pi device. Request is the local snapshot: `session_id`, `initial_fen`, `moves`, `version`, and `state_hash`. The backend deduplicates identical session/hash uploads. On a mismatch it persists a conflict record and returns it; it must never replace Pi history or silently merge moves.
+
+The integrated backend now stores these records separately from online `games`.
+An incoming history that extends the stored move prefix updates the board
+session; divergent histories create a conflict record and leave the existing
+session untouched.

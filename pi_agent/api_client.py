@@ -50,26 +50,6 @@ class DeviceApiClient:
         response.raise_for_status()
         return response.json().get("data", {})
 
-    def request_ble_token(self) -> dict[str, Any]:
-        headers = self._auth_headers()
-        response = requests.post(
-            f"{self.base_url}/device/ble/token",
-            headers=headers,
-            timeout=10,
-        )
-        response.raise_for_status()
-        return response.json().get("data", {})
-
-    def submit_move(self, game_id: str, uci: str, expected_version: Optional[int]) -> dict:
-        payload = {"game_id": game_id, "uci": uci, "expected_version": expected_version}
-        response = requests.post(
-            f"{self.base_url}/game/move",
-            json=payload,
-            timeout=10,
-        )
-        response.raise_for_status()
-        return response.json().get("data", {})
-
     def sync_session(self, session: dict) -> dict[str, Any]:
         """Upload the Pi-authoritative session history when backend access returns.
 

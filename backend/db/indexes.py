@@ -1,6 +1,6 @@
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from backend.db.collections import DEVICES, GAMES, MOVES, PUZZLE_ATTEMPTS, REFRESH_TOKENS, USERS
+from backend.db.collections import BOARD_SESSION_CONFLICTS, BOARD_SESSIONS, DEVICES, GAMES, MOVES, PUZZLE_ATTEMPTS, REFRESH_TOKENS, USERS
 from backend.db.collections import PUZZLES
 
 
@@ -22,3 +22,6 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await db[PUZZLE_ATTEMPTS].create_index("user_id")
     await db[PUZZLE_ATTEMPTS].create_index("puzzle_id")
     await db[PUZZLE_ATTEMPTS].create_index("created_at")
+    await db[BOARD_SESSIONS].create_index([("device_id", 1), ("session_id", 1)], unique=True)
+    await db[BOARD_SESSIONS].create_index("updated_at")
+    await db[BOARD_SESSION_CONFLICTS].create_index([("device_id", 1), ("session_id", 1), ("created_at", -1)])

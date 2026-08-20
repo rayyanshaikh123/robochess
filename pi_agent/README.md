@@ -1,5 +1,25 @@
 # RoboChess Pi Agent
 
+This directory is the single Pi-agent implementation for the RoboChess
+repository. It runs Stockfish and the Pi-authoritative game session offline,
+then optionally claims, heartbeats, and synchronizes board sessions to the
+backend when network access returns.
+
+## BLE contract
+
+One BlueZ GATT service supports both onboarding and local gameplay:
+
+| UUID suffix | Role |
+| --- | --- |
+| `F00E` | Read the full board/device ID. |
+| `F00F` | Authenticated control: onboarding token and game commands. |
+| `F010` | Authenticated Wi-Fi provisioning request/response. |
+| `F011` | Read/notify board and provisioning status. |
+
+The short advertised name is only a discovery label (for example `RC-001`).
+Flutter must scan for the service UUID and use F00E as the authoritative ID.
+Use the JSON envelope and long-message chunk framing in [PROTOCOL.md](PROTOCOL.md).
+
 The Pi agent is the controller for a RoboChess board. It runs Stockfish locally
 without internet, maintains chess state, receives game commands over BLE, and
 sends motion plans to an Arduino Uno gantry controller.
