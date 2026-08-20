@@ -15,6 +15,7 @@ import 'presentation/screens/profile_settings.dart';
 import 'presentation/screens/login_screen.dart';
 import 'presentation/screens/register_screen.dart';
 import 'presentation/screens/board_link_screen.dart';
+import 'presentation/screens/ble_provision_screen.dart';
 import 'presentation/screens/board_details_screen.dart';
 import 'presentation/providers/session_provider.dart';
 import 'domain/models/puzzle_model.dart';
@@ -107,6 +108,10 @@ GoRouter _buildRouter(WidgetRef ref) {
               GoRoute(
                 path: '/connect/link',
                 builder: (context, state) => const BoardLinkScreen(),
+              ),
+              GoRoute(
+                path: '/connect/ble',
+                builder: (context, state) => const BleProvisionScreen(),
               ),
               GoRoute(
                 path: '/connect/board/:deviceId',

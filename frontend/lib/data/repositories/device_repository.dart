@@ -17,6 +17,11 @@ class DeviceRepository {
   Future<DeviceModel> link({required String pairingCode}) =>
       _remote.link(pairingCode: pairingCode);
 
+  Future<String> onboardingToken({required String deviceId}) =>
+      _remote.onboardingToken(deviceId: deviceId);
+
+  Future<void> bleLink({required String token}) => _remote.bleLink(token: token);
+
   Future<DeviceModel> status(String deviceId) => _remote.status(deviceId);
 
   Future<List<DeviceModel>> list() => _remote.list();

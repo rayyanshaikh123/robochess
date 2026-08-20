@@ -1,0 +1,23 @@
+[Unit]
+Description=RoboChess Raspberry Pi Agent
+After=NetworkManager.service bluetooth.service
+Wants=NetworkManager.service bluetooth.service
+
+[Service]
+Type=simple
+User=robochess
+Group=robochess
+SupplementaryGroups=dialout bluetooth
+WorkingDirectory=/opt/robochess
+EnvironmentFile=/etc/robochess/pi-agent.env
+Environment=ROBOCHESS_SESSION_FILE=/var/lib/robochess/session.json
+ExecStart=/opt/robochess/.venv/bin/python -m pi_agent.main
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ReadWritePaths=/var/lib/robochess
+
+[Install]
+WantedBy=multi-user.target

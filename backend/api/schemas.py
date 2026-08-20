@@ -52,6 +52,23 @@ class DeviceBleLinkRequest(BaseModel):
     token: str = Field(min_length=8, max_length=64)
 
 
+class DeviceOnboardingRequest(BaseModel):
+    device_id: str = Field(min_length=1, max_length=128)
+
+
+class DeviceClaimRequest(BaseModel):
+    onboarding_token: str = Field(min_length=16, max_length=256)
+
+
+class DeviceStatusUpdateRequest(BaseModel):
+    status: str = Field(min_length=1, max_length=32)
+    wifi_status: Optional[str] = Field(default=None, max_length=32)
+    backend_status: Optional[str] = Field(default=None, max_length=32)
+    firmware_version: Optional[str] = Field(default=None, max_length=64)
+    protocol_version: Optional[str] = Field(default=None, max_length=32)
+    last_error: Optional[str] = Field(default=None, max_length=512)
+
+
 class DeviceConnectRequest(BaseModel):
     device_id: str
     device_secret: str

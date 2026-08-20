@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'token_store.dart';
+
 class GameSocketClient {
   final String wsBaseUrl;
   WebSocketChannel? _channel;
@@ -51,12 +53,13 @@ class GameSocketClient {
 
 class DeviceSocketClient {
   final String wsBaseUrl;
+  final TokenStore tokenStore;
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
   final StreamController<Map<String, dynamic>> _controller =
       StreamController<Map<String, dynamic>>.broadcast();
 
-  DeviceSocketClient({required this.wsBaseUrl});
+  DeviceSocketClient({required this.wsBaseUrl, required this.tokenStore});
 
   Stream<Map<String, dynamic>> get stream => _controller.stream;
 
@@ -64,7 +67,11 @@ class DeviceSocketClient {
     await _subscription?.cancel();
     await _channel?.sink.close();
 
-    _channel = WebSocketChannel.connect(Uri.parse(wsBaseUrl));
+    final session = await tokenStore.loadSession();
+    final uri = Uri.parse(wsBaseUrl).replace(queryParameters: {
+      if (session != null) 'access_token': session.accessToken,
+    });
+    _channel = WebSocketChannel.connect(uri);
     _subscription = _channel!.stream.listen((event) {
       final data = jsonDecode(event as String) as Map<String, dynamic>;
       _controller.add(data);

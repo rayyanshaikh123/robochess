@@ -19,10 +19,17 @@ from backend.repositories.device_repo import (
     unlink_by_user,
     update_status,
     update_ble_pair_token,
+    consume_onboarding_token,
+    save_onboarding_token,
+    update_device_metadata,
 )
 from backend.realtime.manager import manager as ws_manager
 
 _LOCAL_HARDWARE_ID = "local"
+DEVICE_STATES = {
+    "unpaired", "ble_connected", "provisioning_wifi", "wifi_connecting",
+    "wifi_connected", "server_connecting", "online", "offline", "error",
+}
 
 
 def _generate_pairing_code(length: int = 6) -> str:
@@ -140,6 +147,78 @@ async def create_ble_pair_token(
     }, None
 
 
+async def create_onboarding_token(
+    db: AsyncIOMotorDatabase, user_id: str, device_id: str
+) -> tuple[Optional[dict], Optional[str]]:
+    device = await get_by_device_id(db, device_id)
+    if not device:
+        return None, "Device not found"
+    current_user_id = device.get("user_id")
+    if current_user_id and str(current_user_id) != user_id:
+        return None, "Device already linked"
+
+    settings = load_settings()
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.ble_pair_token_minutes
+    )
+    # Store only a bcrypt hash. The plaintext is returned once to the app.
+    await save_onboarding_token(
+        db, device_id, hash_password(token), expires_at, user_id
+    )
+    return {
+        "device_id": device_id,
+        "onboarding_token": token,
+        "expires_at": expires_at,
+    }, None
+
+
+async def claim_device(
+    db: AsyncIOMotorDatabase, device_id: str, onboarding_token: str
+) -> tuple[Optional[dict], Optional[str]]:
+    device = await get_by_device_id(db, device_id)
+    if not device:
+        return None, "Device not found"
+    token_hash = device.get("onboarding_token_hash")
+    expires_at = device.get("onboarding_token_expires_at")
+    if not token_hash or not expires_at or expires_at <= datetime.now(timezone.utc):
+        return None, "Onboarding token expired"
+    if not verify_password(onboarding_token, token_hash):
+        return None, "Invalid onboarding token"
+    onboarding_user_id = device.get("onboarding_user_id")
+    if not onboarding_user_id:
+        return None, "Onboarding token is not bound to a user"
+    current_user_id = device.get("user_id")
+    if current_user_id and str(current_user_id) != str(onboarding_user_id):
+        return None, "Device already linked"
+    consumed = await consume_onboarding_token(db, device_id, token_hash)
+    if not consumed:
+        return None, "Onboarding token already used"
+    await link_user(db, device_id, str(onboarding_user_id))
+    await update_device_metadata(db, device_id, {
+        "status": "online",
+        "backend_status": "connected",
+    })
+    return {"device_id": device_id, "status": "online"}, None
+
+
+async def update_device_status(
+    db: AsyncIOMotorDatabase, device_id: str, payload: dict
+) -> tuple[Optional[dict], Optional[str]]:
+    status = payload.get("status")
+    if status not in DEVICE_STATES:
+        return None, "Invalid device status"
+    updates = {"status": status}
+    for key in (
+        "wifi_status", "backend_status", "firmware_version",
+        "protocol_version", "last_error",
+    ):
+        if payload.get(key) is not None:
+            updates[key] = payload[key]
+    await update_device_metadata(db, device_id, updates)
+    return {"device_id": device_id, **updates}, None
+
+
 async def disconnect_device(db: AsyncIOMotorDatabase, device_id: str) -> None:
     await update_status(db, device_id, "disconnected")
     await ws_manager.send_to_game(
@@ -228,13 +307,19 @@ async def get_device_status(
         return None, "Device not found"
 
     stored_user_id = device.get("user_id")
-    if stored_user_id and str(stored_user_id) != user_id:
+    if not stored_user_id or str(stored_user_id) != user_id:
         return None, "Forbidden"
 
     return {
         "device_id": device_id,
         "status": device.get("status", "unknown"),
         "last_seen": device.get("last_seen"),
+        "wifi_status": device.get("wifi_status", "unknown"),
+        "backend_status": device.get("backend_status", "unknown"),
+        "firmware_version": device.get("firmware_version"),
+        "protocol_version": device.get("protocol_version"),
+        "last_error": device.get("last_error"),
+        "provisioned_at": device.get("provisioned_at"),
     }, None
 
 
@@ -245,6 +330,9 @@ async def list_devices(db: AsyncIOMotorDatabase, user_id: str) -> list[dict]:
             "device_id": device.get("device_id"),
             "status": device.get("status", "unknown"),
             "last_seen": device.get("last_seen"),
+            "wifi_status": device.get("wifi_status", "unknown"),
+            "backend_status": device.get("backend_status", "unknown"),
+            "last_error": device.get("last_error"),
         }
         for device in devices
     ]

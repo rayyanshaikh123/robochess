@@ -1,1 +1,3 @@
 requests
+python-chess>=1.999
+pyserial>=3.5

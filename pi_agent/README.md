@@ -1,36 +1,191 @@
-# Pi Agent
+# RoboChess Pi Agent
 
-Edge client that runs on each Raspberry Pi. It connects the board detection pipeline to the backend API.
+The Pi agent is the controller for a RoboChess board. It runs Stockfish locally
+without internet, maintains chess state, receives game commands over BLE, and
+sends motion plans to an Arduino Uno gantry controller.
 
-## Setup
+## What works today
 
-1. Create a `.env` with:
+- Offline terminal chess against Stockfish.
+- Native Stockfish build from the included `stockfish.zip` source archive.
+- Local FEN, UCI history, versioning, legal-move validation, reset, game-over,
+  and recovery state.
+- BLE game-command protocol and optional BlueZ GATT server.
+- Acknowledged JSON-lines Uno protocol with a default simulator.
+- A camera seam that accepts only stable, legal candidate moves.
 
+The OpenCV piece-detection model and Flutter/backend implementations are not
+included yet. Their required interface is in [PROTOCOL.md](PROTOCOL.md).
+
+## Fast start: offline Stockfish
+
+Run on the Pi from the repository root:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential unzip python3-venv python3-full
+
+chmod +x pi_agent/install_stockfish.sh
+./pi_agent/install_stockfish.sh
+
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r pi_agent/requirements.txt
+
+ROBOCHESS_STOCKFISH_PATH=/usr/local/bin/stockfish \
+  python -m pi_agent.terminal_game
 ```
-ROBOCHESS_API_BASE=http://<backend-ip>:8000
-ROBOCHESS_WS_BASE=ws://<backend-ip>:8000/ws
-ROBOCHESS_DEVICE_ID=<device_id>
-ROBOCHESS_DEVICE_SECRET=<device_secret>
-ROBOCHESS_HEARTBEAT_SECONDS=10
-ROBOCHESS_BLE_ENABLED=0
-ROBOCHESS_BLE_ADVERTISE_MODE=bluez
-ROBOCHESS_BLE_SERVICE_UUID=0000f00d-0000-1000-8000-00805f9b34fb
-ROBOCHESS_BLE_TOKEN_REFRESH_SECONDS=120
+
+The installer uses `pi_agent/stockfish.zip`, clean-rebuilds it for the Pi, and
+installs the verified engine at `/usr/local/bin/stockfish`. It ignores the
+macOS object files stored in the archive.
+
+You play White. Enter SAN (`e4`, `Nf3`, `O-O`) or UCI (`e2e4`) moves. Use
+`reset` to restart and `quit` to exit.
+
+## Configuration
+
+Create a local configuration file:
+
+```bash
+cp pi_agent/.env.example pi_agent/.env
+chmod 600 pi_agent/.env
 ```
 
-2. Run the agent:
+This repository's local config enables offline BLE with
+`ROBOCHESS_DEVICE_ID=robochess-pi-001`. Its short advertised name is `RC-001`;
+the app should filter by the RoboChess service UUID and read the full board ID
+from the Device Info characteristic. Change both IDs before adding a second
+board.
 
-```
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `ROBOCHESS_STOCKFISH_PATH` | Stockfish executable | `stockfish` |
+| `ROBOCHESS_ENGINE_TIME` | Think time in seconds | `0.50` |
+| `ROBOCHESS_ENGINE_SKILL_LEVEL` | Engine strength, 0–20 | `10` |
+| `ROBOCHESS_BLE_ENABLED` | Start BLE GATT server | `0` |
+| `ROBOCHESS_BLE_ADAPTER` | Optional Bluetooth MAC address | auto-detected |
+| `ROBOCHESS_BLE_NAME` | Short advertised BLE name | `RC-<last 3 ID chars>` |
+| `ROBOCHESS_UNO_SIMULATOR` | Use fake Uno acknowledgements | `1` |
+| `ROBOCHESS_UNO_PORT` | Arduino USB device | `/dev/ttyACM0` |
+| `ROBOCHESS_UNO_BAUDRATE` | Arduino serial speed | `115200` |
+| `ROBOCHESS_API_BASE` | Optional backend API | `http://localhost:8000` |
+| `ROBOCHESS_DEVICE_ID` / `ROBOCHESS_DEVICE_SECRET` | Device credentials | required for full agent |
+
+Always install Python packages inside `.venv`. Do not use `sudo pip` or
+`--break-system-packages`.
+
+## Run the board agent
+
+The agent needs a stable board ID. A device secret is optional: without one it
+runs locally over BLE; with one it also performs backend pairing, heartbeats,
+and session sync. With the virtual environment active:
+
+```bash
 python -m pi_agent.main
 ```
 
-## Integrate detection
+`pi_agent/.env` is loaded automatically for direct runs; systemd uses its
+separate `/etc/robochess/pi-agent.env` file instead.
 
-Edit `vision_adapter.py` to call your existing detection code and return `(uci_move, expected_version)`.
+The agent starts BLE/board control even when the backend is down. It reconnects
+and uploads the Pi-authoritative session snapshot when the network returns.
+Until the camera is available, every game starts from the standard position and
+requires manual physical-board confirmation from the app.
 
-## BLE Notes
+## BLE setup (optional)
 
-- Set `ROBOCHESS_BLE_ENABLED=1` on Raspberry Pi to advertise a BLE token for pairing.
-- The agent requests a short-lived token from `/device/ble/token` and advertises it.
-- `ROBOCHESS_BLE_ADVERTISE_MODE=bluez` uses `bluetoothctl` for advertising.
-- For PC/dev mode, keep using pairing codes instead of BLE.
+BLE is optional because `bluezero` requires native GTK/GLib dependencies. Only
+install it when `ROBOCHESS_BLE_ENABLED=1`:
+
+```bash
+sudo apt install -y python3-gi gir1.2-glib-2.0 libcairo2-dev pkg-config cmake
+source .venv/bin/activate
+python -m pip install --no-deps bluezero==0.9.1
+```
+
+The current virtualenv has been enabled to see the Debian `python3-gi` package.
+For a fresh install, create it with `python3 -m venv --system-site-packages .venv`.
+
+Pair the Flutter phone using encrypted bonding before issuing game commands.
+Control writes require authenticated encryption. [PROTOCOL.md](PROTOCOL.md)
+defines message formats, sequencing, state responses, and backend sync.
+
+## Arduino Uno / gantry
+
+Begin with the simulator:
+
+```dotenv
+ROBOCHESS_UNO_SIMULATOR=1
+```
+
+For a physical Uno, find the USB serial device:
+
+```bash
+ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null
+```
+
+Then configure, for example:
+
+```dotenv
+ROBOCHESS_UNO_SIMULATOR=0
+ROBOCHESS_UNO_PORT=/dev/ttyACM0
+ROBOCHESS_UNO_BAUDRATE=115200
+```
+
+The Uno must acknowledge every JSON-lines motion request defined in
+[PROTOCOL.md](PROTOCOL.md). The Pi handles normal moves, captures, castling,
+en passant, and promotion. A missing acknowledgement stops play in recovery;
+the chess state is not advanced.
+
+Before the app begins a physical game it must call `gantry.home`, then
+`gantry.status`. Your Uno firmware must implement limit-switch homing and
+return its `homed`, `limits`, `fault`, and `calibration_revision` fields in
+the acknowledgement. The Pi deliberately does not guess motor steps, board
+orientation, electromagnet timing, or capture-bin coordinates—those are
+hardware-specific firmware calibration values.
+
+## Camera integration
+
+When the model is ready, send its UCI candidates to
+`VisionAdapter.observe_candidates()`. It only emits a move when exactly one
+legal candidate stays stable for consecutive frames. Ambiguous observations
+must use the app recovery/reset flow.
+
+## Run as a service
+
+For an unattended board, install the project in `/opt/robochess`, create a
+`robochess` service account, and keep credentials out of the repository:
+
+```bash
+sudo install -d /etc/robochess /var/lib/robochess
+sudo install -m 600 pi_agent/.env.example /etc/robochess/pi-agent.env
+sudo install -m 644 pi_agent/systemd/robochess-pi.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now robochess-pi
+```
+
+The service account needs `dialout` and `bluetooth` access. Confirm the
+`WorkingDirectory` and virtualenv path in `systemd/robochess-pi.service` match
+your `/opt/robochess` deployment.
+
+Diagnostics:
+
+```bash
+systemctl status robochess-pi
+journalctl -u robochess-pi -f
+nmcli device status
+/usr/local/bin/stockfish bench 16 1 1 default depth
+python -m pi_agent.diagnostics
+```
+
+## Troubleshooting
+
+| Problem | Fix |
+| --- | --- |
+| `No module named chess` | Activate `.venv`, then run `python -m pip install -r pi_agent/requirements.txt`. |
+| `externally-managed-environment` | You used system Python. Create/activate `.venv`; do not install system-wide. |
+| BLE fails on Cairo/PyGObject | Install the BLE system packages, then use `requirements-ble.txt`. |
+| `stockfish` not found | Run `./pi_agent/install_stockfish.sh` or set `ROBOCHESS_STOCKFISH_PATH`. |
+| Uno serial port fails | Check port/cable and `dialout` membership; use the simulator first. |

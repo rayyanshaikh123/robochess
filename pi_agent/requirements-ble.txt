@@ -1,0 +1,5 @@
+# Optional: needed only when ROBOCHESS_BLE_ENABLED=1 on a BlueZ Pi.
+# On Raspberry Pi OS, use a venv created with --system-site-packages so its
+# Debian python3-gi binding is visible, then install this file with --no-deps.
+-r requirements.txt
+bluezero>=0.8.0

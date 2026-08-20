@@ -157,6 +157,15 @@ class _BoardLinkScreenState extends ConsumerState<BoardLinkScreen> {
             Text('Local test board code: 000000',
                 style:
                     GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant)),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _submitting ? null : () => context.push('/connect/ble'),
+                icon: const Icon(Icons.bluetooth_searching),
+                label: const Text('SCAN AND SET UP OVER BLUETOOTH'),
+              ),
+            ),
             const SizedBox(height: 24),
             Container(
               padding: const EdgeInsets.all(20),

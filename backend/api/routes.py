@@ -18,7 +18,10 @@ from backend.api.schemas import (
     MoveAiRequest,
 )
 from backend.core.game_manager import GameManager
+from backend.core.config import load_settings
+from backend.core.security import decode_token
 from backend.db.client import get_db
+from backend.repositories.device_repo import get_by_device_id
 from backend.services.calibration_service import validate_initial_board
 from backend.services.detection_service import (
     detect_board_state,
@@ -1779,6 +1782,15 @@ async def game_reset(db=Depends(get_db)) -> ApiResponse:
 @router.websocket("/ws")
 async def ws_state(websocket: WebSocket, db=Depends(get_db)) -> None:
     await websocket.accept()
+    ws_user_id = None
+    access_token = websocket.query_params.get("access_token")
+    if access_token:
+        try:
+            token_data = decode_token(access_token, load_settings())
+            if token_data.get("type") == "access":
+                ws_user_id = token_data.get("sub")
+        except Exception:
+            ws_user_id = None
     current_game_id: str | None = None
     device_rooms: set[str] = set()
     try:
@@ -1873,14 +1885,25 @@ async def ws_state(websocket: WebSocket, db=Depends(get_db)) -> None:
                         {"type": "error", "message": "device_ids must be a list"}
                     )
                     continue
+                if not ws_user_id:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Authenticated access_token required for device subscriptions",
+                    })
+                    continue
+                authorized_ids = []
                 for device_id in device_ids:
                     if not isinstance(device_id, str) or not device_id:
+                        continue
+                    device = await get_by_device_id(db, device_id)
+                    if not device or str(device.get("user_id")) != str(ws_user_id):
                         continue
                     room = f"device:{device_id}"
                     if room not in device_rooms:
                         device_rooms.add(room)
                         await ws_manager.connect(room, websocket)
-                await websocket.send_json({"type": "device.subscribed", "data": device_ids})
+                    authorized_ids.append(device_id)
+                await websocket.send_json({"type": "device.subscribed", "data": authorized_ids})
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
             else:

@@ -1,14 +1,20 @@
 import threading
 import time
+from collections.abc import Callable
 
 from pi_agent.api_client import DeviceApiClient
 
 
 class HeartbeatWorker:
-    def __init__(self, api: DeviceApiClient, device_id: str, interval: int) -> None:
+    def __init__(
+        self, api: DeviceApiClient, device_id: str, interval: int,
+        device_secret: str | None = None, session_snapshot: Callable[[], dict | None] | None = None,
+    ) -> None:
         self.api = api
         self.device_id = device_id
         self.interval = max(5, int(interval))
+        self.device_secret = device_secret
+        self.session_snapshot = session_snapshot
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
@@ -26,7 +32,15 @@ class HeartbeatWorker:
     def _run(self) -> None:
         while not self._stop.is_set():
             try:
+                if not self.api.device_token:
+                    if not self.device_secret:
+                        raise RuntimeError("No device secret configured")
+                    self.api.connect(self.device_id, self.device_secret)
+                    snapshot = self.session_snapshot() if self.session_snapshot else None
+                    if snapshot:
+                        self.api.sync_session(snapshot)
                 self.api.heartbeat(self.device_id)
             except Exception:
-                pass
+                # Token is refreshed on the next interval after a network loss.
+                self.api.device_token = None
             time.sleep(self.interval)

@@ -10,7 +10,10 @@ import '../../core/network/ws_client.dart';
 import 'session_provider.dart';
 
 final deviceSocketProvider = Provider<DeviceSocketClient>((ref) {
-  return DeviceSocketClient(wsBaseUrl: AppConfig.wsBaseUrl);
+  return DeviceSocketClient(
+    wsBaseUrl: AppConfig.wsBaseUrl,
+    tokenStore: ref.read(tokenStoreProvider),
+  );
 });
 
 final deviceListProvider =

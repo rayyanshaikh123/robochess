@@ -3,15 +3,20 @@ from fastapi import APIRouter, Depends
 from backend.api.schemas import (
     ApiResponse,
     DeviceBleLinkRequest,
+    DeviceClaimRequest,
     DeviceConnectRequest,
     DeviceLinkRequest,
+    DeviceOnboardingRequest,
     DeviceRegisterRequest,
+    DeviceStatusUpdateRequest,
 )
 from backend.core.dependencies import get_current_device_id, get_current_user_id, rate_limit
 from backend.db.client import get_db
 from backend.services.device_service import (
     connect_device,
     create_ble_pair_token,
+    create_onboarding_token,
+    claim_device,
     disconnect_device,
     get_device_status,
     heartbeat_device,
@@ -20,6 +25,7 @@ from backend.services.device_service import (
     list_devices,
     register_device,
     unlink_device,
+    update_device_status,
 )
 from backend.utils.helpers import error, ok
 
@@ -59,6 +65,42 @@ async def ble_token(
     if err:
         return error(err)
     return ok("BLE token issued", data)
+
+
+@router.post("/onboarding-token", response_model=ApiResponse)
+async def onboarding_token(
+    payload: DeviceOnboardingRequest,
+    db=Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+) -> ApiResponse:
+    data, err = await create_onboarding_token(db, user_id, payload.device_id)
+    if err:
+        return error(err)
+    return ok("Onboarding token issued", data)
+
+
+@router.post("/claim", response_model=ApiResponse)
+async def claim(
+    payload: DeviceClaimRequest,
+    db=Depends(get_db),
+    device_id: str = Depends(get_current_device_id),
+) -> ApiResponse:
+    data, err = await claim_device(db, device_id, payload.onboarding_token)
+    if err:
+        return error(err)
+    return ok("Device claimed", data)
+
+
+@router.post("/status", response_model=ApiResponse)
+async def update_status(
+    payload: DeviceStatusUpdateRequest,
+    db=Depends(get_db),
+    device_id: str = Depends(get_current_device_id),
+) -> ApiResponse:
+    data, err = await update_device_status(db, device_id, payload.model_dump())
+    if err:
+        return error(err)
+    return ok("Device status updated", data)
 
 
 @router.post("/ble/link", response_model=ApiResponse)

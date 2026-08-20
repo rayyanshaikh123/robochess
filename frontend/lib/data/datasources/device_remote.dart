@@ -29,6 +29,18 @@ class DeviceRemoteDataSource {
     return DeviceModel.fromJson(data);
   }
 
+  Future<String> onboardingToken({required String deviceId}) async {
+    final data = await _client.postJson('/device/onboarding-token', body: {
+      'device_id': deviceId,
+    });
+    return data['onboarding_token']?.toString() ??
+        (throw Exception('Backend did not return an onboarding token'));
+  }
+
+  Future<void> bleLink({required String token}) async {
+    await _client.postJson('/device/ble/link', body: {'token': token});
+  }
+
   Future<DeviceModel> status(String deviceId) async {
     final data = await _client.getJson('/device/status/$deviceId');
     return DeviceModel.fromJson(data);
