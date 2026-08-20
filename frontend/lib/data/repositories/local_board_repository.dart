@@ -54,4 +54,11 @@ class LocalBoardRepository {
   Future<void> homeGantry() => send('gantry.home');
   Future<void> gantryStatus() => send('gantry.status');
   Future<void> proposeMove(String move, int expectedVersion) => send('move.propose', {'uci': move, 'expected_version': expectedVersion});
+  Future<void> provisionWifi(String ssid, String password) async {
+    final id = _deviceId;
+    if (id == null) throw StateError('Connect to a board before provisioning Wi-Fi');
+    await ble.sendWifi(id, ssid, password);
+  }
+  Future<void> saveCameraCalibration({required int cameraIndex, required int rotation, required String boardOrientation}) =>
+      send('camera.calibrate', {'camera_index': cameraIndex, 'rotation': rotation, 'board_orientation': boardOrientation});
 }

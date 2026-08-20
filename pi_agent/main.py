@@ -8,6 +8,7 @@ from pi_agent.config import (
     BLE_ENABLED,
     BLE_ADAPTER,
     BLE_NAME,
+    BLE_REQUIRE_BOND,
     DEVICE_ID,
     DEVICE_SECRET,
     HEARTBEAT_SECONDS,
@@ -65,6 +66,7 @@ def main() -> None:
     gatt = GattServer(
         DEVICE_ID, on_control=on_control, on_wifi=on_wifi,
         adapter_address=BLE_ADAPTER or None, name=BLE_NAME or None,
+        require_bond=BLE_REQUIRE_BOND,
     ) if BLE_ENABLED else None
     if gatt:
         gatt.set_game_handler(game.handle)

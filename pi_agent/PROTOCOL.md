@@ -6,6 +6,12 @@ Use the existing Control characteristic. Every JSON envelope uses protocol versi
 
 Messages are `session.start` (`initial_fen` optional, `human_color`), `move.propose` (`uci`, `expected_version`), `session.reset` (`initial_fen` optional), `session.resume`, `state.request`, `gantry.home`, and `gantry.status`. Responses are `control.result`; the Status characteristic exposes the newest `game.state` envelope. The state contains FEN, UCI history, version, phase, state hash and recovery error.
 
+During hardware bring-up the app can also send `camera.calibrate` with
+`camera_index`, `rotation` (0, 90, 180, or 270), and `board_orientation`
+(`white_bottom` or `black_bottom`). The Pi persists these settings for the
+future OpenCV detector; it does not claim that a camera/model is calibrated
+until the detector integration exists.
+
 The BlueZ deployment must require encrypted, bonded pairing before exposing gameplay control. The Flutter app performs bonding, stores the board identity, subscribes to status notifications, and presents manual setup/recovery actions.
 
 ### Transport framing for Android and iPhone

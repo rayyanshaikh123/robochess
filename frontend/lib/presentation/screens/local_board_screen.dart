@@ -66,7 +66,6 @@ class _SessionView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final pi = state.piState;
-    final setup = pi == null || pi.state == 'setup' || pi.state == 'setup_confirmed';
     return ListView(children: [
       ListTile(
         contentPadding: EdgeInsets.zero,
@@ -75,13 +74,16 @@ class _SessionView extends ConsumerWidget {
         trailing: Icon(Icons.circle, size: 12, color: state.connection == LocalConnectionState.ready ? Colors.green : Colors.orange),
       ),
       const Divider(),
-      if (setup) ...[
-        const Text('Board Setup', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        const Text('Place all pieces in the standard starting position, then confirm on the board.'),
-        const SizedBox(height: 16),
-        FilledButton(onPressed: () => ref.read(localBoardProvider.notifier).confirmSetup(), child: const Text('CONFIRM POSITION')),
-      ] else ...[
+      const Text('Board Command Dashboard', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 8),
+      const Text('Commands are sent directly to the Pi. Watch the Pi terminal for “BLE control received”.'),
+      const SizedBox(height: 12),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        FilledButton.icon(onPressed: () => ref.read(localBoardProvider.notifier).confirmSetup(), icon: const Icon(Icons.smart_toy), label: const Text('START BOT GAME')),
+        OutlinedButton(onPressed: () => ref.read(localBoardProvider.notifier).reset(), child: const Text('RESET')),
+      ]),
+      const SizedBox(height: 16),
+      if (pi != null) ...[
         if (pi.fen != null) ChessPosition(fen: pi.fen!),
         const SizedBox(height: 12),
         Text('State: ${pi.state}'),
@@ -91,12 +93,46 @@ class _SessionView extends ConsumerWidget {
         if (state.connection == LocalConnectionState.recovering)
           const Text('Physical board recovery is required. Reset or resume only after confirming the board position.'),
         MoveProposal(onSubmit: (move) => ref.read(localBoardProvider.notifier).proposeMove(move)),
-        const SizedBox(height: 12),
-        OutlinedButton(onPressed: () => ref.read(localBoardProvider.notifier).reset(), child: const Text('RESET SESSION')),
       ],
+      const SizedBox(height: 16),
+      MoveProposal(onSubmit: (move) => ref.read(localBoardProvider.notifier).proposeMove(move)),
+      const SizedBox(height: 24),
+      const _WifiPanel(),
+      const SizedBox(height: 24),
+      const _CameraCalibrationPanel(),
       if (state.error != null) Padding(padding: const EdgeInsets.only(top: 16), child: Text(state.error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
     ]);
   }
+}
+
+class _WifiPanel extends ConsumerStatefulWidget {
+  const _WifiPanel();
+  @override ConsumerState<_WifiPanel> createState() => _WifiPanelState();
+}
+class _WifiPanelState extends ConsumerState<_WifiPanel> {
+  final _ssid = TextEditingController(); final _password = TextEditingController();
+  @override void dispose() { _ssid.dispose(); _password.dispose(); super.dispose(); }
+  @override Widget build(BuildContext context) => Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    const Text('Wi-Fi provisioning', style: TextStyle(fontWeight: FontWeight.bold)),
+    TextField(controller: _ssid, decoration: const InputDecoration(labelText: 'Wi-Fi name (SSID)')),
+    TextField(controller: _password, obscureText: true, decoration: const InputDecoration(labelText: 'Wi-Fi password')),
+    const SizedBox(height: 8),
+    FilledButton(onPressed: () => ref.read(localBoardProvider.notifier).provisionWifi(_ssid.text.trim(), _password.text), child: const Text('SEND TO PI')),
+  ])));
+}
+
+class _CameraCalibrationPanel extends ConsumerStatefulWidget { const _CameraCalibrationPanel(); @override ConsumerState<_CameraCalibrationPanel> createState() => _CameraCalibrationPanelState(); }
+class _CameraCalibrationPanelState extends ConsumerState<_CameraCalibrationPanel> {
+  final _camera = TextEditingController(text: '0'); int _rotation = 0; String _orientation = 'white_bottom';
+  @override void dispose() { _camera.dispose(); super.dispose(); }
+  @override Widget build(BuildContext context) => Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    const Text('Camera calibration', style: TextStyle(fontWeight: FontWeight.bold)),
+    const Text('Saves Pi webcam settings for the future OpenCV detector.'),
+    TextField(controller: _camera, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Pi webcam index')),
+    DropdownButton<int>(value: _rotation, isExpanded: true, items: const [0, 90, 180, 270].map((value) => DropdownMenuItem(value: value, child: Text('Rotation $value°'))).toList(), onChanged: (value) => setState(() => _rotation = value ?? 0)),
+    DropdownButton<String>(value: _orientation, isExpanded: true, items: const [DropdownMenuItem(value: 'white_bottom', child: Text('White at bottom')), DropdownMenuItem(value: 'black_bottom', child: Text('Black at bottom'))], onChanged: (value) => setState(() => _orientation = value ?? 'white_bottom')),
+    FilledButton(onPressed: () => ref.read(localBoardProvider.notifier).saveCameraCalibration(cameraIndex: int.tryParse(_camera.text) ?? 0, rotation: _rotation, boardOrientation: _orientation), child: const Text('SAVE CALIBRATION')),
+  ])));
 }
 
 class MoveProposal extends StatefulWidget {

@@ -29,6 +29,7 @@ class GattServer:
         on_wifi: Callable[[dict], dict] | None = None,
         name: str | None = None,
         adapter_address: str | None = None,
+        require_bond: bool = False,
     ) -> None:
         self.device_id = device_id
 
@@ -62,6 +63,7 @@ class GattServer:
 
         self._thread: threading.Thread | None = None
         self.adapter_address = adapter_address
+        self.require_bond = require_bond
 
     def handle_control(self, raw: bytes) -> list[bytes]:
         """Process a message received through the Control characteristic."""
@@ -75,6 +77,7 @@ class GattServer:
             return []
 
         self._control_buffer.clear()
+        print(f"BLE control received: {message.get('type')}", flush=True)
 
         if message.get("type") in {
             "session.start",
@@ -84,6 +87,8 @@ class GattServer:
             "move.propose",
             "gantry.home",
             "gantry.status",
+            "camera.calibrate",
+            "camera.status",
         }:
             try:
                 validate_game_message(message)
@@ -292,8 +297,7 @@ class GattServer:
                 "write",
                 "write-without-response",
                 "notify",
-                "encrypt-authenticated-write",
-            ],
+            ] + (["encrypt-authenticated-write"] if self.require_bond else []),
             write_callback=self._on_control_write,
         )
 
@@ -315,8 +319,7 @@ class GattServer:
                 "write",
                 "write-without-response",
                 "notify",
-                "encrypt-authenticated-write",
-            ],
+            ] + (["encrypt-authenticated-write"] if self.require_bond else []),
             write_callback=self._on_wifi_write,
         )
 

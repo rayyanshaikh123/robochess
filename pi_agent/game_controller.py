@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import chess
+import json
+from pathlib import Path
 
 from pi_agent.engine import StockfishEngine
 from pi_agent.game_session import GameSession, SessionError
@@ -17,6 +19,7 @@ class GameController:
         self.session: GameSession | None = store.load() if store else None
         self._last_seq = -1
         self._cached_results: dict[int, dict] = {}
+        self.calibration_path = Path(__file__).with_name(".state") / "camera_calibration.json"
 
     def handle(self, message: dict) -> dict:
         data = message.get("data", {})
@@ -39,6 +42,14 @@ class GameController:
         return result
 
     def _dispatch(self, kind: str, data: dict) -> dict:
+        if kind == "camera.status":
+            return self._result("camera_status", calibration=self._load_calibration())
+        if kind == "camera.calibrate":
+            calibration = {"camera_index": int(data.get("camera_index", 0)), "rotation": int(data.get("rotation", 0)), "board_orientation": str(data.get("board_orientation", "white_bottom"))}
+            self.calibration_path.parent.mkdir(parents=True, exist_ok=True)
+            self.calibration_path.write_text(json.dumps(calibration))
+            print(f"Camera calibration saved: {calibration}", flush=True)
+            return self._result("camera_calibrated", calibration=calibration)
         if kind == "session.start":
             fen = data.get("initial_fen", chess.STARTING_FEN)
             color = chess.WHITE if data.get("human_color", "white") == "white" else chess.BLACK
@@ -67,6 +78,12 @@ class GameController:
             state_before_engine["engine_state"] = self.session.snapshot()
             return state_before_engine
         raise ValueError("Unsupported game message")
+
+    def _load_calibration(self) -> dict:
+        try:
+            return json.loads(self.calibration_path.read_text())
+        except (OSError, ValueError):
+            return {}
 
     def _run_engine_turn(self) -> None:
         assert self.session

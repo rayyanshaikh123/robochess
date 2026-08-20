@@ -131,6 +131,22 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
   Future<void> proposeMove(String move) => repository.proposeMove(move, state.piState?.version ?? 0);
   Future<void> reset() => repository.resetSession();
   Future<void> resume() => repository.resumeSession();
+  Future<void> provisionWifi(String ssid, String password) async {
+    try {
+      await repository.provisionWifi(ssid, password);
+      state = state.copyWith(clearError: true);
+    } catch (error) {
+      state = state.copyWith(error: 'Wi-Fi provisioning failed: $error');
+    }
+  }
+  Future<void> saveCameraCalibration({required int cameraIndex, required int rotation, required String boardOrientation}) async {
+    try {
+      await repository.saveCameraCalibration(cameraIndex: cameraIndex, rotation: rotation, boardOrientation: boardOrientation);
+      state = state.copyWith(clearError: true);
+    } catch (error) {
+      state = state.copyWith(error: 'Camera calibration failed: $error');
+    }
+  }
 
   @override
   void dispose() {

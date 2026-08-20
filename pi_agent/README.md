@@ -129,6 +129,9 @@ The current virtualenv has been enabled to see the Debian `python3-gi` package.
 For a fresh install, create it with `python3 -m venv --system-site-packages .venv`.
 
 Pair the Flutter phone using encrypted bonding before issuing game commands.
+For first hardware bring-up, set `ROBOCHESS_BLE_REQUIRE_BOND=0` (the default)
+so Android can write the Control characteristic without a platform-specific
+bonding failure. Set it to `1` once phone pairing has been proven.
 Control writes require authenticated encryption. [PROTOCOL.md](PROTOCOL.md)
 defines message formats, sequencing, state responses, and backend sync.
 
