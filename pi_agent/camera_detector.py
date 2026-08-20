@@ -70,10 +70,22 @@ class PiCameraDetector:
             raise RuntimeError("OpenCV is not installed") from exc
         with self._lock:
             if self._camera is None or not self._camera.isOpened():
-                self._camera = cv2.VideoCapture(self.camera_index)
+                # The C270 exposes V4L2 MJPEG/YUYV modes.  Explicitly selecting
+                # V4L2 and MJPEG avoids unsupported 820x620 negotiation failures.
+                self._camera = cv2.VideoCapture(self.camera_index, cv2.CAP_V4L2)
+                self._camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
                 self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
                 self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             ok, frame = self._camera.read()
+            if not ok:
+                # Fall back to a mode supported by the C270 if an old .env
+                # still requests an unsupported resolution.
+                self._camera.release()
+                self._camera = cv2.VideoCapture(self.camera_index, cv2.CAP_V4L2)
+                self._camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+                self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, 800)
+                self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 600)
+                ok, frame = self._camera.read()
         if not ok:
             raise RuntimeError("Camera frame unavailable")
         return frame
