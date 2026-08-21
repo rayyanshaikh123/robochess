@@ -18,7 +18,9 @@ import '../../domain/models/game_state.dart';
 import '../../domain/models/calibration_frame.dart';
 import '../../domain/voice/voice_service.dart';
 import '../../domain/voice/move_parser.dart';
+import '../../data/repositories/pi_local_api.dart';
 import 'manual_calibration_screen.dart';
+import '../widgets/pi_live_camera_view.dart';
 
 const kBackground = Color(0xFF151311);
 const kSurfaceContLow = Color(0xFF1D1B19);
@@ -345,7 +347,10 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   void _startAutoDetect() {
     if (_autoDetectTimer != null) return;
     _autoDetectTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (!_gameUsesBoard || _snapshotDetecting || _syncing || !_inGameValidated) return;
+      if (!_gameUsesBoard ||
+          _snapshotDetecting ||
+          _syncing ||
+          !_inGameValidated) return;
       _checkAutoDetectReady();
     });
   }
@@ -357,7 +362,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       final data = result['data'] as Map<String, dynamic>? ?? {};
       final ready = data['ready'] == true;
       final reason = data['reason']?.toString() ?? '';
-      
+
       if (ready) {
         // Auto-detect triggered successfully!
         final uci = data['uci']?.toString();
@@ -379,7 +384,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           } catch (_) {
             if (mounted) {
               setState(() {
-                _snapshotNote = 'Auto-detected: $san ($uci). Engine reply failed.';
+                _snapshotNote =
+                    'Auto-detected: $san ($uci). Engine reply failed.';
               });
             }
           }
@@ -554,6 +560,23 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       setState(() {
         _inGameValidationNote = 'Force validate failed. Check backend.';
         _inGameValidating = false;
+      });
+    }
+  }
+
+  Future<void> _manualPiCalibrate() async {
+    final ok = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ManualCalibrationScreen(
+          localApi: PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl),
+        ),
+      ),
+    );
+    if (ok == true && mounted) {
+      setState(() {
+        _inGameValidated = false;
+        _inGameValidationNote =
+            'Pi calibration saved. Validate the board again.';
       });
     }
   }
@@ -990,6 +1013,11 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          PiLiveCameraView(
+            baseUrl: AppConfig.piLocalApiBaseUrl,
+            onCalibrate: _manualPiCalibrate,
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
               Text('BOARD SNAPSHOT',
@@ -1494,9 +1522,9 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
       final missing = summary['missing'] as int? ?? 0;
       final extra = summary['extra'] as int? ?? 0;
       final wrongColor = summary['wrong_color'] as int? ?? 0;
-      
+
       if (!mounted) return;
-      
+
       setState(() {
         _validated = valid;
         if (valid) {

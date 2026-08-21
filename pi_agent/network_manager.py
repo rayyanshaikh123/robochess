@@ -45,6 +45,24 @@ class NetworkManager:
             raise NetworkManagerError(result.stderr.strip() or "nmcli command failed")
         return result.stdout.strip()
 
+    @staticmethod
+    def _usable_ip(value: str) -> bool:
+        value = value.strip()
+        return bool(value) and value not in {"127.0.0.1", "0.0.0.0"} and not value.startswith("169.254.")
+
+    def _host_ip(self) -> str | None:
+        """Return a routable host address when nmcli also reports loopback."""
+        try:
+            output = subprocess.run(
+                ["hostname", "-I"], capture_output=True, text=True, timeout=5, check=False
+            ).stdout
+        except (OSError, subprocess.SubprocessError):
+            return None
+        for value in output.split():
+            if self._usable_ip(value):
+                return value
+        return None
+
     def status(
         self,
         internet_check_enabled: bool = True,
@@ -63,8 +81,10 @@ class NetworkManager:
                 ssid = line.split(":", 1)[1] or None
             if "IP4.ADDRESS" in line:
                 value = line.split(":", 1)[1].split("/", 1)[0]
-                if value:
+                if self._usable_ip(value):
                     ip_address = value
+        if not ip_address:
+            ip_address = self._host_ip()
         if not connected:
             return NetworkStatus(False, ssid=ssid, ip_address=ip_address, state="no_wifi")
         internet_available = False

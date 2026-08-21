@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from pi_agent.network_manager import NetworkManager
@@ -65,13 +66,37 @@ class LocalApiHost:
         return frame
 
     def _jpeg(self, frame):
+        encoded = self._encode_jpeg(frame)
+        return Response(content=encoded, media_type="image/jpeg")
+
+    def _encode_jpeg(self, frame) -> bytes:
         import cv2
         ok, encoded = cv2.imencode(
             ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, int(self.config["jpeg_quality"])]
         )
         if not ok:
             raise HTTPException(500, "Could not encode camera frame")
-        return Response(content=encoded.tobytes(), media_type="image/jpeg")
+        return encoded.tobytes()
+
+    def _stream_frames(self):
+        """Yield a continuous MJPEG stream for phone/tablet live preview."""
+        while True:
+            try:
+                frame = self.detector.preview_frame() if self.detector else self._capture()
+                jpeg = self._encode_jpeg(frame)
+                yield (
+                    b"--robochess-frame\r\n"
+                    b"Content-Type: image/jpeg\r\n"
+                    + f"Content-Length: {len(jpeg)}\r\n\r\n".encode()
+                    + jpeg
+                    + b"\r\n"
+                )
+                time.sleep(0.12)
+            except GeneratorExit:
+                return
+            except Exception:
+                # End the stream so Flutter can display/retry a useful error.
+                return
 
     def _routes(self):
         @self.app.get("/local/health")
@@ -122,6 +147,13 @@ class LocalApiHost:
                 except Exception as exc:
                     raise HTTPException(422, f"Calibration preview failed: {exc}") from exc
             return self._jpeg(frame)
+
+        @self.app.get("/local/camera/stream")
+        def camera_stream():
+            return StreamingResponse(
+                self._stream_frames(),
+                media_type="multipart/x-mixed-replace; boundary=robochess-frame",
+            )
 
         @self.app.get("/local/calibration")
         def calibration():

@@ -127,6 +127,7 @@ without internet or MongoDB:
 GET  http://<pi-ip>:8765/local/health
 GET  http://<pi-ip>:8765/local/network/status
 GET  http://<pi-ip>:8765/local/camera/frame
+GET  http://<pi-ip>:8765/local/camera/stream
 POST http://<pi-ip>:8765/local/calibration/manual
 POST http://<pi-ip>:8765/local/move/detect
 POST http://<pi-ip>:8765/local/move/analyze-and-reply

@@ -17,7 +17,8 @@ final localBoardRepositoryProvider = Provider<LocalBoardRepository>((ref) {
   return LocalBoardRepository(ref.read(localBleServiceProvider));
 });
 
-final localStateStoreProvider = Provider<LocalStateStore>((ref) => LocalStateStore());
+final localStateStoreProvider =
+    Provider<LocalStateStore>((ref) => LocalStateStore());
 
 class LocalBoardState {
   final List<RoboChessDevice> devices;
@@ -34,7 +35,7 @@ class LocalBoardState {
     this.selected,
     this.piState,
     this.network,
-    this.localApiBaseUrl,
+    this.localApiBaseUrl = AppConfig.piLocalApiBaseUrl,
     this.connection = LocalConnectionState.disconnected,
     this.scanning = false,
     this.error,
@@ -50,7 +51,8 @@ class LocalBoardState {
     bool? scanning,
     String? error,
     bool clearError = false,
-  }) => LocalBoardState(
+  }) =>
+      LocalBoardState(
         devices: devices ?? this.devices,
         selected: selected ?? this.selected,
         piState: piState ?? this.piState,
@@ -68,15 +70,21 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
   StreamSubscription<RoboChessBleDevice>? _devices;
   StreamSubscription<Map<String, dynamic>>? _notifications;
 
-  LocalBoardController(this.repository, this.store) : super(const LocalBoardState()) {
+  LocalBoardController(this.repository, this.store)
+      : super(const LocalBoardState()) {
     _notifications = repository.notifications.listen(_onMessage);
     _restoreState();
   }
 
   void _onDevice(RoboChessBleDevice item) {
-    final device = RoboChessDevice(remoteId: item.result.device.remoteId.str, displayName: item.name, deviceId: null, rssi: item.rssi);
+    final device = RoboChessDevice(
+        remoteId: item.result.device.remoteId.str,
+        displayName: item.name,
+        deviceId: null,
+        rssi: item.rssi);
     final devices = [...state.devices];
-    final index = devices.indexWhere((item) => item.remoteId == device.remoteId);
+    final index =
+        devices.indexWhere((item) => item.remoteId == device.remoteId);
     if (index == -1) {
       devices.add(device);
     } else {
@@ -91,27 +99,41 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
       final stateData = message.data['state'] ?? message.data['engine_state'];
       final networkData = message.data['network'];
       if (message.data['status'] == 'network_status' && networkData is Map) {
-        final network = PiNetworkStatus.fromMap(Map<String, dynamic>.from(networkData));
+        final network =
+            PiNetworkStatus.fromMap(Map<String, dynamic>.from(networkData));
+        final reportedIp = network.ipAddress?.trim();
+        final usableIp = reportedIp == null ||
+                reportedIp.isEmpty ||
+                reportedIp == '127.0.0.1' ||
+                reportedIp == '0.0.0.0' ||
+                reportedIp == 'localhost'
+            ? null
+            : reportedIp;
         state = state.copyWith(
           network: network,
-          localApiBaseUrl: network.ipAddress == null
+          localApiBaseUrl: usableIp == null
               ? AppConfig.piLocalApiBaseUrl
-              : 'http://${network.ipAddress}:8765',
+              : 'http://$usableIp:8765',
           clearError: true,
         );
         return;
       }
-      if ((message.type == 'control.result' || message.type == 'game.state') && stateData is Map) {
+      if ((message.type == 'control.result' || message.type == 'game.state') &&
+          stateData is Map) {
         final next = PiState.fromMessage(message);
         if (repository.acceptState(next)) {
-          state = state.copyWith(piState: next, connection: LocalConnectionState.ready, clearError: true);
+          state = state.copyWith(
+              piState: next,
+              connection: LocalConnectionState.ready,
+              clearError: true);
           store.saveState(next);
         }
         if (next.state == 'recovery') {
           state = state.copyWith(connection: LocalConnectionState.recovering);
         }
       } else if (message.data['status'] == 'error' || message.type == 'error') {
-        state = state.copyWith(error: message.data['error']?.toString() ?? message.type);
+        state = state.copyWith(
+            error: message.data['error']?.toString() ?? message.type);
       }
     } catch (error) {
       state = state.copyWith(error: 'Invalid board message: $error');
@@ -124,33 +146,51 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
   }
 
   Future<void> scan() async {
-    state = state.copyWith(scanning: true, connection: LocalConnectionState.scanning, clearError: true);
+    state = state.copyWith(
+        scanning: true,
+        connection: LocalConnectionState.scanning,
+        clearError: true);
     try {
       await _devices?.cancel();
       _devices = repository.scan().listen(_onDevice, onError: (Object error) {
-        state = state.copyWith(error: 'Bluetooth scan failed: $error', scanning: false, connection: LocalConnectionState.disconnected);
+        state = state.copyWith(
+            error: 'Bluetooth scan failed: $error',
+            scanning: false,
+            connection: LocalConnectionState.disconnected);
       });
       // Scan results are streamed; retain the scanning state until a board appears.
     } catch (error) {
-      state = state.copyWith(error: 'Bluetooth scan failed: $error', scanning: false, connection: LocalConnectionState.disconnected);
+      state = state.copyWith(
+          error: 'Bluetooth scan failed: $error',
+          scanning: false,
+          connection: LocalConnectionState.disconnected);
     }
   }
 
   Future<void> connect(RoboChessDevice device) async {
-    state = state.copyWith(selected: device, connection: LocalConnectionState.connecting, clearError: true);
+    state = state.copyWith(
+        selected: device,
+        connection: LocalConnectionState.connecting,
+        clearError: true);
     try {
       final id = await repository.connectRemote(device.remoteId);
       await store.saveDevice(id);
-      state = state.copyWith(selected: device.copyWith(deviceId: id, state: LocalConnectionState.connected), connection: LocalConnectionState.paired);
+      state = state.copyWith(
+          selected: device.copyWith(
+              deviceId: id, state: LocalConnectionState.connected),
+          connection: LocalConnectionState.paired);
       await repository.requestState();
       await repository.requestNetworkStatus();
     } catch (error) {
-      state = state.copyWith(error: 'Board connection failed: $error', connection: LocalConnectionState.disconnected);
+      state = state.copyWith(
+          error: 'Board connection failed: $error',
+          connection: LocalConnectionState.disconnected);
     }
   }
 
   Future<void> confirmSetup() => repository.startSession();
-  Future<void> proposeMove(String move) => repository.proposeMove(move, state.piState?.version ?? 0);
+  Future<void> proposeMove(String move) =>
+      repository.proposeMove(move, state.piState?.version ?? 0);
   Future<void> reset() => repository.resetSession();
   Future<void> resume() => repository.resumeSession();
   Future<void> provisionWifi(String ssid, String password) async {
@@ -161,9 +201,16 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
       state = state.copyWith(error: 'Wi-Fi provisioning failed: $error');
     }
   }
-  Future<void> saveCameraCalibration({required int cameraIndex, required int rotation, required String boardOrientation}) async {
+
+  Future<void> saveCameraCalibration(
+      {required int cameraIndex,
+      required int rotation,
+      required String boardOrientation}) async {
     try {
-      await repository.saveCameraCalibration(cameraIndex: cameraIndex, rotation: rotation, boardOrientation: boardOrientation);
+      await repository.saveCameraCalibration(
+          cameraIndex: cameraIndex,
+          rotation: rotation,
+          boardOrientation: boardOrientation);
       state = state.copyWith(clearError: true);
     } catch (error) {
       state = state.copyWith(error: 'Camera calibration failed: $error');
@@ -179,6 +226,8 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
   }
 }
 
-final localBoardProvider = StateNotifierProvider<LocalBoardController, LocalBoardState>((ref) {
-  return LocalBoardController(ref.read(localBoardRepositoryProvider), ref.read(localStateStoreProvider));
+final localBoardProvider =
+    StateNotifierProvider<LocalBoardController, LocalBoardState>((ref) {
+  return LocalBoardController(ref.read(localBoardRepositoryProvider),
+      ref.read(localStateStoreProvider));
 });

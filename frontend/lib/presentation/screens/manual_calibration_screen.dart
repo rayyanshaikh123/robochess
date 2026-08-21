@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../providers/board_provider.dart';
 import '../../domain/models/calibration_frame.dart';
+import '../../data/repositories/pi_local_api.dart';
 
 const kBackground = Color(0xFF151311);
 const kSurfaceContLow = Color(0xFF1D1B19);
@@ -52,7 +54,9 @@ Offset _imageToDisplay(Offset imagePos, Size displaySize, int imgW, int imgH) {
 }
 
 class ManualCalibrationScreen extends ConsumerStatefulWidget {
-  const ManualCalibrationScreen({super.key});
+  final PiLocalApi? localApi;
+
+  const ManualCalibrationScreen({super.key, this.localApi});
 
   @override
   ConsumerState<ManualCalibrationScreen> createState() =>
@@ -73,6 +77,12 @@ class _ManualCalibrationScreenState
   static const _labels = ['TL', 'TR', 'BR', 'BL'];
 
   @override
+  void dispose() {
+    widget.localApi?.client.close();
+    super.dispose();
+  }
+
+  @override
   void initState() {
     super.initState();
     _loadFrame();
@@ -85,7 +95,13 @@ class _ManualCalibrationScreenState
       _imagePoints.clear();
     });
     try {
-      final frame = await ref.read(boardRepositoryProvider).captureFrame();
+      final frame = widget.localApi == null
+          ? await ref.read(boardRepositoryProvider).captureFrame()
+          : CalibrationFrame(
+              imageBase64: base64Encode(await widget.localApi!.cameraFrame()),
+              width: 800,
+              height: 600,
+            );
       if (mounted) {
         setState(() {
           _frame = frame;
@@ -108,8 +124,8 @@ class _ManualCalibrationScreenState
 
     final corners = _imagePoints
         .map((p) => [
-              p.dx.clamp(0.0, frame.width.toDouble()),
-              p.dy.clamp(0.0, frame.height.toDouble()),
+              p.dx.clamp(0.0, frame.width.toDouble()).toDouble(),
+              p.dy.clamp(0.0, frame.height.toDouble()).toDouble(),
             ])
         .toList();
 
@@ -118,7 +134,11 @@ class _ManualCalibrationScreenState
       _error = null;
     });
     try {
-      await ref.read(boardRepositoryProvider).manualCalibrate(corners);
+      if (widget.localApi == null) {
+        await ref.read(boardRepositoryProvider).manualCalibrate(corners);
+      } else {
+        await widget.localApi!.saveCalibration(corners: corners);
+      }
       if (mounted) Navigator.of(context).pop(true);
     } catch (err) {
       if (mounted) {
@@ -152,7 +172,10 @@ class _ManualCalibrationScreenState
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        title: Text('Manual Calibration',
+        title: Text(
+            widget.localApi == null
+                ? 'Manual Calibration'
+                : 'Pi Board Calibration',
             style: GoogleFonts.spaceGrotesk(
                 fontSize: 16, fontWeight: FontWeight.w700, color: kOnSurface)),
         actions: [
@@ -217,8 +240,8 @@ class _ManualCalibrationScreenState
                                 ..._imagePoints.asMap().entries.map((e) {
                                   final index = e.key;
                                   final imgPt = e.value;
-                                  final dp = _imageToDisplay(
-                                      imgPt, displaySize, frame.width, frame.height);
+                                  final dp = _imageToDisplay(imgPt, displaySize,
+                                      frame.width, frame.height);
                                   return Positioned(
                                     left: dp.dx - 14,
                                     top: dp.dy - 14,
@@ -285,7 +308,8 @@ class _ManualCalibrationScreenState
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.touch_app_rounded, color: kPrimary, size: 16),
+                        Icon(Icons.touch_app_rounded,
+                            color: kPrimary, size: 16),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -328,8 +352,9 @@ class _ManualCalibrationScreenState
                       const SizedBox(width: 10),
                       Expanded(
                         child: ElevatedButton.icon(
-                          onPressed:
-                              _loading || _imagePoints.length != 4 ? null : _submit,
+                          onPressed: _loading || _imagePoints.length != 4
+                              ? null
+                              : _submit,
                           icon: const Icon(Icons.check_circle_outline_rounded,
                               size: 16),
                           label: Text('SAVE',
