@@ -19,8 +19,10 @@ class PiLiveCameraView extends StatefulWidget {
 class _PiLiveCameraViewState extends State<PiLiveCameraView> {
   late PiLocalApi _api;
   StreamSubscription<Uint8List>? _subscription;
+  Timer? _fallbackTimer;
   Uint8List? _frame;
   String? _error;
+  bool _polling = false;
 
   @override
   void initState() {
@@ -42,6 +44,8 @@ class _PiLiveCameraViewState extends State<PiLiveCameraView> {
 
   void _connect() {
     _subscription?.cancel();
+    _fallbackTimer?.cancel();
+    _error = null;
     _subscription = _api.cameraStream().listen(
       (frame) {
         if (mounted) {
@@ -52,14 +56,49 @@ class _PiLiveCameraViewState extends State<PiLiveCameraView> {
         }
       },
       onError: (Object error) {
-        if (mounted) setState(() => _error = 'Live camera unavailable: $error');
+        _startFrameFallback(error);
       },
+      onDone: () => _startFrameFallback('Pi stream closed'),
     );
+  }
+
+  void _startFrameFallback(Object error) {
+    if (!mounted) return;
+    _fallbackTimer?.cancel();
+    setState(() {
+      _error = _frame == null
+          ? 'Stream unavailable; trying camera frames… ($error)'
+          : 'Live over Wi-Fi (compatibility mode)';
+    });
+    _pollFrame();
+    _fallbackTimer =
+        Timer.periodic(const Duration(milliseconds: 350), (_) => _pollFrame());
+  }
+
+  Future<void> _pollFrame() async {
+    if (_polling || !mounted) return;
+    _polling = true;
+    try {
+      final frame = await _api.cameraFrame(preview: true);
+      if (mounted) {
+        setState(() {
+          _frame = frame;
+          _error = 'Live over Wi-Fi (frame fallback)';
+        });
+      }
+    } catch (error) {
+      if (mounted && _frame == null) {
+        setState(() => _error = 'Pi camera unavailable: $error');
+      }
+    } finally {
+      _polling = false;
+    }
   }
 
   @override
   void dispose() {
     _subscription?.cancel();
+    _fallbackTimer?.cancel();
     _api.client.close();
     super.dispose();
   }

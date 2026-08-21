@@ -12,6 +12,7 @@ class PiLocalApi {
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
 
   static const _requestTimeout = Duration(seconds: 5);
+  static const _cameraRequestTimeout = Duration(seconds: 2);
 
   Future<Map<String, dynamic>> networkStatus() async {
     final response = await client
@@ -22,9 +23,12 @@ class PiLocalApi {
         (jsonDecode(response.body) as Map)['data'] as Map);
   }
 
-  Future<Uint8List> cameraFrame({bool preview = false}) async {
+  Future<Uint8List> cameraFrame({
+    bool preview = false,
+    Duration timeout = _cameraRequestTimeout,
+  }) async {
     final endpoint = preview ? '/local/camera/preview' : '/local/camera/frame';
-    final response = await client.get(_uri(endpoint)).timeout(_requestTimeout);
+    final response = await client.get(_uri(endpoint)).timeout(timeout);
     if (response.statusCode >= 400) {
       throw Exception('Pi camera returned HTTP ${response.statusCode}');
     }
@@ -37,7 +41,7 @@ class PiLocalApi {
   /// Decodes the Pi's multipart MJPEG response into individual JPEG frames.
   Stream<Uint8List> cameraStream() async* {
     final request = http.Request('GET', _uri('/local/camera/stream'));
-    final response = await client.send(request);
+    final response = await client.send(request).timeout(_requestTimeout);
     if (response.statusCode >= 400) {
       throw Exception('Pi camera stream returned HTTP ${response.statusCode}');
     }

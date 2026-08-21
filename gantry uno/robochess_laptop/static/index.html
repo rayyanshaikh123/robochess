@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoboChess Control</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>%E2%99%9E</text></svg>">
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c2230; --line:#2a3341;
+    --ink:#e6edf3; --dim:#8b97a8; --accent:#4c9aff; --good:#3fb950;
+    --warn:#d29922; --bad:#f85149; --mag:#c678dd;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.45 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+         padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+  h1{font-size:15px;margin:0 12px 0 0;letter-spacing:.5px;font-weight:650}
+  h1 span{color:var(--accent)}
+  select,input,button{font:inherit;color:var(--ink);background:var(--panel2);
+        border:1px solid var(--line);border-radius:6px;padding:6px 9px}
+  input[type=checkbox]{width:15px;height:15px;accent-color:var(--accent);padding:0}
+  button{cursor:pointer}
+  button:hover:not(:disabled){border-color:var(--accent)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#04101f;font-weight:600}
+  button.estop{background:var(--bad);border-color:var(--bad);color:#fff;font-weight:700;
+        margin-left:auto;padding:6px 16px}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;
+        background:var(--panel2);border:1px solid var(--line);font-size:12px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--bad)}
+  .dot.on{background:var(--good)} .dot.busy{background:var(--warn)}
+  nav{display:flex;gap:4px;padding:8px 14px 0;background:var(--panel)}
+  nav button{border-bottom-left-radius:0;border-bottom-right-radius:0;border-bottom-color:transparent}
+  nav button.sel{background:var(--bg);color:var(--accent);font-weight:600}
+  main{padding:14px;display:none;gap:16px}
+  main.sel{display:flex;flex-wrap:wrap;align-items:flex-start}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.9px;color:var(--dim);
+           margin:0 0 10px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .row+.row{margin-top:8px}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:13px}
+  .kv b{color:var(--dim);font-weight:500}
+  code,.mono{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace}
+  svg{display:block;touch-action:none}
+  #pad{cursor:crosshair;background:#0a0d12;border-radius:8px}
+  /* chess board */
+  #board{display:grid;grid-template-columns:repeat(8,56px);grid-template-rows:repeat(8,56px);
+         border:2px solid var(--line);border-radius:4px;overflow:hidden;user-select:none}
+  .sq{display:flex;align-items:center;justify-content:center;font-size:38px;line-height:1;
+      position:relative;cursor:pointer}
+  .sq.l{background:#b9c4d4} .sq.d{background:#5d738f}
+  .sq .glyph{filter:drop-shadow(0 1px 1px rgba(0,0,0,.45))}
+  .sq.w{color:#fff} .sq.b{color:#14181f}
+  .sq .lbl{position:absolute;bottom:1px;right:3px;font-size:9px;opacity:.45;color:#0c1017}
+  .sq.sel{outline:3px solid var(--accent);outline-offset:-3px}
+  .sq.tgt::before{content:"";position:absolute;width:16px;height:16px;border-radius:50%;
+      background:rgba(76,154,255,.75)}
+  .sq.tgt.occ::before{width:46px;height:46px;background:none;
+      border:4px solid rgba(248,81,73,.8)}
+  .sq.last{box-shadow:inset 0 0 0 3px rgba(210,153,34,.7)}
+  #log{height:170px;overflow-y:auto;background:#080b0f;border:1px solid var(--line);
+       border-radius:8px;padding:8px;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+  #log div{white-space:pre-wrap;word-break:break-all}
+  .tx{color:var(--accent)} .rx{color:var(--good)} .error{color:var(--bad)}
+  .warn{color:var(--warn)} .info{color:var(--dim)} .ok{color:var(--good)}
+  .banner{border-radius:8px;padding:9px 12px;margin:0 14px 10px;display:none;font-size:13px}
+  .banner.show{display:block}
+  .banner.bad{background:#3d1418;border:1px solid var(--bad);color:#ffb3ae}
+  .banner.warn{background:#3a2d0c;border:1px solid var(--warn);color:#f0d089}
+  .hint{color:var(--dim);font-size:12px;margin-top:8px}
+  ol.moves{margin:0;padding-left:22px;max-height:200px;overflow-y:auto;font-size:13px}
+  .grave{display:flex;flex-wrap:wrap;gap:3px;font-size:20px;min-height:26px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Robo<span>Chess</span></h1>
+  <select id="port" style="min-width:230px"></select>
+  <button id="refreshPorts" title="Rescan serial ports">&#x21bb;</button>
+  <select id="baud">
+    <option>9600</option><option>57600</option><option selected>115200</option><option>250000</option>
+  </select>
+  <button id="connect" class="primary">Connect</button>
+  <label class="pill"><input type="checkbox" id="sim"> Simulate</label>
+  <span class="pill"><span class="dot" id="dotConn"></span><span id="connTxt">offline</span></span>
+  <span class="pill"><span class="dot" id="dotBusy"></span><span id="busyTxt">idle</span></span>
+  <span class="pill mono" id="posTxt">X 0.0 &nbsp; Y 0.0</span>
+  <span class="pill" id="limPill">LIM <span class="dot" id="dotLimX"></span>X
+        <span class="dot" id="dotLimY"></span>Y</span>
+  <button class="estop" id="estop">STOP</button>
+</header>
+
+<div class="banner bad" id="bannerErr"></div>
+<div class="banner warn" id="bannerSync"></div>
+
+<nav>
+  <button data-tab="pad" class="sel">XY Pad</button>
+  <button data-tab="chess">Chess</button>
+  <button data-tab="console">Console</button>
+</nav>
+
+<!-- ------------------------------------------------------------ XY PAD -->
+<main id="tab-pad" class="sel">
+  <div class="card">
+    <h2>Click anywhere to move the gantry</h2>
+    <div id="padWrap"></div>
+    <div class="row" style="margin-top:10px">
+      <span class="pill mono" id="hoverTxt">&mdash;</span>
+      <label class="pill"><input type="checkbox" id="padMag"> magnet engaged while moving</label>
+      <label class="pill" title="Display only - never changes what is sent to the gantry"><input type="checkbox" id="flipX"> mirror ↔</label>
+      <label class="pill" title="Display only - never changes what is sent to the gantry"><input type="checkbox" id="flipY"> mirror ↕</label>
+      <label class="pill"><input type="checkbox" id="padSnap"> snap to square centres</label>
+    </div>
+    <div class="hint">Grey = full travel envelope. Blue grid = the 8&times;8 board.
+      Purple strip on the right = captured-piece parking (far +X end).
+      Home (0,0) is the bottom-left corner.</div>
+  </div>
+
+  <div class="card" style="min-width:250px">
+    <h2>Manual</h2>
+    <div class="row">
+      <input id="mx" type="number" step="0.5" placeholder="X mm" style="width:92px">
+      <input id="my" type="number" step="0.5" placeholder="Y mm" style="width:92px">
+      <button id="goManual">Go</button>
+    </div>
+    <div class="row">
+      <button id="btnHome">Home (limit switches)</button>
+      <button id="btnPark">Return to 0,0</button>
+    </div>
+    <div class="row">
+      <button id="magOn">Magnet ON</button>
+      <button id="magOff">Magnet OFF</button>
+    </div>
+    <div class="row">Jog
+      <input id="jogStep" type="number" value="10" step="1" style="width:70px"> mm
+    </div>
+    <div class="row" style="display:grid;grid-template-columns:repeat(3,42px);gap:5px">
+      <span></span><button data-jog="0,1">&#9650;</button><span></span>
+      <button data-jog="-1,0">&#9664;</button><button id="btnStatus">?</button><button data-jog="1,0">&#9654;</button>
+      <span></span><button data-jog="0,-1">&#9660;</button><span></span>
+    </div>
+    <div class="row"><button id="clearAbort">Clear STOP latch</button></div>
+  </div>
+
+  <div class="card" style="min-width:250px">
+    <h2>Speed (saved to EEPROM)</h2>
+    <div class="row">
+      <span style="width:64px">Max</span>
+      <input id="setSpeed" type="number" value="80" step="5" style="width:80px"> mm/s
+    </div>
+    <div class="row">
+      <span style="width:64px">Accel</span>
+      <input id="setAccel" type="number" value="1000" step="100" style="width:80px"> mm/s²
+    </div>
+    <div class="row">
+      <button id="applySpeed" class="primary">Apply</button>
+      <button id="showCfg">Show all settings</button>
+    </div>
+    <div class="hint">If the motors buzz, stall or lose position, lower Max
+      first, then Accel. Changes persist on the Uno across power cycles.</div>
+  </div>
+</main>
+
+<!-- ------------------------------------------------------------- CHESS -->
+<main id="tab-chess">
+  <div class="card">
+    <h2>Click a piece, then its destination</h2>
+    <div id="board"></div>
+    <div class="hint" id="boardHint">&nbsp;</div>
+  </div>
+
+  <div class="card" style="min-width:290px;flex:1">
+    <h2>Game</h2>
+    <div class="kv">
+      <b>Turn</b><span id="gTurn">white</span>
+      <b>State</b><span id="gState">&mdash;</span>
+      <b>Parked</b><span id="gGraveN">0 / 24</span>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <input id="sanIn" placeholder="or type: Nf3, exd5, O-O" style="flex:1;min-width:150px">
+      <button id="sanGo">Play</button>
+    </div>
+    <div class="row">
+      <label class="pill">after each move:
+        <select id="homeMode" style="margin-left:6px">
+          <option value="rehome">re-home on limit switches (no drift)</option>
+          <option value="park">rapid to 0,0 (faster, drifts)</option>
+          <option value="none">stay put</option>
+        </select></label>
+    </div>
+    <div class="row">
+      <button id="gNew">New game</button>
+      <button id="gUndo" title="Software take-back only - pieces are NOT moved back">Take back</button>
+      <button id="gResync">Resync</button>
+    </div>
+    <h2 style="margin-top:14px">Parked pieces</h2>
+    <div class="grave" id="gGrave"></div>
+    <h2 style="margin-top:14px">Moves</h2>
+    <ol class="moves" id="gMoves"></ol>
+  </div>
+</main>
+
+<!-- ----------------------------------------------------------- CONSOLE -->
+<main id="tab-console">
+  <div class="card" style="flex:1;min-width:320px">
+    <h2>Send a raw firmware command</h2>
+    <div class="row">
+      <input id="rawIn" class="mono" placeholder="MOVEXY 100 100" style="flex:1;min-width:200px">
+      <button id="rawGo">Send</button>
+    </div>
+    <div class="hint">Firmware understands: HOME &middot; MOVEXY x y &middot; MAG ON|OFF &middot; STATUS &middot; STOP &middot; PING</div>
+    <h2 style="margin-top:14px">Geometry in use</h2>
+    <pre class="mono" id="geoTxt" style="color:var(--dim);font-size:12px;margin:0"></pre>
+  </div>
+</main>
+
+<div style="padding:0 14px 14px"><div id="log"></div></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const api = async (path, body) => {
+  const r = await fetch(path, body === undefined ? {} : {
+    method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  const j = await r.json().catch(() => ({ok:false, error:"bad response"}));
+  if (!j.ok) showErr(j.error || "request failed");
+  return j;
+};
+function showErr(msg){
+  const b = $("#bannerErr"); b.textContent = msg; b.classList.add("show");
+  clearTimeout(showErr._t); showErr._t = setTimeout(()=>b.classList.remove("show"), 6000);
+}
+
+/* ---------------- tabs ---------------- */
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("sel", x === b));
+  document.querySelectorAll("main").forEach(m =>
+    m.classList.toggle("sel", m.id === "tab-" + b.dataset.tab));
+});
+
+/* ---------------- connection ---------------- */
+let CONNECTED = false;
+async function loadPorts(){
+  const j = await api("/api/ports");
+  const sel = $("#port"); const prev = sel.value; sel.innerHTML = "";
+  (j.ports || []).forEach(p => {
+    const o = document.createElement("option");
+    o.value = p.device;
+    o.textContent = p.device + (p.description ? " — " + p.description : "") + (p.likely_uno ? "  ★" : "");
+    sel.appendChild(o);
+  });
+  if (!j.ports || !j.ports.length){
+    const o = document.createElement("option");
+    o.value = ""; o.textContent = "no serial ports found";
+    sel.appendChild(o);
+  }
+  if (prev) sel.value = prev;
+}
+$("#refreshPorts").onclick = loadPorts;
+$("#connect").onclick = async () => {
+  if (CONNECTED){ await api("/api/disconnect", {}); return; }
+  await api("/api/connect", {port: $("#port").value, baud: +$("#baud").value,
+                             simulate: $("#sim").checked});
+};
+
+/* ---------------- XY pad ---------------- */
+let GEO = null, PAD = null, VIEW = {flip_x:false, flip_y:false};
+const PAD_W = 430;   // px width of the drawn envelope
+function buildPad(){
+  const g = GEO, s = PAD_W / g.max_x, H = g.max_y * s;
+  // Display-only mirroring. The mm value sent to the firmware is never
+  // touched - only where it is drawn, and toMM() inverts this exactly.
+  const sx = mm => (VIEW.flip_x ? (g.max_x - mm) : mm) * s;
+  const sy = mm => VIEW.flip_y ? (mm * s) : (H - mm * s);
+  // Corner-aware rect helper: with mirroring on, sx(lo) may be the RIGHT
+  // edge, so never assume sx(lo) is the origin corner.
+  const rct = (x0, y0, x1, y1, attrs) =>
+    `<rect x="${Math.min(sx(x0), sx(x1))}" y="${Math.min(sy(y0), sy(y1))}"
+           width="${Math.abs(sx(x1) - sx(x0))}" height="${Math.abs(sy(y1) - sy(y0))}"
+           ${attrs}/>`;
+
+  let p = `<svg id="pad" width="${PAD_W}" height="${H}" viewBox="0 0 ${PAD_W} ${H}">`;
+  p += `<rect x="0" y="0" width="${PAD_W}" height="${H}" fill="#0a0d12" stroke="#2a3341"/>`;
+  // parking strip - runs along +X, beyond the far edge of the board
+  p += rct(g.graveyard_x, g.origin_y, g.graveyard_x + g.graveyard_depth,
+           g.origin_y + g.board_span, 'fill="#241a30" stroke="#6d4a8f"');
+  g.slots.forEach(([x, y]) => {
+    p += `<circle cx="${sx(x)}" cy="${sy(y)}" r="4" fill="none" stroke="#8b5fbf" stroke-width="1"/>`;
+  });
+  // board squares
+  for (let f = 0; f < 8; f++) for (let r = 0; r < 8; r++){
+    const x0 = g.origin_x + f * g.square, y0 = g.origin_y + r * g.square;
+    p += rct(x0, y0, x0 + g.square, y0 + g.square,
+             `fill="${(f + r) % 2 ? "#182234" : "#101724"}" stroke="#25405f" stroke-width=".6"`);
+  }
+  p += rct(g.origin_x, g.origin_y, g.origin_x + g.board_span, g.origin_y + g.board_span,
+           'fill="none" stroke="#4c9aff" stroke-width="1.4"');
+  // labels - anchored to the board edge nearest the drawn origin
+  // With origin_y = 0 the board touches the bottom of the envelope, so a
+  // label placed below it falls outside the SVG and is clipped. Drop it
+  // just inside the board edge when there is no room outside.
+  const yEdge = Math.max(sy(g.origin_y), sy(g.origin_y + g.board_span));
+  const yLab = (yEdge + 12 > H - 2) ? yEdge - 4 : yEdge + 12;
+  const xLab = Math.min(sx(g.origin_x), sx(g.origin_x + g.board_span)) - 7;
+  // Label by what the square ACTUALLY is at that grid position - with files
+  // reversed, the column nearest home is h, not a.
+  for (let f = 0; f < 8; f++)
+    p += `<text x="${sx(g.origin_x + (f + .5) * g.square)}" y="${yLab}"
+            fill="#6b7f99" text-anchor="middle" font-size="9">${"abcdefgh"[g.files_reversed ? 7 - f : f]}</text>`;
+  for (let r = 0; r < 8; r++)
+    p += `<text x="${xLab}" y="${sy(g.origin_y + (r + .5) * g.square) + 3}"
+            fill="#6b7f99" text-anchor="middle" font-size="9">${g.ranks_reversed ? 8 - r : r + 1}</text>`;
+  // home marker + crosshair
+  p += `<circle cx="${sx(0)}" cy="${sy(0)}" r="6" fill="none" stroke="#3fb950" stroke-width="1.5"/>`;
+  p += `<text x="${sx(0)}" y="${sy(0) + (VIEW.flip_y ? 18 : -10)}" fill="#3fb950"
+          font-size="9" text-anchor="middle">home 0,0</text>`;
+  p += `<g id="cross"><line id="ch" stroke="#f0883e" stroke-width="1"/>
+        <line id="cv" stroke="#f0883e" stroke-width="1"/>
+        <circle id="cc" r="4" fill="none" stroke="#f0883e" stroke-width="1.6"/></g>`;
+  p += `</svg>`;
+  $("#padWrap").innerHTML = p;
+  PAD = {s, H, sx, sy};
+  const svg = $("#pad");
+  svg.addEventListener("mousemove", e => {
+    const m = toMM(e); $("#hoverTxt").textContent = `X ${m.x.toFixed(1)}  Y ${m.y.toFixed(1)} mm` +
+      (m.sq ? `   (${m.sq})` : "");
+  });
+  svg.addEventListener("mouseleave", () => $("#hoverTxt").textContent = "—");
+  svg.addEventListener("click", async e => {
+    const m = toMM(e);
+    await api("/api/goto", {x: m.x, y: m.y, magnet: $("#padMag").checked});
+  });
+}
+function toMM(e){
+  const r = $("#pad").getBoundingClientRect();
+  let x = (e.clientX - r.left) / PAD.s;
+  let y = (PAD.H - (e.clientY - r.top)) / PAD.s;
+  // Undo the display mirroring so the mm we send is the true machine
+  // coordinate, whatever way the view happens to be drawn.
+  if (VIEW.flip_x) x = GEO.max_x - x;
+  if (VIEW.flip_y) y = GEO.max_y - y;
+  x = Math.min(Math.max(x, 0), GEO.max_x); y = Math.min(Math.max(y, 0), GEO.max_y);
+  let sq = null;
+  const fi = Math.floor((x - GEO.origin_x) / GEO.square), ri = Math.floor((y - GEO.origin_y) / GEO.square);
+  if (fi >= 0 && fi < 8 && ri >= 0 && ri < 8)
+    sq = "abcdefgh"[GEO.files_reversed ? 7 - fi : fi] + ((GEO.ranks_reversed ? 7 - ri : ri) + 1);
+  if ($("#padSnap").checked && sq){ const c = GEO.squares[sq]; x = c[0]; y = c[1]; }
+  return {x: +x.toFixed(2), y: +y.toFixed(2), sq};
+}
+function drawCross(x, y){
+  if (!PAD) return;
+  const X = PAD.sx(x), Y = PAD.sy(y);
+  const ch = $("#ch"), cv = $("#cv"), cc = $("#cc");
+  if (!ch) return;
+  ch.setAttribute("x1", 0); ch.setAttribute("x2", PAD_W); ch.setAttribute("y1", Y); ch.setAttribute("y2", Y);
+  cv.setAttribute("y1", 0); cv.setAttribute("y2", PAD.H); cv.setAttribute("x1", X); cv.setAttribute("x2", X);
+  cc.setAttribute("cx", X); cc.setAttribute("cy", Y);
+}
+
+$("#goManual").onclick = () => api("/api/goto", {x: +$("#mx").value || 0, y: +$("#my").value || 0});
+$("#btnHome").onclick  = () => api("/api/home", {});
+$("#btnPark").onclick  = () => api("/api/park", {});
+$("#magOn").onclick    = () => api("/api/magnet", {on: true});
+$("#magOff").onclick   = () => api("/api/magnet", {on: false});
+$("#btnStatus").onclick= () => api("/api/raw", {command: "STATUS"});
+$("#clearAbort").onclick = () => api("/api/clear-abort", {});
+$("#applySpeed").onclick = async () => {
+  await api("/api/setting", {key: "max.speed", value: +$("#setSpeed").value});
+  await api("/api/setting", {key: "max.accel", value: +$("#setAccel").value});
+};
+$("#showCfg").onclick = () => api("/api/raw", {command: "CFG"});
+$("#estop").onclick    = () => api("/api/stop", {});
+$("#rawGo").onclick    = () => { api("/api/raw", {command: $("#rawIn").value}); $("#rawIn").value = ""; };
+$("#rawIn").onkeydown  = e => { if (e.key === "Enter") $("#rawGo").click(); };
+document.querySelectorAll("[data-jog]").forEach(b => b.onclick = () => {
+  const [dx, dy] = b.dataset.jog.split(",").map(Number);
+  const st = +$("#jogStep").value || 10;
+  api("/api/goto", {x: Math.min(Math.max(LASTX + dx * st, 0), GEO.max_x),
+                    y: Math.min(Math.max(LASTY + dy * st, 0), GEO.max_y)});
+});
+
+/* ---------------- chess board ---------------- */
+const GLYPH = {p:"♟",n:"♞",b:"♝",r:"♜",q:"♛",k:"♚"};
+let SEL = null, TARGETS = [], LASTMOVE = [], POS = {};
+function buildBoard(){
+  const el = $("#board"); el.innerHTML = "";
+  // Same display-only mirroring as the pad, so the two always agree with
+  // each other and with what you see on the physical board.
+  const ranks = VIEW.flip_y ? [0,1,2,3,4,5,6,7] : [7,6,5,4,3,2,1,0];
+  const files = VIEW.flip_x ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
+  for (const r of ranks) for (const f of files){
+    const name = "abcdefgh"[f] + (r + 1);
+    const d = document.createElement("div");
+    d.className = "sq " + ((f + r) % 2 ? "l" : "d");
+    d.dataset.sq = name;
+    d.innerHTML = `<span class="glyph"></span><span class="lbl">${name}</span>`;
+    d.onclick = () => clickSquare(name);
+    el.appendChild(d);
+  }
+}
+function fenToPos(fen){
+  const rows = fen.split(" ")[0].split("/"); const pos = {};
+  rows.forEach((row, i) => {
+    let f = 0;
+    for (const ch of row){
+      if (/\d/.test(ch)) { f += +ch; continue; }
+      pos["abcdefgh"[f] + (8 - i)] = ch; f++;
+    }
+  });
+  return pos;
+}
+function renderBoard(){
+  document.querySelectorAll("#board .sq").forEach(d => {
+    const n = d.dataset.sq, pc = POS[n];
+    const g = d.querySelector(".glyph");
+    g.textContent = pc ? GLYPH[pc.toLowerCase()] : "";
+    d.classList.toggle("w", !!pc && pc === pc.toUpperCase());
+    d.classList.toggle("b", !!pc && pc === pc.toLowerCase());
+    d.classList.toggle("sel", n === SEL);
+    d.classList.toggle("tgt", TARGETS.includes(n));
+    d.classList.toggle("occ", TARGETS.includes(n) && !!pc);
+    d.classList.toggle("last", LASTMOVE.includes(n));
+  });
+}
+async function clickSquare(name){
+  if (SEL && TARGETS.includes(name)){
+    const from = SEL; SEL = null; TARGETS = []; renderBoard();
+    const j = await api("/api/game/move", {from, to: name});
+    if (j.ok) $("#boardHint").textContent = j.san + ": " +
+      j.actions.map(a => a.kind === "park" ? "park " + a.from :
+                         a.kind === "move" ? a.from + "→" + a.to : a.why).join(", ");
+    return;
+  }
+  if (SEL === name){ SEL = null; TARGETS = []; renderBoard(); return; }
+  const j = await api("/api/game/targets?from=" + name);
+  SEL = (j.targets && j.targets.length) ? name : null;
+  TARGETS = j.targets || [];
+  renderBoard();
+}
+$("#sanGo").onclick = async () => {
+  const v = $("#sanIn").value.trim(); if (!v) return;
+  const j = await api("/api/game/move", {san: v});
+  if (j.ok) $("#sanIn").value = "";
+};
+$("#sanIn").onkeydown = e => { if (e.key === "Enter") $("#sanGo").click(); };
+$("#gNew").onclick    = () => api("/api/game/reset", {});
+$("#gUndo").onclick   = () => api("/api/game/undo", {});
+$("#gResync").onclick = () => api("/api/game/resync", {});
+$("#homeMode").onchange = e => api("/api/game/options", {home_mode: e.target.value});
+async function setFlip(){
+  const j = await api("/api/view", {flip_x: $("#flipX").checked, flip_y: $("#flipY").checked});
+  if (j.ok){
+    VIEW = j.view;
+    buildPad(); drawCross(LASTX, LASTY);
+    buildBoard(); renderBoard();
+  }
+}
+$("#flipX").onchange = setFlip;
+$("#flipY").onchange = setFlip;
+
+/* ---------------- polling ---------------- */
+let SEQ = 0, LASTX = 0, LASTY = 0, LASTFEN = "";
+async function poll(){
+  try{
+    const r = await fetch("/api/state?since=" + SEQ);
+    const j = await r.json();
+    if (!j.ok) return;
+    const s = j.state, g = j.game;
+
+    CONNECTED = s.connected;
+    $("#dotConn").className = "dot" + (s.connected ? " on" : "");
+    $("#connTxt").textContent = s.connected
+      ? (s.simulate ? "simulated" : s.port + " @ " + s.baud) : "offline";
+    $("#connect").textContent = s.connected ? "Disconnect" : "Connect";
+    $("#dotBusy").className = "dot" + (s.busy ? " busy" : " on");
+    $("#busyTxt").textContent = s.busy ? (s.job || "working") + (s.queued > 1 ? ` +${s.queued - 1}` : "") : "idle";
+    $("#posTxt").innerHTML = `X ${s.x.toFixed(1)} &nbsp; Y ${s.y.toFixed(1)}` +
+      (s.magnet ? ' &nbsp;<b style="color:var(--mag)">MAG</b>' : "");
+    LASTX = s.x; LASTY = s.y; drawCross(s.x, s.y);
+    $("#dotLimX").className = "dot" + (s.lim_x ? "" : " on");
+    $("#dotLimY").className = "dot" + (s.lim_y ? "" : " on");
+    $("#limPill").title = (s.lim_x || s.lim_y)
+      ? "A limit switch is currently TRIGGERED" : "both limit switches open";
+
+    if (j.view && (j.view.flip_x !== VIEW.flip_x || j.view.flip_y !== VIEW.flip_y)){
+      VIEW = j.view; $("#flipX").checked = VIEW.flip_x; $("#flipY").checked = VIEW.flip_y;
+      buildPad(); buildBoard(); renderBoard();
+    }
+
+    const bs = $("#bannerSync");
+    if (g.desynced){ bs.textContent = "⚠ " + g.desync_note; bs.classList.add("show"); }
+    else if (s.link_down){
+      bs.textContent = "⚠ USB link lost — the Uno unplugged, reset or browned out. "
+        + "Check the cable, then press Connect again. If this happens during moves, "
+        + "suspect the electromagnet: check its flyback diode and give the coil its "
+        + "own supply rather than sharing USB power.";
+      bs.classList.add("show");
+    }
+    else if (s.limits_mismatch && s.limits_mismatch.length){
+      bs.textContent = "⚠ Firmware soft limits disagree with this app: " +
+        s.limits_mismatch.join(", ") + ". Moves into the parking strip will be " +
+        "refused with ERR RANGE. Send DEFAULTS (or the SET commands in the log) " +
+        "on the Console tab.";
+      bs.classList.add("show");
+    }
+    else if (s.aborted && s.connected){ bs.textContent = "STOP latched — press “Clear STOP latch” on the XY Pad tab, then re-home."; bs.classList.add("show"); }
+    else bs.classList.remove("show");
+
+    if (g.fen !== LASTFEN){
+      LASTFEN = g.fen; POS = fenToPos(g.fen);
+      const h = g.history; LASTMOVE = h.length ? [h[h.length - 1].slice(0, 2), h[h.length - 1].slice(2, 4)] : [];
+      SEL = null; TARGETS = []; renderBoard();
+      $("#gMoves").innerHTML = "";
+      for (let i = 0; i < g.san_history.length; i += 2){
+        const li = document.createElement("li");
+        li.textContent = g.san_history[i] + " " + (g.san_history[i + 1] || "");
+        $("#gMoves").appendChild(li);
+      }
+      $("#gGrave").innerHTML = g.graveyard.map(c =>
+        `<span style="color:${c === c.toUpperCase() ? "#fff" : "#8b97a8"}">${GLYPH[c.toLowerCase()] || "?"}</span>`).join("");
+    }
+    $("#gTurn").textContent = g.turn + (g.check ? " (in check)" : "");
+    $("#gState").textContent = g.game_over ? (g.termination + " " + g.result) : "in progress";
+    $("#gGraveN").textContent = g.graveyard_used + " / " + g.graveyard_capacity;
+    if (document.activeElement !== $("#homeMode")) $("#homeMode").value = j.home_mode;
+
+    if (j.log && j.log.length){
+      const box = $("#log"); const stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 24;
+      j.log.forEach(e => {
+        SEQ = Math.max(SEQ, e.seq);
+        const d = document.createElement("div");
+        d.className = e.kind; d.textContent = e.text;
+        box.appendChild(d);
+      });
+      while (box.children.length > 500) box.removeChild(box.firstChild);
+      if (stick) box.scrollTop = box.scrollHeight;
+    }
+  } catch(err){ /* server restarting - ignore */ }
+}
+
+(async function init(){
+  buildBoard();
+  const j = await api("/api/geometry");
+  GEO = j.geometry; buildPad();
+  $("#geoTxt").textContent = GEO.describe;
+  await loadPorts();
+  setInterval(poll, 350);
+  poll();
+})();
+</script>
+</body>
+</html>
