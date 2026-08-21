@@ -7,6 +7,7 @@ callbacks are kept independent from BlueZ so they can be tested on a laptop.
 from collections.abc import Callable
 import json
 import threading
+import time
 
 from pi_agent.ble_protocol import (
     CONTROL_UUID,
@@ -60,6 +61,10 @@ class GattServer:
         self._control_characteristic = None
         self._wifi_characteristic = None
         self._status_characteristic = None
+        # BlueZ/GATT notifications must be serialized.  Setting a
+        # characteristic repeatedly in the same callback can replace an
+        # earlier notification before the central has received it.
+        self._send_lock = threading.Lock()
 
         self._thread: threading.Thread | None = None
         self.adapter_address = adapter_address
@@ -169,12 +174,17 @@ class GattServer:
 
         self._send_replies(self._status_characteristic, encode_chunks(self._status))
 
-    @staticmethod
-    def _send_replies(characteristic: object | None, replies: list[bytes]) -> None:
-        """Emit every response frame; long JSON messages use chunk frames."""
-        if characteristic:
-            for reply in replies:
+    def _send_replies(self, characteristic: object | None, replies: list[bytes]) -> None:
+        """Emit response frames one at a time so BLE notifications are not lost."""
+        if not characteristic or not replies:
+            return
+        with self._send_lock:
+            for index, reply in enumerate(replies):
                 characteristic.set_value(list(reply))
+                # BlueZ may coalesce rapid value changes. Give the controller
+                # time to transmit each notification before replacing it.
+                if index + 1 < len(replies):
+                    time.sleep(0.02)
 
     def handle_wifi(self, raw: bytes) -> list[bytes]:
         """Decode and process a Wi-Fi provisioning message."""

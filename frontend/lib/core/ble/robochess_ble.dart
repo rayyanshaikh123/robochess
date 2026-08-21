@@ -40,6 +40,7 @@ class RoboChessBleClient {
   final _messages = StreamController<Map<String, dynamic>>.broadcast();
   final Map<String, List<List<int>>> _chunks = {};
   final Map<String, Timer> _chunkExpiry = {};
+  Future<void> _writeQueue = Future<void>.value();
 
   Stream<List<ScanResult>> scan({Duration timeout = const Duration(seconds: 8)}) async* {
     if (await FlutterBluePlus.adapterState.first != BluetoothAdapterState.on) {
@@ -140,7 +141,18 @@ class RoboChessBleClient {
 
   Future<void> sendControl(Map<String, dynamic> value) => _writeChunks(_control, value);
 
-  Future<void> _writeChunks(BluetoothCharacteristic? characteristic, Map<String, dynamic> value) async {
+  Future<void> _writeChunks(BluetoothCharacteristic? characteristic, Map<String, dynamic> value) {
+    // Keep commands ordered. This matters when a user submits the next move
+    // while the previous command's state notification is still arriving.
+    final operation = _writeQueue.then<void>(
+      (_) => _writeChunksNow(characteristic, value),
+      onError: (_, __) => _writeChunksNow(characteristic, value),
+    );
+    _writeQueue = operation;
+    return operation;
+  }
+
+  Future<void> _writeChunksNow(BluetoothCharacteristic? characteristic, Map<String, dynamic> value) async {
     if (characteristic == null) throw StateError('BLE characteristic is unavailable');
     // BlueZ can expose the RoboChess secure-write characteristic as either
     // WRITE or WRITE WITHOUT RESPONSE, depending on the Android Bluetooth
@@ -162,6 +174,10 @@ class RoboChessBleClient {
         bytes.sublist(offset, end),
         withoutResponse: withoutResponse,
       );
+      if (withoutResponse && end < bytes.length) {
+        // Without-response writes are not flow-controlled by the platform.
+        await Future<void>.delayed(const Duration(milliseconds: 15));
+      }
     }
   }
 
