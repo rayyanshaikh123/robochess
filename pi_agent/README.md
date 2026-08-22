@@ -180,17 +180,16 @@ ROBOCHESS_UNO_PORT=/dev/ttyACM0
 ROBOCHESS_UNO_BAUDRATE=115200
 ```
 
-The Uno must acknowledge every JSON-lines motion request defined in
+The Uno must acknowledge every ASCII command defined in
 [PROTOCOL.md](PROTOCOL.md). The Pi handles normal moves, captures, castling,
 en passant, and promotion. A missing acknowledgement stops play in recovery;
 the chess state is not advanced.
 
 Before the app begins a physical game it must call `gantry.home`, then
-`gantry.status`. Your Uno firmware must implement limit-switch homing and
-return its `homed`, `limits`, `fault`, and `calibration_revision` fields in
-the acknowledgement. The Pi deliberately does not guess motor steps, board
-orientation, electromagnet timing, or capture-bin coordinates—those are
-hardware-specific firmware calibration values.
+`gantry.status`. The Pi verifies `HOMED=1` before issuing motion. The Uno
+remains responsible for limit-switch and motor safety; the Pi owns board
+geometry, coordinate conversion, path planning, electromagnet sequencing, and
+capture-bin coordinates.
 
 ## Camera integration
 
