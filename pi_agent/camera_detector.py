@@ -98,11 +98,13 @@ class PiCameraDetector:
         return frame
 
     def status(self) -> dict:
+        recognizer_status = self.recognizer.status() if self.recognizer else {}
         return {
             "model_available": self.model_available,
             "calibrated": self.calibrated,
             "model_path_configured": bool(self.model_path),
             "last_error": self.last_error,
+            "detector": recognizer_status,
         }
 
     def detect_candidates(self, session) -> list[str]:

@@ -19,11 +19,23 @@ The BlueZ deployment must require encrypted, bonded pairing before exposing game
 Small messages are one UTF-8 JSON BLE write/notification. Long Pi responses
 are sent as compact chunk frames: `{"v":"1","t":"chunk","id":"request-id","d":"device-id","i":0,"n":3,"p":"base64"}`. Reassemble frames by `id`, sort by `i`, concatenate base64-decoded `p` values after all `n` chunks arrive, then decode the resulting UTF-8 JSON envelope. Discard incomplete sequences after 10 seconds and request state again. App-to-Pi JSON may be fragmented across multiple writes; the Pi reassembles it before parsing.
 
-## Uno JSON-lines protocol
+## Uno ASCII serial protocol
 
-Pi sends one line: `{"type":"motion.execute","id":"uuid","uci":"e7e5","operations":[...]}`. The Uno must send exactly one matching line: `{"type":"ack","id":"uuid","ok":true}` after all operations complete, or `{"type":"error","id":"uuid","ok":false,"error":"..."}`. Operations are `move` (`from`, `to`), `remove` (`square`), and `promote` (`square`, `piece`). The Pi retries the same request ID once, then enters recovery.
+The Pi owns chess-to-coordinate conversion and sends one uppercase command per
+line at 115200 baud. The Uno returns one or more lines, terminating success
+with `OK`, `DONE`, or `READY`, and failure with `ERR`, `ERROR`, `FAIL`, or
+`ALARM`.
 
-Before accepting a game, the Flutter/iPhone app must send `gantry.home`; the Uno must complete both limit-switch homing axes and acknowledge only after it sets machine zero. `gantry.status` returns Uno-reported homed state, limit-switch state, fault code, and calibration revision. Coordinate conversion is deliberately owned by Uno firmware, where the calibrated X/Y steps-per-square, offsets, electromagnet timing, and capture-bin position can be kept atomically with motion control.
+Supported commands are `PING`, `STATUS`, `HOME`, `MOVEXY <x_mm> <y_mm>`,
+`JOG <axis> <mm>`, `MAG ON|OFF`, and `STOP`. The Pi retries failed commands
+according to its timeout policy, releases the magnet on motion failure, and
+enters game recovery when execution cannot be verified.
+
+Before physical move execution, the Flutter/iPhone app should send
+`gantry.home`; the Pi verifies `HOMED=1` through `STATUS` and refuses to issue
+`MOVEXY` otherwise. Limit-switch supervision and low-level motor safety remain
+inside the Uno. Coordinate conversion, path planning, electromagnet timing,
+and capture-bin handling remain in the Pi.
 
 ## Backend reconciliation endpoint
 

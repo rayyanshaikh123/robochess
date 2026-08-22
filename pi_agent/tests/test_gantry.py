@@ -121,8 +121,9 @@ class UnoControllerTests(unittest.TestCase):
         verbs = [c.split()[0] for c in transport.commands]
         self.assertEqual(verbs.count("MAG"), 2)
         # Magnet on only after arriving at the source square.
-        self.assertEqual(verbs[0], "MOVEXY")
-        self.assertEqual(transport.commands[1], "MAG ON")
+        self.assertEqual(verbs[0], "STATUS")
+        self.assertEqual(transport.commands[1], "MOVEXY")
+        self.assertEqual(transport.commands[2], "MAG ON")
         self.assertEqual(verbs[-1], "MOVEXY")  # parked at the end
 
     def test_capture_removes_the_taken_piece_before_moving(self):
@@ -174,6 +175,20 @@ class UnoControllerTests(unittest.TestCase):
         uno, _ = self._controller()
         self.assertTrue(uno.ping())
         self.assertTrue(uno.status()["homed"])
+
+    def test_unhomed_gantry_is_rejected_before_motion(self):
+        class UnhomedTransport(SimulatedTransport):
+            def send(self, command, timeout):
+                self.commands.append(command)
+                if command.split()[0].upper() == "STATUS":
+                    return True, ["OK X=0.00 Y=0.00 HOMED=0 MAG=OFF LIMX=0 LIMY=0"]
+                return super().send(command, timeout)
+
+        transport = UnhomedTransport()
+        uno = UnoController(transport, retries=0)
+        with self.assertRaises(UnoError):
+            uno.execute(motion_plan(chess.Board(), chess.Move.from_uci("e2e4")))
+        self.assertEqual([c.split()[0] for c in transport.commands], ["STATUS"])
 
 
 if __name__ == "__main__":
