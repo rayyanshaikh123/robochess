@@ -17,7 +17,12 @@ class DeviceApiClient:
             timeout=10,
         )
         response.raise_for_status()
-        data = response.json().get("data", {})
+        payload = response.json()
+        if payload.get("status") != "ok":
+            raise RuntimeError(payload.get("message", "Device connection rejected"))
+        data = payload.get("data") or {}
+        if not data.get("device_token"):
+            raise RuntimeError("Backend returned no device token")
         self.device_token = data.get("device_token")
         return data
 

@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/ble/robochess_ble.dart';
 import '../providers/device_provider.dart';
+import '../providers/session_provider.dart';
 
 class BleProvisionScreen extends ConsumerStatefulWidget {
   const BleProvisionScreen({super.key});
@@ -94,10 +95,11 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
         final network = Map<String, dynamic>.from(
           ((response['data'] as Map)['network'] as Map?) ?? const {},
         );
-        if (network['internet_available'] != true && mounted) {
+        if (network['wifi_connected'] != true && mounted) {
           setState(() {
             _needsWifi = true;
-            _message = 'Board needs Wi-Fi before it can link to your account.';
+            _message =
+                'Board is not connected to Wi-Fi. Enter its Wi-Fi credentials to link it.';
           });
           return;
         }
