@@ -62,12 +62,44 @@ def main() -> None:
         "backend_available": False,
     }
 
+    def claim_pending_token() -> dict:
+        token = store.load().get("onboarding_token")
+        if not token:
+            return {"status": "no_token"}
+        if not api.device_token and DEVICE_SECRET:
+            api.connect(DEVICE_ID, DEVICE_SECRET)
+        if not api.device_token:
+            return {"status": "error", "error": "Pi backend credentials are not configured"}
+        result = api.claim(token)
+        store.save({})
+        network_config["backend_available"] = True
+        return {"status": "token_claimed", "device": result}
+
     def on_control(message: dict) -> dict:
         data = message.get("data") or {}
         token = data.get("onboarding_token")
         if token:
             store.set_onboarding_token(token)
-            return {"status": "token_saved"}
+            try:
+                result = claim_pending_token()
+                if result.get("status") == "error":
+                    network_state = network.status(
+                        INTERNET_CHECK_ENABLED,
+                        INTERNET_CHECK_URL,
+                        INTERNET_CHECK_TIMEOUT_SECONDS,
+                    )
+                    if not network_state.internet_available:
+                        return {"status": "token_saved"}
+                return result
+            except Exception as exc:
+                network_state = network.status(
+                    INTERNET_CHECK_ENABLED,
+                    INTERNET_CHECK_URL,
+                    INTERNET_CHECK_TIMEOUT_SECONDS,
+                )
+                if not network_state.internet_available:
+                    return {"status": "token_saved"}
+                return {"status": "error", "error": str(exc)}
         if message.get("type") == "network.status":
             return {"status": "network_status", "network": network.status(
                 INTERNET_CHECK_ENABLED,
@@ -84,6 +116,9 @@ def main() -> None:
             result = network.wait_until_connected()
             if not result.connected:
                 raise NetworkManagerError(result.error or "Wi-Fi connection failed")
+            claim = claim_pending_token()
+            if claim.get("status") == "error":
+                raise NetworkManagerError(claim.get("error", "Cloud linking failed"))
             if api.device_token:
                 api.update_status("wifi_connected", wifi_status="connected")
             return {"status": "wifi_connected", "ssid": result.ssid}
@@ -129,16 +164,14 @@ def main() -> None:
             api.connect(DEVICE_ID, DEVICE_SECRET)
             network_config["backend_available"] = True
         except Exception as exc:
-            # BLE gameplay and the physical board deliberately remain usable offline.
-            print(f"Backend unavailable; starting in offline mode: {exc}")
+            print(f"Backend unavailable; cloud linking is unavailable until this is fixed: {exc}")
     else:
-        print("No backend device secret configured; starting BLE board in local-only mode.")
+        print("No backend device secret configured; cloud linking is unavailable.")
 
     onboarding_token = store.load().get("onboarding_token")
     if onboarding_token:
         try:
-            api.claim(onboarding_token)
-            store.save({})
+            claim_pending_token()
         except Exception as exc:
             print(f"Device claim pending: {exc}")
 

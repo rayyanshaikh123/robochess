@@ -4,7 +4,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import '../widgets/animated_profile_avatar.dart';
 import '../providers/device_provider.dart';
-import '../providers/local_board_provider.dart';
 import '../../domain/models/device_model.dart';
 import 'dart:math' as math;
 
@@ -217,46 +216,10 @@ DeviceModel? _resolveActiveDevice(
 }
 
 class _LinkedBoards extends ConsumerWidget {
-  Widget _localBoardCard(BuildContext context, String deviceId) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: kSurfaceContHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.bluetooth_connected, color: kPrimary),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Local RoboChess board'),
-                const SizedBox(height: 3),
-                const Text('Saved local board • offline mode'),
-                const SizedBox(height: 3),
-                Text(deviceId),
-              ],
-            ),
-          ),
-          TextButton(
-            onPressed: () => context.go('/local'),
-            child: const Text('OPEN'),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final devicesState = ref.watch(deviceListProvider);
     final selectedId = ref.watch(selectedDeviceProvider);
-    final localState = ref.watch(localBoardProvider);
-    final localDeviceId = ref.watch(localLinkedDeviceIdProvider).valueOrNull ??
-        localState.selected?.deviceId;
 
     return Container(
       width: double.infinity,
@@ -292,8 +255,8 @@ class _LinkedBoards extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
           devicesState.when(
-          data: (items) {
-              if (items.isEmpty && localDeviceId == null) {
+            data: (items) {
+              if (items.isEmpty) {
                 return Text('No boards linked yet.',
                     style: GoogleFonts.inter(
                         fontSize: 12, color: kOnSurfaceVariant));
@@ -307,92 +270,90 @@ class _LinkedBoards extends ConsumerWidget {
               }
               return Column(
                 children: [
-                  if (localDeviceId != null)
-                    _localBoardCard(context, localDeviceId),
                   ...items.map((device) {
                     final isSelected = device.deviceId == selectedId;
                     return Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: kSurfaceContHighest,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isSelected
-                            ? kPrimary
-                            : kOutlineVariant.withOpacity(0.2),
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: kSurfaceContHighest,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isSelected
+                              ? kPrimary
+                              : kOutlineVariant.withOpacity(0.2),
+                        ),
                       ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.memory,
-                            color: device.status == 'connected'
-                                ? kPrimary
-                                : kSecondary,
-                            size: 18),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(device.deviceId,
-                                  style: GoogleFonts.inter(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      color: kOnSurface)),
-                              const SizedBox(height: 4),
-                              Text(device.status.toUpperCase(),
-                                  style: GoogleFonts.inter(
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.w700,
-                                      color: device.status == 'connected'
-                                          ? kPrimary
-                                          : kOnSurfaceVariant)),
-                              const SizedBox(height: 4),
-                              Text(
-                                  device.lastSeen == null
-                                      ? 'Last seen: --'
-                                      : 'Last seen: ${device.lastSeen!.toLocal().toString()}',
-                                  style: GoogleFonts.inter(
-                                      fontSize: 9, color: kOnSurfaceVariant)),
-                            ],
+                      child: Row(
+                        children: [
+                          Icon(Icons.memory,
+                              color: device.status == 'connected'
+                                  ? kPrimary
+                                  : kSecondary,
+                              size: 18),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(device.deviceId,
+                                    style: GoogleFonts.inter(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: kOnSurface)),
+                                const SizedBox(height: 4),
+                                Text(device.status.toUpperCase(),
+                                    style: GoogleFonts.inter(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w700,
+                                        color: device.status == 'connected'
+                                            ? kPrimary
+                                            : kOnSurfaceVariant)),
+                                const SizedBox(height: 4),
+                                Text(
+                                    device.lastSeen == null
+                                        ? 'Last seen: --'
+                                        : 'Last seen: ${device.lastSeen!.toLocal().toString()}',
+                                    style: GoogleFonts.inter(
+                                        fontSize: 9, color: kOnSurfaceVariant)),
+                              ],
+                            ),
                           ),
-                        ),
-                        TextButton(
-                          onPressed: () =>
-                              context.go('/connect/board/${device.deviceId}'),
-                          child: Text('DETAILS',
-                              style: GoogleFonts.inter(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w700,
-                                  color: kSecondary)),
-                        ),
-                        TextButton(
-                          onPressed: () => ref
-                              .read(selectedDeviceProvider.notifier)
-                              .select(device.deviceId),
-                          child: Text(isSelected ? 'ACTIVE' : 'SELECT',
-                              style: GoogleFonts.inter(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w700,
-                                  color: isSelected ? kPrimary : kSecondary)),
-                        ),
-                        IconButton(
-                          onPressed: () async {
-                            await ref
-                                .read(deviceListProvider.notifier)
-                                .unlink(device.deviceId);
-                            if (selectedId == device.deviceId) {
+                          TextButton(
+                            onPressed: () =>
+                                context.go('/connect/board/${device.deviceId}'),
+                            child: Text('DETAILS',
+                                style: GoogleFonts.inter(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700,
+                                    color: kSecondary)),
+                          ),
+                          TextButton(
+                            onPressed: () => ref
+                                .read(selectedDeviceProvider.notifier)
+                                .select(device.deviceId),
+                            child: Text(isSelected ? 'ACTIVE' : 'SELECT',
+                                style: GoogleFonts.inter(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700,
+                                    color: isSelected ? kPrimary : kSecondary)),
+                          ),
+                          IconButton(
+                            onPressed: () async {
                               await ref
-                                  .read(selectedDeviceProvider.notifier)
-                                  .clear();
-                            }
-                          },
-                          icon: const Icon(Icons.link_off,
-                              color: kOnSurfaceVariant, size: 18),
-                        ),
-                      ],
-                    ),
+                                  .read(deviceListProvider.notifier)
+                                  .unlink(device.deviceId);
+                              if (selectedId == device.deviceId) {
+                                await ref
+                                    .read(selectedDeviceProvider.notifier)
+                                    .clear();
+                              }
+                            },
+                            icon: const Icon(Icons.link_off,
+                                color: kOnSurfaceVariant, size: 18),
+                          ),
+                        ],
+                      ),
                     );
                   }).toList(),
                 ],
@@ -403,11 +364,9 @@ class _LinkedBoards extends ConsumerWidget {
               valueColor: AlwaysStoppedAnimation<Color>(kPrimary),
               minHeight: 6,
             ),
-            error: (err, _) => localDeviceId != null
-                ? _localBoardCard(context, localDeviceId)
-                : Text('Failed to load boards.',
-                    style: GoogleFonts.inter(
-                        fontSize: 12, color: kOnSurfaceVariant)),
+            error: (err, _) => Text('Failed to load boards.',
+                style:
+                    GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant)),
           ),
         ],
       ),
@@ -540,7 +499,9 @@ class _RadarSectionState extends State<_RadarSection>
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _StatChip(
-                      icon: Icons.smart_toy, label: 'AI AVAILABLE', color: kSecondary),
+                      icon: Icons.smart_toy,
+                      label: 'AI AVAILABLE',
+                      color: kSecondary),
                   const SizedBox(width: 20),
                   _StatChip(
                       icon: Icons.timer,
