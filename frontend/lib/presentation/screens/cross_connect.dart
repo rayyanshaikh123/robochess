@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import '../widgets/animated_profile_avatar.dart';
 import '../providers/device_provider.dart';
+import '../providers/local_board_provider.dart';
 import '../../domain/models/device_model.dart';
 import 'dart:math' as math;
 
@@ -216,10 +217,46 @@ DeviceModel? _resolveActiveDevice(
 }
 
 class _LinkedBoards extends ConsumerWidget {
+  Widget _localBoardCard(BuildContext context, String deviceId) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: kSurfaceContHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.bluetooth_connected, color: kPrimary),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Local RoboChess board'),
+                SizedBox(height: 3),
+                Text('Saved local board • offline mode'),
+                SizedBox(height: 3),
+                Text(deviceId),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: () => context.go('/local'),
+            child: const Text('OPEN'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final devicesState = ref.watch(deviceListProvider);
     final selectedId = ref.watch(selectedDeviceProvider);
+    final localState = ref.watch(localBoardProvider);
+    final localDeviceId = ref.watch(localLinkedDeviceIdProvider).valueOrNull ??
+        localState.selected?.deviceId;
 
     return Container(
       width: double.infinity,
@@ -255,13 +292,13 @@ class _LinkedBoards extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
           devicesState.when(
-            data: (items) {
-              if (items.isEmpty) {
+          data: (items) {
+              if (items.isEmpty && localDeviceId == null) {
                 return Text('No boards linked yet.',
                     style: GoogleFonts.inter(
                         fontSize: 12, color: kOnSurfaceVariant));
               }
-              if (selectedId == null) {
+              if (selectedId == null && items.isNotEmpty) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   ref
                       .read(selectedDeviceProvider.notifier)
@@ -269,9 +306,12 @@ class _LinkedBoards extends ConsumerWidget {
                 });
               }
               return Column(
-                children: items.map((device) {
-                  final isSelected = device.deviceId == selectedId;
-                  return Container(
+                children: [
+                  if (localDeviceId != null)
+                    _localBoardCard(context, localDeviceId),
+                  ...items.map((device) {
+                    final isSelected = device.deviceId == selectedId;
+                    return Container(
                     margin: const EdgeInsets.only(bottom: 10),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -353,8 +393,9 @@ class _LinkedBoards extends ConsumerWidget {
                         ),
                       ],
                     ),
-                  );
-                }).toList(),
+                    );
+                  }).toList(),
+                ],
               );
             },
             loading: () => const LinearProgressIndicator(
@@ -362,9 +403,11 @@ class _LinkedBoards extends ConsumerWidget {
               valueColor: AlwaysStoppedAnimation<Color>(kPrimary),
               minHeight: 6,
             ),
-            error: (err, _) => Text('Failed to load boards.',
-                style:
-                    GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant)),
+            error: (err, _) => localDeviceId != null
+                ? _localBoardCard(context, localDeviceId)
+                : Text('Failed to load boards.',
+                    style: GoogleFonts.inter(
+                        fontSize: 12, color: kOnSurfaceVariant)),
           ),
         ],
       ),

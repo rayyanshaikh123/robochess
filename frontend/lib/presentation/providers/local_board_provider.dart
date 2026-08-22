@@ -20,6 +20,13 @@ final localBoardRepositoryProvider = Provider<LocalBoardRepository>((ref) {
 final localStateStoreProvider =
     Provider<LocalStateStore>((ref) => LocalStateStore());
 
+/// A BLE board can be usable locally even when the Pi has no backend
+/// credentials. The Link Board screen uses this to distinguish local linking
+/// from account-backed cloud linking.
+final localLinkedDeviceIdProvider = FutureProvider<String?>((ref) {
+  return ref.read(localStateStoreProvider).loadDevice();
+});
+
 class LocalBoardState {
   final List<RoboChessDevice> devices;
   final RoboChessDevice? selected;

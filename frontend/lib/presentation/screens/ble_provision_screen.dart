@@ -3,9 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/ble/robochess_ble.dart';
+import '../../data/repositories/local_state_store.dart';
 import '../providers/device_provider.dart';
+import '../providers/local_board_provider.dart';
 import '../providers/session_provider.dart';
 
 class BleProvisionScreen extends ConsumerStatefulWidget {
@@ -19,6 +22,7 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
   final _ble = RoboChessBleClient();
   final _ssid = TextEditingController();
   final _password = TextEditingController();
+  final _localStateStore = LocalStateStore();
   StreamSubscription<List<ScanResult>>? _scanSubscription;
   StreamSubscription<String>? _statusSubscription;
   final _devices = <String, RoboChessBleDevice>{};
@@ -75,8 +79,21 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
       final deviceId = _selectedDeviceId ?? await _ble.connectAndReadDeviceId(candidate.result.device);
       _selectedDeviceId = deviceId;
       _selectedRemoteId = candidate.result.device.remoteId.str;
+      // Persist the local BLE link immediately. Cloud onboarding may be
+      // unavailable, but the board is still usable through the Pi locally.
+      await _localStateStore.saveDevice(deviceId);
+      ref.invalidate(localLinkedDeviceIdProvider);
       if (_needsWifi != true) {
         setState(() => _message = 'Checking the board network...');
+        // Subscribe before writing: the Pi can answer immediately and a
+        // listener created afterward loses the response.
+        final networkResponse = _ble.messages
+            .firstWhere(
+              (message) =>
+                  message['type'] == 'control.result' &&
+                  (message['data'] as Map?)?['status'] == 'network_status',
+            )
+            .timeout(const Duration(seconds: 8));
         await _ble.sendControl({
           'version': bleProtocolVersion,
           'request_id': DateTime.now().microsecondsSinceEpoch.toString(),
@@ -84,42 +101,74 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
           'device_id': deviceId,
           'data': const {},
         });
-        final response = await _ble.messages.firstWhere(
-          (message) => message['type'] == 'control.result' &&
-              (message['data'] as Map?)?['status'] == 'network_status',
-        ).timeout(const Duration(seconds: 8));
+        final response = await networkResponse;
         final network = Map<String, dynamic>.from(
           ((response['data'] as Map)['network'] as Map?) ?? const {},
         );
         if (network['internet_available'] == true) {
-          if (mounted) setState(() => _message = 'Board already has internet. Wi-Fi provisioning is not required.');
-          await ref.read(deviceListProvider.notifier).load();
+          if (mounted) {
+            setState(() => _message = 'Board has internet. Linking it to your account...');
+          }
+          // Continue to onboarding even when Wi-Fi is already configured;
+          // networking and account linking are separate steps.
+        } else {
+          if (mounted) {
+            setState(() {
+              _needsWifi = true;
+              _message = 'Board has no internet. Configure Wi-Fi or continue locally.';
+            });
+          }
           return;
         }
-        if (mounted) {
-          setState(() {
-            _needsWifi = true;
-            _message = 'Board has no internet. Configure Wi-Fi or continue locally.';
-          });
-        }
-        return;
       }
-      if (_ssid.text.trim().isEmpty || _password.text.isEmpty) {
+      final needsWifi = _needsWifi == true;
+      if (needsWifi && (_ssid.text.trim().isEmpty || _password.text.isEmpty)) {
         setState(() => _message = 'Enter the Wi-Fi network and password first.');
         return;
       }
       setState(() => _message = 'Requesting secure onboarding token...');
       final token = await ref.read(deviceRepositoryProvider).onboardingToken(deviceId: deviceId);
+      final onboardingResponse = _ble.messages
+          .firstWhere((message) {
+            if (message['type'] != 'control.result') return false;
+            final data = message['data'];
+            if (data is! Map) return false;
+            final status = data['status']?.toString();
+            return status == 'token_claimed' ||
+                status == 'token_saved' ||
+                status == 'error';
+          })
+          .timeout(const Duration(seconds: 8));
       await _ble.sendOnboardingToken(deviceId, token);
-      setState(() => _message = 'Sending Wi-Fi credentials...');
-      await _ble.sendWifi(deviceId, _ssid.text.trim(), _password.text);
-      _statusSubscription = _ble.statusStream.listen((status) {
-        if (mounted) setState(() => _message = status);
-      });
+      final onboarding = await onboardingResponse;
+      final onboardingData = onboarding['data'];
+      if (onboardingData is Map && onboardingData['status'] == 'error') {
+        throw StateError(onboardingData['error']?.toString() ?? 'Board onboarding failed');
+      }
+      if (needsWifi) {
+        setState(() => _message = 'Sending Wi-Fi credentials...');
+        // Subscribe before writing for the same reason as network.status.
+        _statusSubscription = _ble.statusStream.listen((status) {
+          if (mounted) setState(() => _message = status);
+        });
+        await _ble.sendWifi(deviceId, _ssid.text.trim(), _password.text);
+      } else {
+        setState(() => _message = 'Board linked. Refreshing linked boards...');
+      }
       await ref.read(deviceListProvider.notifier).load();
-      if (mounted) setState(() => _message = 'Provisioning started. The board will appear online when connected.');
+      if (mounted) {
+        context.go('/connect');
+      }
     } catch (error) {
-      if (mounted) setState(() => _message = 'Provisioning failed: $error');
+      // Bluetooth connection and cloud onboarding are independent. If BLE
+      // succeeded, keep the local board link even when the Pi/backend
+      // credentials are missing or the backend is temporarily unavailable.
+      if (_selectedDeviceId != null && mounted) {
+        ref.invalidate(localLinkedDeviceIdProvider);
+        context.go('/connect');
+      } else if (mounted) {
+        setState(() => _message = 'Provisioning failed: $error');
+      }
     } finally {
       if (mounted) setState(() => _working = false);
     }
@@ -141,7 +190,12 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
             TextField(controller: _password, obscureText: true, decoration: const InputDecoration(labelText: 'Wi-Fi password')),
             const SizedBox(height: 8),
             OutlinedButton(
-              onPressed: _working ? null : () => setState(() => _message = 'Continuing offline locally. Camera calibration and local games remain available.'),
+              onPressed: _working
+                  ? null
+                  : () {
+                      ref.invalidate(localLinkedDeviceIdProvider);
+                      context.go('/connect');
+                    },
               child: const Text('CONTINUE OFFLINE LOCALLY'),
             ),
             const SizedBox(height: 8),

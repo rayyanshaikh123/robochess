@@ -54,33 +54,55 @@ class RoboChessBleClient {
   }
 
   Future<String> connectAndReadDeviceId(BluetoothDevice device) async {
-    await device.connect(timeout: const Duration(seconds: 15), autoConnect: false);
-    // iOS owns the pairing UI; Android also bonds automatically on the first
-    // authenticated write. Do not force a platform-specific bond dialog here.
-    _device = device;
-    final services = await device.discoverServices();
-    final service = services.firstWhere(
-      (item) => item.uuid == Guid(roboChessServiceUuid),
-      orElse: () => throw StateError('RoboChess BLE service not found'),
-    );
-    BluetoothCharacteristic find(String uuid) => service.characteristics.firstWhere(
-          (item) => item.uuid == Guid(uuid),
-          orElse: () => throw StateError('BLE characteristic not found: $uuid'),
-        );
-    final info = find(deviceInfoUuid);
-    _control = find(controlUuid);
-    _wifi = find(wifiUuid);
-    _status = find(statusUuid);
-    if (_control!.properties.notify) {
-      await _control!.setNotifyValue(true);
-      _controlSubscription = _control!.onValueReceived.listen(_handleFrame);
+    // A failed discovery leaves iOS/Android with a half-open connection.
+    // Clear that state before retrying so the next tap starts cleanly.
+    if (_device != null && _device!.remoteId != device.remoteId) {
+      await disconnect();
     }
-    if (_status!.properties.notify) {
-      await _status!.setNotifyValue(true);
-      _statusSubscription = _status!.onValueReceived.listen(_handleFrame);
+    try {
+      await device.connect(timeout: const Duration(seconds: 15), autoConnect: false);
+      // iOS owns the pairing UI; Android also bonds automatically on the first
+      // authenticated write. Do not force a platform-specific bond dialog here.
+      _device = device;
+      final services = await device.discoverServices();
+      final service = services.firstWhere(
+        (item) => item.uuid == Guid(roboChessServiceUuid),
+        orElse: () => throw StateError('RoboChess BLE service not found'),
+      );
+      BluetoothCharacteristic find(String uuid) => service.characteristics.firstWhere(
+            (item) => item.uuid == Guid(uuid),
+            orElse: () => throw StateError('BLE characteristic not found: $uuid'),
+          );
+      final info = find(deviceInfoUuid);
+      _control = find(controlUuid);
+      _wifi = find(wifiUuid);
+      _status = find(statusUuid);
+      if (_control!.properties.notify) {
+        await _control!.setNotifyValue(true);
+        _controlSubscription = _control!.onValueReceived.listen(_handleFrame);
+      }
+      if (_status!.properties.notify) {
+        await _status!.setNotifyValue(true);
+        _statusSubscription = _status!.onValueReceived.listen(_handleFrame);
+      }
+      final bytes = await info.read();
+      return utf8.decode(bytes, allowMalformed: true).trim();
+    } catch (_) {
+      await _controlSubscription?.cancel();
+      await _statusSubscription?.cancel();
+      _controlSubscription = null;
+      _statusSubscription = null;
+      _control = null;
+      _wifi = null;
+      _status = null;
+      _device = null;
+      try {
+        await device.disconnect();
+      } catch (_) {
+        // The platform may already have torn down the failed connection.
+      }
+      rethrow;
     }
-    final bytes = await info.read();
-    return utf8.decode(bytes, allowMalformed: true);
   }
 
   Stream<Map<String, dynamic>> get messages => _messages.stream;
