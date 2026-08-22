@@ -71,7 +71,11 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
       _message = 'Connecting to ${candidate.name}...';
     });
     try {
-      final deviceId = _selectedDeviceId ??
+      // iOS may silently drop the GATT connection while the Pi is checking
+      // its network or while the app requests the cloud onboarding token.
+      // Always rebuild the connection before sending the next command.
+      await _ble.disconnect();
+      final deviceId =
           await _ble.connectAndReadDeviceId(candidate.result.device);
       _selectedDeviceId = deviceId;
       _selectedRemoteId = candidate.result.device.remoteId.str;
@@ -114,6 +118,10 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
       final token = await ref
           .read(deviceRepositoryProvider)
           .onboardingToken(deviceId: deviceId);
+      // Reconnect once more because the cloud request can outlive an iOS
+      // BLE connection interval.
+      await _ble.disconnect();
+      await _ble.connectAndReadDeviceId(candidate.result.device);
       final claimResponse = _ble.messages.firstWhere((message) {
         if (message['type'] != 'control.result') return false;
         final status = (message['data'] as Map?)?['status'];
