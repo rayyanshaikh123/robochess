@@ -229,14 +229,14 @@ class _LinkedBoards extends ConsumerWidget {
         children: [
           const Icon(Icons.bluetooth_connected, color: kPrimary),
           const SizedBox(width: 10),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Local RoboChess board'),
-                SizedBox(height: 3),
-                Text('Saved local board • offline mode'),
-                SizedBox(height: 3),
+                const Text('Local RoboChess board'),
+                const SizedBox(height: 3),
+                const Text('Saved local board • offline mode'),
+                const SizedBox(height: 3),
                 Text(deviceId),
               ],
             ),

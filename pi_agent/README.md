@@ -33,10 +33,13 @@ sends motion plans to an Arduino Uno gantry controller.
 - BLE game-command protocol and optional BlueZ GATT server.
 - Acknowledged JSON-lines Uno protocol with a default simulator.
 - Shared OpenCV camera capture, saved four-corner calibration, and optional
-  local YOLO automatic move detection with stable legal-move filtering.
+  Roboflow or local YOLO automatic move detection with stable legal-move
+  filtering.
 
-Automatic detection is local-only. Roboflow remains disabled unless explicitly
-configured; a missing local model never prevents camera preview or calibration.
+Automatic detection supports cloud-only Roboflow mode. Set
+`ROBOCHESS_VISION_MODE=cloud`, `ROBOCHESS_ROBOFLOW_MODEL_URL`, and
+`ROBOCHESS_ROBOFLOW_API_KEY`; no local `.pt` file is required. In `auto` mode,
+Roboflow is preferred and a local model is used as fallback.
 
 ## Fast start: offline Stockfish
 

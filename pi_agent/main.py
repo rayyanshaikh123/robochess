@@ -67,17 +67,6 @@ def main() -> None:
         token = data.get("onboarding_token")
         if token:
             store.set_onboarding_token(token)
-            # Claim immediately when the Pi already has a backend device
-            # token. Previously the token was only saved and the board did not
-            # appear in the user's linked-board list until a restart.
-            if api.device_token:
-                try:
-                    claimed = api.claim(str(token))
-                    api.update_status("online", wifi_status="connected", backend_status="connected")
-                    store.save({})
-                    return {"status": "token_claimed", **claimed}
-                except Exception as exc:
-                    return {"status": "error", "error": f"Onboarding claim failed: {exc}"}
             return {"status": "token_saved"}
         if message.get("type") == "network.status":
             return {"status": "network_status", "network": network.status(

@@ -181,13 +181,24 @@ class BoardRecognizer:
             confidence: Minimum detection confidence threshold.
         """
         self.model_ref = str(model_path).strip()
-        self.roboflow_enabled = os.getenv("ROBOCHESS_ROBOFLOW_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
-        self.roboflow_model_url = os.getenv("ROBOCHESS_ROBOFLOW_MODEL_URL", "").strip()
+        self.vision_mode = os.getenv("ROBOCHESS_VISION_MODE", "auto").strip().lower()
+        self.cloud_only = self.vision_mode == "cloud"
+        self.roboflow_enabled = (
+            self.cloud_only
+            or os.getenv("ROBOCHESS_ROBOFLOW_ENABLED", "0").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
+        self.roboflow_model_url = (
+            os.getenv("ROBOCHESS_ROBOFLOW_MODEL_URL", "").strip()
+            or os.getenv("ROBOFLOW_MODEL_URL", "").strip()
+        )
         self.cloud_model_id = (
             parse_cloud_model_id(self.roboflow_model_url)
             or parse_cloud_model_id(self.model_ref)
         ) if self.roboflow_enabled else None
-        self.model_path: Optional[Path] = Path(self.model_ref) if self.model_ref else None
+        self.model_path: Optional[Path] = (
+            None if self.cloud_only else (Path(self.model_ref) if self.model_ref else None)
+        )
         self.confidence = confidence
         self.infer_iou = 0.45
         self.infer_max_det = 96
@@ -197,7 +208,10 @@ class BoardRecognizer:
         self.infer_augment = False
         self.model: Optional[object] = None
         self.cloud_model = None
-        self.cloud_api_key = os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip()
+        self.cloud_api_key = (
+            os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip()
+            or os.getenv("ROBOFLOW_API_KEY", "").strip()
+        )
         self.cloud_base_url = self._cloud_base_url(self.roboflow_model_url)
         self.warp_matrix: Optional[np.ndarray] = None
         self.model_names: dict[int, str] = {}
@@ -212,14 +226,17 @@ class BoardRecognizer:
             except Exception as exc:
                 self.last_error = str(exc)
                 print(f"[WARN] Roboflow unavailable: {exc}")
-        if self.model_path and self.model_path.is_file():
+        if not self.cloud_only and self.model_path and self.model_path.is_file():
             try:
                 self._load_local_model()
             except Exception as exc:
                 self.last_error = str(exc)
                 print(f"[WARN] Local model unavailable: {exc}")
         if not self.is_ready:
-            print(f"[WARN] No vision model is ready. Configure Roboflow or install local weights at {self.model_ref}.")
+            if self.cloud_only:
+                print("[WARN] Cloud vision is not ready. Configure ROBOCHESS_ROBOFLOW_MODEL_URL and ROBOCHESS_ROBOFLOW_API_KEY.")
+            else:
+                print(f"[WARN] No vision model is ready. Configure Roboflow or install local weights at {self.model_ref}.")
 
     @staticmethod
     def _cloud_base_url(model_url: str) -> str:
@@ -272,11 +289,16 @@ class BoardRecognizer:
         if path:
             self.model_ref = str(path).strip()
             self.cloud_model_id = (
-                parse_cloud_model_id(self.model_ref)
-                if self.roboflow_enabled and self.roboflow_model_url
+                parse_cloud_model_id(self.roboflow_model_url)
+                or parse_cloud_model_id(self.model_ref)
+                if self.roboflow_enabled
                 else None
             )
-            self.model_path = None if self.cloud_model_id else Path(self.model_ref)
+            self.model_path = (
+                None
+                if self.cloud_only or self.cloud_model_id
+                else Path(self.model_ref)
+            )
         if self.cloud_model_id is None:
             if self.model_path is None or not self.model_path.exists():
                 raise FileNotFoundError(f"Model not found: {self.model_ref}")
@@ -290,6 +312,7 @@ class BoardRecognizer:
     def status(self) -> dict:
         return {
             "ready": self.is_ready,
+            "vision_mode": self.vision_mode,
             "active_detector": self.active_detector if self.is_ready else "none",
             "cloud_configured": self.cloud_model is not None,
             "local_model_configured": self.model_path is not None,
@@ -363,7 +386,8 @@ class BoardRecognizer:
                 self.last_error = None
                 return detections
             except Exception as exc:
-                self.last_error = f"Roboflow inference failed; using local model: {exc}"
+                fallback = "no local fallback configured" if self.cloud_only else "using local model"
+                self.last_error = f"Roboflow inference failed; {fallback}: {exc}"
                 if self.model is None:
                     raise RuntimeError(self.last_error) from exc
         if self.model is not None:

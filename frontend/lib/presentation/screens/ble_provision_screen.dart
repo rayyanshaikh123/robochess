@@ -85,15 +85,6 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
       ref.invalidate(localLinkedDeviceIdProvider);
       if (_needsWifi != true) {
         setState(() => _message = 'Checking the board network...');
-        // Subscribe before writing: the Pi can answer immediately and a
-        // listener created afterward loses the response.
-        final networkResponse = _ble.messages
-            .firstWhere(
-              (message) =>
-                  message['type'] == 'control.result' &&
-                  (message['data'] as Map?)?['status'] == 'network_status',
-            )
-            .timeout(const Duration(seconds: 8));
         await _ble.sendControl({
           'version': bleProtocolVersion,
           'request_id': DateTime.now().microsecondsSinceEpoch.toString(),
@@ -101,60 +92,38 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
           'device_id': deviceId,
           'data': const {},
         });
-        final response = await networkResponse;
+        final response = await _ble.messages.firstWhere(
+          (message) => message['type'] == 'control.result' &&
+              (message['data'] as Map?)?['status'] == 'network_status',
+        ).timeout(const Duration(seconds: 8));
         final network = Map<String, dynamic>.from(
           ((response['data'] as Map)['network'] as Map?) ?? const {},
         );
         if (network['internet_available'] == true) {
-          if (mounted) {
-            setState(() => _message = 'Board has internet. Linking it to your account...');
-          }
-          // Continue to onboarding even when Wi-Fi is already configured;
-          // networking and account linking are separate steps.
-        } else {
-          if (mounted) {
-            setState(() {
-              _needsWifi = true;
-              _message = 'Board has no internet. Configure Wi-Fi or continue locally.';
-            });
-          }
+          if (mounted) setState(() => _message = 'Board already has internet. Wi-Fi provisioning is not required.');
+          await ref.read(deviceListProvider.notifier).load();
           return;
         }
+        if (mounted) {
+          setState(() {
+            _needsWifi = true;
+            _message = 'Board has no internet. Configure Wi-Fi or continue locally.';
+          });
+        }
+        return;
       }
-      final needsWifi = _needsWifi == true;
-      if (needsWifi && (_ssid.text.trim().isEmpty || _password.text.isEmpty)) {
+      if (_ssid.text.trim().isEmpty || _password.text.isEmpty) {
         setState(() => _message = 'Enter the Wi-Fi network and password first.');
         return;
       }
       setState(() => _message = 'Requesting secure onboarding token...');
       final token = await ref.read(deviceRepositoryProvider).onboardingToken(deviceId: deviceId);
-      final onboardingResponse = _ble.messages
-          .firstWhere((message) {
-            if (message['type'] != 'control.result') return false;
-            final data = message['data'];
-            if (data is! Map) return false;
-            final status = data['status']?.toString();
-            return status == 'token_claimed' ||
-                status == 'token_saved' ||
-                status == 'error';
-          })
-          .timeout(const Duration(seconds: 8));
       await _ble.sendOnboardingToken(deviceId, token);
-      final onboarding = await onboardingResponse;
-      final onboardingData = onboarding['data'];
-      if (onboardingData is Map && onboardingData['status'] == 'error') {
-        throw StateError(onboardingData['error']?.toString() ?? 'Board onboarding failed');
-      }
-      if (needsWifi) {
-        setState(() => _message = 'Sending Wi-Fi credentials...');
-        // Subscribe before writing for the same reason as network.status.
-        _statusSubscription = _ble.statusStream.listen((status) {
-          if (mounted) setState(() => _message = status);
-        });
-        await _ble.sendWifi(deviceId, _ssid.text.trim(), _password.text);
-      } else {
-        setState(() => _message = 'Board linked. Refreshing linked boards...');
-      }
+      setState(() => _message = 'Sending Wi-Fi credentials...');
+      await _ble.sendWifi(deviceId, _ssid.text.trim(), _password.text);
+      _statusSubscription = _ble.statusStream.listen((status) {
+        if (mounted) setState(() => _message = status);
+      });
       await ref.read(deviceListProvider.notifier).load();
       if (mounted) {
         context.go('/connect');

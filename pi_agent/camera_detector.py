@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 from typing import Any
@@ -31,7 +32,18 @@ class PiCameraDetector:
         self._load_recognizer()
 
     def _load_recognizer(self) -> None:
-        if not self.model_path:
+        cloud_enabled = (
+            os.getenv("ROBOCHESS_VISION_MODE", "").strip().lower() == "cloud"
+            or os.getenv("ROBOCHESS_ROBOFLOW_ENABLED", "0").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
+        cloud_url = os.getenv("ROBOCHESS_ROBOFLOW_MODEL_URL", "").strip() or os.getenv(
+            "ROBOFLOW_MODEL_URL", ""
+        ).strip()
+        cloud_key = os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip() or os.getenv(
+            "ROBOFLOW_API_KEY", ""
+        ).strip()
+        if not self.model_path and not (cloud_enabled and cloud_url and cloud_key):
             self.last_error = "ROBOCHESS_MODEL_PATH is not configured"
             return
         try:
