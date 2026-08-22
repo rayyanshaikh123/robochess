@@ -101,7 +101,10 @@ flutter pub get
 flutter run
 ```
 
-The Android emulator defaults to `http://10.0.2.2:8000` for the API and `ws://10.0.2.2:8000/ws` for WebSockets. For a physical phone or a different backend host, provide the URLs at build time:
+The current development default is `http://172.20.10.3:8000` for the API and
+`ws://172.20.10.3:8000/ws` for WebSockets. Android emulators normally use
+`10.0.2.2`; for a physical phone or a different backend host, provide the URLs
+at build time:
 
 ```bash
 flutter run \
