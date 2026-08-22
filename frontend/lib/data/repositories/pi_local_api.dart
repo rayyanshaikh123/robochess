@@ -97,4 +97,16 @@ class PiLocalApi {
     return Map<String, dynamic>.from(
         (jsonDecode(response.body) as Map)['data'] as Map);
   }
+
+  Future<Map<String, dynamic>> autoCalibrate() async {
+    final response = await client
+        .post(_uri('/local/calibration/auto'))
+        .timeout(_requestTimeout);
+    if (response.statusCode >= 400) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>?;
+      throw Exception(body?['detail']?.toString() ?? 'Automatic calibration failed');
+    }
+    return Map<String, dynamic>.from(
+        (jsonDecode(response.body) as Map)['data'] as Map);
+  }
 }

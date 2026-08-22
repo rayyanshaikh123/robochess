@@ -16,7 +16,7 @@ PROTOCOL_VERSION = "1"
 MAX_CHUNK_BYTES = 180
 CHUNK_PAYLOAD_BYTES = 42
 
-GAME_MESSAGE_TYPES = {"session.start", "session.reset", "session.resume", "state.request", "move.propose", "gantry.home", "gantry.status", "camera.calibrate", "camera.status"}
+GAME_MESSAGE_TYPES = {"session.start", "session.reset", "session.resume", "session.undo", "state.request", "move.propose", "gantry.home", "gantry.status", "camera.calibrate", "camera.status"}
 
 
 def envelope(message_type: str, device_id: str, **data: Any) -> dict[str, Any]:

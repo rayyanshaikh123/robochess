@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:go_router/go_router.dart';
+import '../../domain/models/game_state.dart';
+import '../providers/game_provider.dart';
 
 // ── Colour tokens ──────────────────────────────────────
 const kBackground = Color(0xFF151311);
@@ -46,11 +50,12 @@ const _initialBoard = [
   ['R','N','B','Q','K','B','N','R'],
 ];
 
-class HomeDashboard extends StatelessWidget {
+class HomeDashboard extends ConsumerWidget {
   const HomeDashboard({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final game = ref.watch(gameControllerProvider).valueOrNull;
     return Scaffold(
       backgroundColor: kBackground,
       body: SafeArea(
@@ -69,7 +74,7 @@ class HomeDashboard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 30),
-              const _LiveBoardCard(),
+              _LiveBoardCard(game: game),
             ],
           ),
         ),
@@ -78,9 +83,36 @@ class HomeDashboard extends StatelessWidget {
   }
 }
 
-// ── Live Board (STATIC) ─────────────────────────────────
+// ── Live Board ──────────────────────────────────────────
 class _LiveBoardCard extends StatelessWidget {
-  const _LiveBoardCard();
+  final GameStateModel? game;
+
+  const _LiveBoardCard({this.game});
+
+  List<List<String?>> _boardFromFen() {
+    if (game == null || game!.currentFen.isEmpty) {
+      return _boardFromInitial();
+    }
+    final placement = game!.currentFen.split(' ').first;
+    final rows = placement.split('/');
+    if (rows.length != 8) return _boardFromInitial();
+    final board = rows.map((row) {
+      final cells = <String?>[];
+      for (final char in row.split('')) {
+        final empty = int.tryParse(char);
+        if (empty != null) {
+          cells.addAll(List<String?>.filled(empty, null));
+        } else {
+          cells.add(char);
+        }
+      }
+      return cells.length == 8 ? cells : <String?>[];
+    }).toList();
+    return board.every((row) => row.length == 8) ? board : _boardFromInitial();
+  }
+
+  List<List<String?>> _boardFromInitial() =>
+      _initialBoard.map((row) => row.map((piece) => piece).toList()).toList();
 
   String _pieceSymbol(String? piece) {
     if (piece == null) return '';
@@ -96,6 +128,7 @@ class _LiveBoardCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final board = _boardFromFen();
     return Container(
       decoration: BoxDecoration(
         color: kSurfaceContLow,
@@ -105,7 +138,7 @@ class _LiveBoardCard extends StatelessWidget {
       child: Column(
         children: [
           Text(
-            "Static Board Preview",
+            game == null ? 'Ready for a Game' : 'Live Game Position',
             style: GoogleFonts.spaceGrotesk(
               fontSize: 20,
               fontWeight: FontWeight.w700,
@@ -133,7 +166,7 @@ class _LiveBoardCard extends StatelessWidget {
                   final row = index ~/ 8;
                   final col = index % 8;
                   final isLight = (row + col) % 2 == 0;
-                  final piece = _initialBoard[row][col];
+                  final piece = board[row][col];
 
                   return Container(
                     color: isLight
@@ -155,6 +188,18 @@ class _LiveBoardCard extends StatelessWidget {
               ),
             ),
           ),
+          const SizedBox(height: 16),
+          if (game == null)
+            FilledButton.icon(
+              onPressed: () => context.go('/play'),
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('START A GAME'),
+            )
+          else
+            Text(
+              'Move ${game!.gameVersion}${game!.lastMove == null ? '' : ' • ${game!.lastMove}'}',
+              style: GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant),
+            ),
         ],
       ),
     );

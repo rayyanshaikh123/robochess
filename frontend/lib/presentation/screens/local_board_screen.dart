@@ -137,6 +137,9 @@ class _SessionView extends ConsumerWidget {
         OutlinedButton(
             onPressed: () => ref.read(localBoardProvider.notifier).reset(),
             child: const Text('RESET')),
+        OutlinedButton(
+            onPressed: () => ref.read(localBoardProvider.notifier).undo(),
+            child: const Text('UNDO TURN')),
       ]),
       const SizedBox(height: 16),
       if (pi != null) ...[

@@ -88,6 +88,7 @@ class GattServer:
             "session.start",
             "session.reset",
             "session.resume",
+            "session.undo",
             "state.request",
             "move.propose",
             "gantry.home",

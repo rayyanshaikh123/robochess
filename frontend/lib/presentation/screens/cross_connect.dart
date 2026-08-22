@@ -61,7 +61,7 @@ class CrossConnect extends ConsumerWidget {
             _LinkedBoards(),
             const SizedBox(height: 24),
 
-            // ── Global Matchmaking Radar ──────────────────────────────────
+            // ── Game Launch ───────────────────────────────────────────────
             _RadarSection(),
             const SizedBox(height: 28),
 
@@ -435,20 +435,22 @@ class _RadarSectionState extends State<_RadarSection>
           Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('GLOBAL MATCHMAKING',
+              Text('GAME LAUNCH',
                   style: GoogleFonts.spaceGrotesk(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
                       color: kPrimary,
                       letterSpacing: 4)),
               const SizedBox(height: 8),
-              Text('Ready to Engage?',
+              Text('Ready to Play?',
                   style: GoogleFonts.spaceGrotesk(
                       fontSize: 28,
                       fontWeight: FontWeight.w700,
                       color: kOnSurface)),
               const SizedBox(height: 24),
-              // Find opponent button
+              // Start a playable game. Online matchmaking is not available
+              // in the current backend, so this opens the working game flow
+              // instead of silently doing nothing.
               Container(
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
@@ -467,7 +469,7 @@ class _RadarSectionState extends State<_RadarSection>
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: () {},
+                    onTap: () => context.go('/play'),
                     borderRadius: BorderRadius.circular(14),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
@@ -478,7 +480,7 @@ class _RadarSectionState extends State<_RadarSection>
                           const Icon(Icons.explore,
                               color: kOnPrimary, size: 22),
                           const SizedBox(width: 10),
-                          Text('Find Global Opponent',
+                          Text('Start a Game',
                               style: GoogleFonts.spaceGrotesk(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w700,
@@ -490,16 +492,16 @@ class _RadarSectionState extends State<_RadarSection>
                 ),
               ),
               const SizedBox(height: 20),
-              // Stats row
+              // Capabilities row
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _StatChip(
-                      icon: Icons.public, label: '1 Online', color: kSecondary),
+                      icon: Icons.smart_toy, label: 'AI AVAILABLE', color: kSecondary),
                   const SizedBox(width: 20),
                   _StatChip(
                       icon: Icons.timer,
-                      label: '< 30s Wait',
+                      label: 'INSTANT START',
                       color: kSecondary),
                 ],
               ),

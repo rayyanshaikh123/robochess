@@ -66,6 +66,9 @@ class GameController:
         if kind == "session.reset":
             self.session.reset(data.get("initial_fen", chess.STARTING_FEN)); self.session.confirm_setup()
             return self._result("state")
+        if kind == "session.undo":
+            self.session.undo_last_turn()
+            return self._result("state")
         if kind == "session.resume":
             self.session.confirm_setup()
             return self._result("state")
@@ -89,6 +92,9 @@ class GameController:
         assert self.session
         if self.session.phase.value == "finished":
             return
+        # The app sends move intent only. The Pi verifies the physical safety
+        # boundary before converting the engine move into gantry commands.
+        self.uno.ensure_homed()
         self.session.begin_engine_move()
         uci = self.engine.best_move(self.session.board)
         move = self.session.parse_legal_move(uci)

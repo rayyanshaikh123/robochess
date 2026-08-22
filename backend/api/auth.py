@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends
 
-from backend.api.schemas import ApiResponse, LoginRequest, LogoutRequest, RefreshRequest, RegisterRequest
+from backend.api.schemas import ApiResponse, LoginRequest, LogoutRequest, ProfileUpdateRequest, RefreshRequest, RegisterRequest
 from backend.core.dependencies import get_current_user_id, rate_limit
 from backend.db.client import get_db
-from backend.repositories.user_repo import get_by_id
+from backend.repositories.user_repo import get_by_id, update_display_name
 from backend.services.auth_service import login_user, logout_user, refresh_session, register_user
 from backend.services.user_stats_service import get_user_stats
 from backend.utils.helpers import error, ok
@@ -75,6 +75,26 @@ async def me(
         "created_at": created_at.isoformat() if created_at else None,
     }
     return ok("ok", data)
+
+
+@router.patch("/me", response_model=ApiResponse)
+async def update_me(
+    payload: ProfileUpdateRequest,
+    user_id: str = Depends(get_current_user_id),
+    db=Depends(get_db),
+) -> ApiResponse:
+    display_name = payload.display_name.strip()
+    if not display_name:
+        return error("Display name cannot be empty")
+    user = await update_display_name(db, user_id, display_name)
+    if not user:
+        return error("User not found")
+    return ok("Profile updated", {
+        "user_id": str(user.get("_id")),
+        "email": user.get("email"),
+        "display_name": user.get("display_name"),
+        "created_at": user.get("created_at").isoformat() if user.get("created_at") else None,
+    })
 
 
 @router.get("/stats", response_model=ApiResponse)

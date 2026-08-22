@@ -15,6 +15,16 @@ async def get_by_id(db: AsyncIOMotorDatabase, user_id: str) -> Optional[dict]:
     return await db[USERS].find_one({"_id": ObjectId(user_id)})
 
 
+async def update_display_name(
+    db: AsyncIOMotorDatabase, user_id: str, display_name: str
+) -> Optional[dict]:
+    await db[USERS].update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"display_name": display_name}},
+    )
+    return await get_by_id(db, user_id)
+
+
 async def create_user(
     db: AsyncIOMotorDatabase,
     email: str,

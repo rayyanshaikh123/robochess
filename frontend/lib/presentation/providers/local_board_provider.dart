@@ -192,6 +192,7 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
   Future<void> proposeMove(String move) =>
       repository.proposeMove(move, state.piState?.version ?? 0);
   Future<void> reset() => repository.resetSession();
+  Future<void> undo() => repository.undoSession();
   Future<void> resume() => repository.resumeSession();
   Future<void> provisionWifi(String ssid, String password) async {
     try {

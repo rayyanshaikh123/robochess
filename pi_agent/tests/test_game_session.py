@@ -35,6 +35,16 @@ class GameSessionTests(unittest.TestCase):
         self.assertEqual(self.session.version, 0)
         self.assertEqual(self.session.phase, SessionPhase.IDLE)
 
+    def test_undo_rewinds_logical_state_and_enters_recovery(self):
+        self.session.accept_player_move("e2e4")
+        self.session.begin_engine_move()
+        self.session.accept_engine_move("e7e5")
+        self.session.undo_last_turn()
+        self.assertEqual(self.session.moves, [])
+        self.assertEqual(self.session.version, 0)
+        self.assertEqual(self.session.phase, SessionPhase.RECOVERY)
+        self.assertIn("restore the physical board", self.session.last_error or "")
+
     def test_session_round_trip_and_interrupted_gantry_recovery(self):
         self.session.accept_player_move("e2e4")
         self.session.begin_engine_move()

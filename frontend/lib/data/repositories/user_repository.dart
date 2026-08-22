@@ -14,4 +14,8 @@ class UserRepository {
   Future<UserStats> stats() {
     return _remote.stats();
   }
+
+  Future<UserProfile> updateProfile({required String displayName}) {
+    return _remote.updateProfile(displayName: displayName);
+  }
 }

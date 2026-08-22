@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:chess/chess.dart' as chess_lib;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../widgets/animated_profile_avatar.dart';
 
 // ── Colour tokens (matching the Learn Section palette) ───────────────────────
@@ -9,9 +10,7 @@ const _kBackground = Color(0xFF151311);
 const _kSurfaceContLow = Color(0xFF1D1B19);
 const _kSurfaceContHigh = Color(0xFF2C2A27);
 const _kSurfaceContHighest = Color(0xFF373431);
-const _kSurfaceContLowest = Color(0xFF0F0E0C);
 const _kPrimary = Color(0xFF8ADB52);
-const _kPrimaryContainer = Color(0xFF68B631);
 const _kOnSurface = Color(0xFFE7E2DD);
 const _kOnSurfaceVariant = Color(0xFFC0CAB4);
 const _kOutlineVariant = Color(0xFF414939);
@@ -24,7 +23,6 @@ class _Opening {
   final String style;
   final IconData styleIcon;
   final int difficultyDots; // out of 4
-  final double masteryPercent; // 0.0 – 1.0
 
   const _Opening({
     required this.name,
@@ -32,7 +30,6 @@ class _Opening {
     required this.style,
     required this.styleIcon,
     required this.difficultyDots,
-    required this.masteryPercent,
   });
 }
 
@@ -43,7 +40,6 @@ const _openings = [
     style: 'Aggressive',
     styleIcon: Icons.local_fire_department,
     difficultyDots: 3,
-    masteryPercent: 0.65,
   ),
   _Opening(
     name: 'Ruy Lopez',
@@ -51,7 +47,6 @@ const _openings = [
     style: 'Solid',
     styleIcon: Icons.shield,
     difficultyDots: 2,
-    masteryPercent: 0.30,
   ),
   _Opening(
     name: 'Caro-Kann',
@@ -59,7 +54,6 @@ const _openings = [
     style: 'Solid',
     styleIcon: Icons.shield,
     difficultyDots: 4,
-    masteryPercent: 0.85,
   ),
   _Opening(
     name: "King's Indian",
@@ -67,7 +61,6 @@ const _openings = [
     style: 'Hypermodern',
     styleIcon: Icons.auto_awesome,
     difficultyDots: 3,
-    masteryPercent: 0.45,
   ),
   _Opening(
     name: 'Queen\'s Gambit',
@@ -75,7 +68,6 @@ const _openings = [
     style: 'Gambits',
     styleIcon: Icons.whatshot,
     difficultyDots: 2,
-    masteryPercent: 0.55,
   ),
   _Opening(
     name: 'French Defense',
@@ -83,7 +75,6 @@ const _openings = [
     style: 'Solid',
     styleIcon: Icons.shield,
     difficultyDots: 3,
-    masteryPercent: 0.20,
   ),
 ];
 
@@ -99,6 +90,30 @@ class OpeningsScreen extends StatefulWidget {
 class _OpeningsScreenState extends State<OpeningsScreen> {
   String _searchQuery = '';
   int _selectedFilter = 0;
+  final _progressStorage = const FlutterSecureStorage();
+  final Set<String> _startedOpenings = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProgress();
+  }
+
+  Future<void> _loadProgress() async {
+    final raw = await _progressStorage.read(key: 'started_openings');
+    if (!mounted || raw == null || raw.isEmpty) return;
+    setState(() => _startedOpenings.addAll(raw.split('\n')));
+  }
+
+  Future<void> _markStarted(String name) async {
+    if (_startedOpenings.add(name)) {
+      setState(() {});
+      await _progressStorage.write(
+        key: 'started_openings',
+        value: _startedOpenings.join('\n'),
+      );
+    }
+  }
 
   List<_Opening> get _filtered {
     var list = _openings.toList();
@@ -278,7 +293,11 @@ class _OpeningsScreenState extends State<OpeningsScreen> {
                     delegate: SliverChildBuilderDelegate(
                       (context, index) => Padding(
                         padding: const EdgeInsets.only(bottom: 16),
-                        child: _OpeningCard(opening: results[index]),
+                      child: _OpeningCard(
+                        opening: results[index],
+                        started: _startedOpenings.contains(results[index].name),
+                        onPractice: _markStarted,
+                      ),
                       ),
                       childCount: results.length,
                     ),
@@ -293,12 +312,67 @@ class _OpeningsScreenState extends State<OpeningsScreen> {
 // ── Opening Card ─────────────────────────────────────────────────────────────
 class _OpeningCard extends StatelessWidget {
   final _Opening opening;
-  const _OpeningCard({required this.opening});
+  final bool started;
+  final Future<void> Function(String name) onPractice;
+
+  const _OpeningCard({
+    required this.opening,
+    required this.started,
+    required this.onPractice,
+  });
+
+  void _openLesson(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _kSurfaceContLow,
+      showDragHandle: true,
+      builder: (sheetContext) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(opening.name,
+                style: GoogleFonts.spaceGrotesk(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w700,
+                    color: _kOnSurface)),
+            const SizedBox(height: 6),
+            Text('${opening.style} opening • ${opening.difficultyDots}/4 difficulty',
+                style: GoogleFonts.inter(color: _kOnSurfaceVariant)),
+            const SizedBox(height: 18),
+            Text('Main line',
+                style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w700, color: _kPrimary)),
+            const SizedBox(height: 6),
+            Text(opening.notation,
+                style: GoogleFonts.spaceGrotesk(
+                    fontSize: 18, color: _kOnSurface)),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () {
+                  Navigator.of(sheetContext).pop();
+                  onPractice(opening.name);
+                  context.go('/play');
+                },
+                icon: const Icon(Icons.play_arrow),
+                label: const Text('PRACTICE THIS OPENING'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final pct = (opening.masteryPercent * 100).round();
-    return Container(
+    return InkWell(
+      onTap: () => _openLesson(context),
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
       decoration: BoxDecoration(
         color: _kSurfaceContLow,
         borderRadius: BorderRadius.circular(18),
@@ -360,7 +434,7 @@ class _OpeningCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 18),
 
-                // Bottom row: board placeholder + stats
+                // Bottom row: practice board + lesson metadata
                 Row(
                   children: [
                     // Mini board visualizer
@@ -400,20 +474,21 @@ class _OpeningCard extends StatelessWidget {
                           ),
                           const SizedBox(height: 14),
 
-                          // Mastery progress
+                          // The curriculum is static until lesson completion
+                          // tracking is available from the backend.
                           Row(
                             mainAxisAlignment:
                                 MainAxisAlignment.spaceBetween,
                             children: [
                               Text(
-                                'Mastery',
+                                'Practice line',
                                 style: GoogleFonts.inter(
                                   fontSize: 10,
                                   color: _kOnSurfaceVariant,
                                 ),
                               ),
                               Text(
-                                '$pct%',
+                                started ? 'STARTED' : 'READY',
                                 style: GoogleFonts.inter(
                                   fontSize: 10,
                                   fontWeight: FontWeight.w700,
@@ -421,48 +496,6 @@ class _OpeningCard extends StatelessWidget {
                                 ),
                               ),
                             ],
-                          ),
-                          const SizedBox(height: 6),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(99),
-                            child: SizedBox(
-                              height: 6,
-                              child: Stack(
-                                children: [
-                                  Container(
-                                    decoration: BoxDecoration(
-                                      color: _kSurfaceContLowest,
-                                      borderRadius:
-                                          BorderRadius.circular(99),
-                                    ),
-                                  ),
-                                  FractionallySizedBox(
-                                    widthFactor:
-                                        opening.masteryPercent,
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        borderRadius:
-                                            BorderRadius.circular(99),
-                                        gradient:
-                                            const LinearGradient(
-                                          colors: [
-                                            _kPrimary,
-                                            _kPrimaryContainer,
-                                          ],
-                                        ),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: _kPrimary
-                                                .withOpacity(0.5),
-                                            blurRadius: 8,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
                           ),
                         ],
                       ),
@@ -473,6 +506,7 @@ class _OpeningCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
       ),
     );
   }

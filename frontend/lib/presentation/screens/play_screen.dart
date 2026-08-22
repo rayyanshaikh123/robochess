@@ -260,6 +260,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           );
       if (result.useBoard) {
         _fetchLiveFrame();
+        _startAutoDetect();
       } else {
         _clearSnapshot();
         _autoDetectTimer?.cancel();
@@ -392,6 +393,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
           await _fetchLiveFrame();
         }
+      } else if (reason.isNotEmpty && mounted) {
+        setState(() => _snapshotNote = reason);
       }
     } catch (err) {
       // Silently fail on auto-detect check errors
@@ -963,6 +966,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           if (_gameUsesBoard && _linkedGameId != null) ...[
             const SizedBox(height: 12),
             _buildLiveBoardPreview(),
+            const SizedBox(height: 12),
+            _buildBoardValidationActions(),
           ],
 
           // ── Board ──

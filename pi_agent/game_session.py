@@ -55,6 +55,30 @@ class GameSession:
         self.phase = SessionPhase.IDLE
         self.last_error = None
 
+    def undo_last_turn(self) -> None:
+        """Rewind logical state and require physical-board reconciliation.
+
+        The Pi cannot safely move captured pieces back by itself, so undo never
+        claims that the physical board was restored. The recovery phase forces
+        the user to put the pieces back before resuming.
+        """
+        if self.phase in {SessionPhase.EXECUTING_ENGINE_MOVE, SessionPhase.AWAITING_ENGINE}:
+            raise SessionError("Wait for the current move to finish before undoing")
+        if not self.moves:
+            raise SessionError("There are no moves to undo")
+
+        plies = 2 if len(self.moves) >= 2 else 1
+        remaining = self.moves[:-plies]
+        board = chess.Board(self.initial_fen)
+        for uci in remaining:
+            move = board.parse_uci(uci)
+            board.push(move)
+        self.board = board
+        self.moves = remaining
+        self.version = len(remaining)
+        self.phase = SessionPhase.RECOVERY
+        self.last_error = "Undo requested; restore the physical board, then resume."
+
     def _validate_turn(self, actor: str) -> None:
         expected = self.human_color if actor == "player" else not self.human_color
         if self.board.turn != expected:

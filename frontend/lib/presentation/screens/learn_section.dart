@@ -257,6 +257,7 @@ class _CategoryGrid extends StatelessWidget {
       badgeColor: kSecondary,
       iconData: Icons.precision_manufacturing,
       iconBg: Color(0x20A2E7FF),
+      route: '/learn/endgames',
     ),
     _Category(
       title: 'Tactical Drills',
@@ -266,6 +267,7 @@ class _CategoryGrid extends StatelessWidget {
       badgeColor: kTertiary,
       iconData: Icons.bolt,
       iconBg: Color(0x2097D77E),
+      route: '/learn/tactics',
     ),
   ];
 
@@ -301,7 +303,7 @@ class _CategoryCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Image placeholder with badge
+            // Curriculum illustration with lesson badge
             Stack(
               children: [
                 Container(
@@ -539,7 +541,7 @@ class _ContinueFAB extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: () {},
+          onTap: () => context.push('/learn/openings'),
           borderRadius: BorderRadius.circular(14),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),

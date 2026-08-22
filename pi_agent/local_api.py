@@ -25,6 +25,62 @@ class MoveRequest(BaseModel):
     expected_version: int | None = None
 
 
+def _order_corners(points):
+    import numpy as np
+
+    values = np.asarray(points, dtype="float32")
+    sums = values.sum(axis=1)
+    differences = np.diff(values, axis=1).reshape(-1)
+    ordered = [
+        values[sums.argmin()],
+        values[differences.argmin()],
+        values[sums.argmax()],
+        values[differences.argmax()],
+    ]
+    return [(float(point[0]), float(point[1])) for point in ordered]
+
+
+def detect_board_corners(frame):
+    """Find a board-sized quadrilateral in a camera frame."""
+    import cv2
+
+    height, width = frame.shape[:2]
+    minimum_area = width * height * 0.10
+    maximum_area = width * height * 0.98
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    candidates = []
+    for source in (
+        cv2.Canny(gray, 30, 120),
+        cv2.Canny(
+            cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY, 11, 2,
+            ),
+            10,
+            60,
+        ),
+    ):
+        edges = cv2.dilate(source, None, iterations=2)
+        contours, _ = cv2.findContours(
+            edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < minimum_area or area > maximum_area:
+                continue
+            perimeter = cv2.arcLength(contour, True)
+            quad = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
+            if len(quad) == 4:
+                candidates.append((area, quad.reshape(4, 2)))
+
+    if not candidates:
+        return None
+    _, best = max(candidates, key=lambda candidate: candidate[0])
+    return _order_corners(best)
+
+
 class LocalApiHost:
     def __init__(self, game, network: NetworkManager, config: dict[str, Any], detector=None) -> None:
         self.game = game
@@ -175,7 +231,23 @@ class LocalApiHost:
 
         @self.app.post("/local/calibration/auto")
         def auto_calibration():
-            raise HTTPException(501, "Automatic local calibration requires board-corner detection")
+            frame = self._capture()
+            corners = detect_board_corners(frame)
+            if corners is None:
+                raise HTTPException(
+                    422,
+                    "Could not detect a board. Place the full board in frame with a clear border.",
+                )
+            self.state_path.mkdir(parents=True, exist_ok=True)
+            data = {
+                "corners": corners,
+                "board_orientation": "white_bottom",
+                "method": "contour_quad",
+            }
+            self.calibration_path.write_text(json.dumps(data, indent=2))
+            if self.detector is not None:
+                self.detector.last_error = None
+            return {"status": "ok", "message": "Calibration saved", "data": data}
 
         @self.app.post("/local/calibration/validate")
         def validate_calibration():
@@ -199,7 +271,7 @@ class LocalApiHost:
 
         @self.app.post("/local/game/undo")
         def undo_game():
-            raise HTTPException(501, "Undo is not implemented in the Pi session controller")
+            return {"status": "ok", "data": self.game.handle({"type": "session.undo", "data": {}})}
 
         @self.app.post("/local/move/detect-if-clear")
         def detect_move_if_clear():
@@ -225,8 +297,10 @@ class LocalApiHost:
         def gantry_stop():
             try:
                 self.game.uno.stop()
-            except AttributeError:
-                raise HTTPException(501, "Gantry stop is not supported by the current controller")
+            except AttributeError as exc:
+                raise HTTPException(500, "Gantry controller does not expose STOP") from exc
+            except Exception as exc:
+                raise HTTPException(503, f"Gantry stop failed: {exc}") from exc
             return {"status": "ok", "data": {"status": "stopped"}}
 
         @self.app.post("/local/move/detect")

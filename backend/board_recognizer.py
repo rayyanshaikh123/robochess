@@ -15,6 +15,7 @@ import chess
 import os
 import requests
 import time
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Optional
 
@@ -150,6 +151,10 @@ def parse_cloud_model_id(model_ref: str) -> Optional[str]:
     if text.lower().startswith("rf://"):
         model_id = text[5:].strip()
         return model_id or None
+    if text.lower().startswith(("http://", "https://")):
+        parsed = urlparse(text)
+        parts = [part for part in parsed.path.split("/") if part]
+        return "/".join(parts[-2:]) if len(parts) >= 2 else None
     # Allow plain project/version format, e.g. chess-yimaf-jwsta/3
     if "/" in text and "\\" not in text and ":" not in text and not text.lower().endswith(".pt"):
         return text
@@ -178,10 +183,11 @@ class BoardRecognizer:
         self.model_ref = str(model_path).strip()
         self.roboflow_enabled = os.getenv("ROBOCHESS_ROBOFLOW_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
         self.roboflow_model_url = os.getenv("ROBOCHESS_ROBOFLOW_MODEL_URL", "").strip()
-        self.cloud_model_id = parse_cloud_model_id(self.model_ref) if self.roboflow_enabled and self.roboflow_model_url else None
-        self.model_path: Optional[Path] = (
-            None if self.cloud_model_id or not self.model_ref else Path(self.model_ref)
-        )
+        self.cloud_model_id = (
+            parse_cloud_model_id(self.roboflow_model_url)
+            or parse_cloud_model_id(self.model_ref)
+        ) if self.roboflow_enabled else None
+        self.model_path: Optional[Path] = Path(self.model_ref) if self.model_ref else None
         self.confidence = confidence
         self.infer_iou = 0.45
         self.infer_max_det = 96
@@ -191,64 +197,75 @@ class BoardRecognizer:
         self.infer_augment = False
         self.model: Optional[object] = None
         self.cloud_model = None
-        self.cloud_api_key = os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip() or os.getenv("ROBOFLOW_API_KEY", "").strip()
-        self.cloud_base_url = (self.roboflow_model_url or os.getenv("ROBOFLOW_DETECT_URL", "")).strip().rstrip("/")
+        self.cloud_api_key = os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip()
+        self.cloud_base_url = self._cloud_base_url(self.roboflow_model_url)
         self.warp_matrix: Optional[np.ndarray] = None
         self.model_names: dict[int, str] = {}
+        self.last_error: Optional[str] = None
+        self.active_detector = "none"
 
-        # Load local or cloud model.
-        if self.roboflow_enabled and self.roboflow_model_url and self.cloud_model_id is not None:
-            self._load_model()
-        elif parse_cloud_model_id(self.model_ref) is not None:
-            print("[WARN] Roboflow model reference ignored; enable ROBOCHESS_ROBOFLOW_ENABLED and provide ROBOCHESS_ROBOFLOW_MODEL_URL.")
-        elif self.model_path and self.model_path.is_file():
-            self._load_model()
-        else:
-            print(f"[WARN] Model not found at {self.model_ref}. "
-                  f"Call load_model() after training.")
+        # Keep both candidates loaded when possible. Cloud is preferred at
+        # inference time; local YOLO remains available for offline fallback.
+        if self.roboflow_enabled and self.cloud_model_id:
+            try:
+                self._load_cloud_model()
+            except Exception as exc:
+                self.last_error = str(exc)
+                print(f"[WARN] Roboflow unavailable: {exc}")
+        if self.model_path and self.model_path.is_file():
+            try:
+                self._load_local_model()
+            except Exception as exc:
+                self.last_error = str(exc)
+                print(f"[WARN] Local model unavailable: {exc}")
+        if not self.is_ready:
+            print(f"[WARN] No vision model is ready. Configure Roboflow or install local weights at {self.model_ref}.")
 
-    def _load_model(self):
-        """Load a local YOLO model or a Roboflow cloud model."""
-        if self.cloud_model_id is not None:
-            if not self.cloud_api_key or not self.cloud_base_url:
-                raise RuntimeError(
-                    "Roboflow is enabled but ROBOCHESS_ROBOFLOW_MODEL_URL/API_KEY is missing."
-                )
-            self.cloud_model = {
-                "model_id": self.cloud_model_id,
-                "api_key": self.cloud_api_key,
-                "base_url": self.cloud_base_url,
-            }
-            self.model = None
-            self.model_names = {i: name for i, name in enumerate(CLASS_NAMES)}
-            print(f"[OK] Cloud model loaded: {self.cloud_model_id}")
-            return
+    @staticmethod
+    def _cloud_base_url(model_url: str) -> str:
+        parsed = urlparse(model_url)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+        return model_url.rstrip("/")
 
+    def _load_cloud_model(self) -> None:
+        if not self.cloud_api_key or not self.cloud_base_url:
+            raise RuntimeError(
+                "Roboflow is enabled but ROBOCHESS_ROBOFLOW_MODEL_URL/API_KEY is missing."
+            )
+        self.cloud_model = {
+            "model_id": self.cloud_model_id,
+            "api_key": self.cloud_api_key,
+            "base_url": self.cloud_base_url,
+        }
+        self.model_names = {i: name for i, name in enumerate(CLASS_NAMES)}
+        print(f"[OK] Roboflow cloud model configured: {self.cloud_model_id}")
+
+    def _load_local_model(self) -> None:
         if YOLO is None:
             raise ImportError("ultralytics is required for local .pt models: pip install ultralytics")
         if self.model_path is None:
             raise FileNotFoundError("Local model path is not set.")
-
         self.model = YOLO(str(self.model_path))
-        self.cloud_model = None
         raw_names = getattr(self.model, "names", None)
         if isinstance(raw_names, dict):
             self.model_names = {int(k): normalize_class_name(str(v)) for k, v in raw_names.items()}
         elif isinstance(raw_names, list):
             self.model_names = {i: normalize_class_name(str(v)) for i, v in enumerate(raw_names)}
-        else:
-            self.model_names = {}
-
-        # Try to read training imgsz from model args/overrides so inference
-        # matches what the model was trained at (avoids accuracy loss).
         try:
-            train_args = getattr(self.model, "overrides", {}) or {}
-            trained_sz = int(train_args.get("imgsz", 0))
+            trained_sz = int((getattr(self.model, "overrides", {}) or {}).get("imgsz", 0))
             if trained_sz >= 320:
                 self.infer_imgsz = trained_sz
         except Exception:
             pass
-        print(f"[OK] YOLO model loaded: {self.model_path} (infer_imgsz={self.infer_imgsz})")
+        print(f"[OK] Local YOLO model loaded: {self.model_path} (infer_imgsz={self.infer_imgsz})")
+
+    def _load_model(self):
+        """Load a local YOLO model or a Roboflow cloud model."""
+        if self.cloud_model_id is not None:
+            self._load_cloud_model()
+            return
+        self._load_local_model()
 
     def load_model(self, path: Optional[str] = None):
         """Explicitly load or reload the model."""
@@ -269,6 +286,17 @@ class BoardRecognizer:
     def is_ready(self) -> bool:
         """Check if the model is loaded and corners are calibrated."""
         return self.model is not None or self.cloud_model is not None
+
+    def status(self) -> dict:
+        return {
+            "ready": self.is_ready,
+            "active_detector": self.active_detector if self.is_ready else "none",
+            "cloud_configured": self.cloud_model is not None,
+            "local_model_configured": self.model_path is not None,
+            "local_model_available": self.model is not None,
+            "model_path": str(self.model_path) if self.model_path else None,
+            "last_error": self.last_error,
+        }
 
     @property
     def is_calibrated(self) -> bool:
@@ -329,9 +357,20 @@ class BoardRecognizer:
             raise RuntimeError("Model not loaded. Call load_model() first.")
 
         if self.cloud_model is not None:
-            return self._detect_cloud(frame)
-
-        return self._detect_local(frame)
+            try:
+                detections = self._detect_cloud(frame)
+                self.active_detector = "roboflow"
+                self.last_error = None
+                return detections
+            except Exception as exc:
+                self.last_error = f"Roboflow inference failed; using local model: {exc}"
+                if self.model is None:
+                    raise RuntimeError(self.last_error) from exc
+        if self.model is not None:
+            detections = self._detect_local(frame)
+            self.active_detector = "local_yolo"
+            return detections
+        raise RuntimeError("No vision detector is available")
 
     def _detect_local(self, frame: np.ndarray) -> list[dict]:
         """Run local Ultralytics inference."""

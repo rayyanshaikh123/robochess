@@ -40,6 +40,10 @@ class LogoutRequest(BaseModel):
     refresh_token: str = Field(min_length=10)
 
 
+class ProfileUpdateRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=64)
+
+
 class DeviceRegisterRequest(BaseModel):
     hardware_id: Optional[str] = None
 

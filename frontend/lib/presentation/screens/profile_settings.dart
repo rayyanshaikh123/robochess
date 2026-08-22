@@ -47,6 +47,51 @@ class _ProfileSettingsState extends ConsumerState<ProfileSettings> {
     }
   }
 
+  Future<void> _editProfile(String currentName) async {
+    final controller = TextEditingController(text: currentName);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Edit profile'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 64,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(labelText: 'Display name'),
+          onSubmitted: (value) => Navigator.of(dialogContext).pop(value.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('CANCEL'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('SAVE'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (!mounted || name == null || name.isEmpty || name == currentName) return;
+    try {
+      await ref.read(userRepositoryProvider).updateProfile(displayName: name);
+      ref.invalidate(userProfileProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile updated')),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not update profile: $error')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final profile = ref.watch(userProfileProvider);
@@ -137,6 +182,7 @@ class _ProfileSettingsState extends ConsumerState<ProfileSettings> {
               email: email,
               ratingText: ratingText,
               rankText: rankText,
+              onEdit: () => _editProfile(displayName),
             ),
             if (profileError != null) ...[
               const SizedBox(height: 10),
@@ -214,7 +260,9 @@ class _ProfileSettingsState extends ConsumerState<ProfileSettings> {
               loading: deviceLoading,
               errorText: deviceError,
               unlinking: _unlinking,
-              onFirmwareUpdate: device == null ? null : () {},
+              onRefresh: device == null
+                  ? null
+                  : () => ref.read(deviceListProvider.notifier).load(),
               onDisconnect: device == null || _unlinking
                   ? null
                   : () async {
@@ -246,12 +294,14 @@ class _PlayerHero extends StatelessWidget {
   final String? email;
   final String ratingText;
   final String rankText;
+  final VoidCallback onEdit;
 
   const _PlayerHero({
     required this.displayName,
     required this.email,
     required this.ratingText,
     required this.rankText,
+    required this.onEdit,
   });
 
   @override
@@ -366,7 +416,7 @@ class _PlayerHero extends StatelessWidget {
           ),
           // Edit button
           GestureDetector(
-            onTap: () {},
+            onTap: onEdit,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
@@ -729,7 +779,7 @@ class _DeviceCard extends StatelessWidget {
   final bool loading;
   final String? errorText;
   final bool unlinking;
-  final VoidCallback? onFirmwareUpdate;
+  final VoidCallback? onRefresh;
   final VoidCallback? onDisconnect;
 
   const _DeviceCard({
@@ -737,7 +787,7 @@ class _DeviceCard extends StatelessWidget {
     required this.loading,
     required this.errorText,
     required this.unlinking,
-    required this.onFirmwareUpdate,
+    required this.onRefresh,
     required this.onDisconnect,
   });
 
@@ -867,7 +917,7 @@ class _DeviceCard extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
-              onPressed: onFirmwareUpdate,
+              onPressed: onRefresh,
               style: OutlinedButton.styleFrom(
                 backgroundColor: kSurfaceContHighest,
                 side: BorderSide.none,
@@ -876,7 +926,7 @@ class _DeviceCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10)),
               ),
               icon: const Icon(Icons.sync, color: kOnSurface, size: 16),
-              label: Text('FIRMWARE UPDATE',
+              label: Text('REFRESH STATUS',
                   style: GoogleFonts.spaceGrotesk(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,

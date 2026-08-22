@@ -52,6 +52,7 @@ class LocalBoardRepository {
   Future<void> requestNetworkStatus() => send('network.status');
   Future<void> resumeSession() => send('session.resume');
   Future<void> resetSession() => send('session.reset');
+  Future<void> undoSession() => send('session.undo');
   Future<void> homeGantry() => send('gantry.home');
   Future<void> gantryStatus() => send('gantry.status');
   Future<void> proposeMove(String move, int expectedVersion) => send('move.propose', {'uci': move, 'expected_version': expectedVersion});

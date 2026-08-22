@@ -240,6 +240,13 @@ class UnoController:
     manual_actions: list[str] = field(default_factory=list)
     _graveyard_used: int = 0
 
+    def ensure_homed(self) -> dict:
+        """Verify the Uno has homed before any coordinate motion."""
+        status = self.status()
+        if status.homed is not True:
+            raise UnoError("Gantry is not homed; send gantry.home before moving")
+        return status.as_dict()
+
     # -- protocol primitives --------------------------------------------------
 
     def command(self, text: str, timeout: float | None = None) -> list[str]:
@@ -263,6 +270,9 @@ class UnoController:
 
     def home(self) -> None:
         self.command("HOME", TIMEOUT_HOME_S)
+        status = self.status()
+        if status.homed is not True:
+            raise UnoError("Uno acknowledged HOME but did not report HOMED=1")
 
     def stop(self) -> None:
         self.command("STOP", TIMEOUT_SHORT_S)
@@ -289,6 +299,7 @@ class UnoController:
     def execute(self, plan: MotionPlan) -> None:
         """Run a :class:`MotionPlan`, releasing the magnet if anything fails."""
         try:
+            self.ensure_homed()
             for op in plan.operations:
                 kind = op.get("op")
                 if kind == "remove":

@@ -16,4 +16,11 @@ class UserRemoteDataSource {
     final data = await _client.getJson('/auth/stats');
     return UserStats.fromJson(data);
   }
+
+  Future<UserProfile> updateProfile({required String displayName}) async {
+    final data = await _client.patchJson('/auth/me', body: {
+      'display_name': displayName,
+    });
+    return UserProfile.fromJson(data);
+  }
 }

@@ -72,8 +72,6 @@ class _ManualCalibrationScreenState
   /// Points stored in **image pixel** coordinates (not display coords).
   final List<Offset> _imagePoints = [];
 
-  Size? _displaySize;
-
   static const _labels = ['TL', 'TR', 'BR', 'BL'];
 
   @override
@@ -150,6 +148,25 @@ class _ManualCalibrationScreenState
     }
   }
 
+  Future<void> _autoCalibratePi() async {
+    if (widget.localApi == null) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await widget.localApi!.autoCalibrate();
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (err) {
+      if (mounted) {
+        setState(() {
+          _error = 'Automatic calibration failed: $err';
+          _loading = false;
+        });
+      }
+    }
+  }
+
   void _addPoint(Offset localPos, Size displaySize) {
     final frame = _frame;
     if (frame == null || _imagePoints.length >= 4) return;
@@ -208,8 +225,6 @@ class _ManualCalibrationScreenState
                             constraints.maxWidth,
                             constraints.maxHeight,
                           );
-                          _displaySize = displaySize;
-
                           return GestureDetector(
                             behavior: HitTestBehavior.opaque,
                             onTapDown: (details) =>
@@ -329,6 +344,18 @@ class _ManualCalibrationScreenState
                         style: GoogleFonts.inter(fontSize: 11, color: kError)),
                   ],
                   const SizedBox(height: 10),
+
+                  if (widget.localApi != null) ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _loading ? null : _autoCalibratePi,
+                        icon: const Icon(Icons.auto_fix_high, size: 16),
+                        label: const Text('AUTO-DETECT BOARD CORNERS'),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
 
                   // Action buttons
                   Row(
