@@ -1,0 +1,161 @@
+{
+  "pbtResults": {
+    "1. Write bug condition exploration test": {
+      "status": "passed",
+      "failingExample": "BUG-3: find.byIcon(Icons.arrow_back) finds 0 widgets in BoardLinkScreen tree.\nBUG-4: parseMove('e to e4').uci == 'e2e4' — \"to\" consumed as rank \"2\".\nBUG-4 supplementary: parseMove('d for d5').uci == 'd4d5' — \"for\" consumed as rank \"4\".\nBUG-5: After context.go('/analysis?...'), context.pop() throws GoError; \"Analyze\" button not found after Back.\nBUG-6: find.text('DRAW') finds 1 widget when gameMode == 'human_vs_ai' — Draw button always rendered.\nBUG-7: find.byType(AlertDialog) finds 0 widgets after tapping Resign — no onTap handler wired.\nBUG-8: find.text('MAGNUS') finds 0 widgets — _PlayerRow shows hard-coded 'PLAYER_ONE'.\nBUG-9: GoRouterState.extra is null after tapping 'PRACTICE THIS OPENING' — context.go('/play') passes no extra.\nBUG-11: find.textContaining('TestUser') finds 0 widgets — HomeDashboard never reads userProfileProvider.\nBUG-12: apiClientProvider.baseUrl == 'http://172.20.10.3:8000' — compile-time constant ignores persisted URL.",
+      "lastRunTimestamp": 1787476828430
+    }
+  },
+  "executionHistory": {
+    "1. Write bug condition exploration test": [
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787475136314
+      },
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787475146895
+      },
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787476852215
+      }
+    ],
+    "2. Write preservation property tests (BEFORE implementing fix)": [
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787475136414
+      },
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787476857452
+      },
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787477531706
+      }
+    ],
+    "3.1 BUG-1 — Fix BLE adapter state race condition": [
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787475136563
+      },
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787477544898
+      }
+    ],
+    "3.2 BUG-2 — Fix device-not-found in provisioning flow": [
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787475136623
+      },
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787477545904
+      }
+    ],
+    "3.3 BUG-3 — Add back button to BoardLinkScreen": [
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787475136652
+      },
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787477546932
+      }
+    ],
+    "3.4 BUG-4 — Fix STT token ambiguity in move parser": [
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787475136701
+      },
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787477547869
+      }
+    ],
+    "3.5 BUG-5 — Fix GoError when navigating back from Analysis": [
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787475136744
+      },
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787477548927
+      }
+    ],
+    "3.6 BUG-6 — Disable Draw button when playing against bot": [
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787475136773
+      }
+    ],
+    "3.7 BUG-7 — Wire up Resign button with confirmation and API call": [
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787475136803
+      }
+    ],
+    "3.8 BUG-8 — Show authenticated username in PlayerRow": [
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787475136831
+      }
+    ],
+    "3.9 BUG-9 & BUG-10 — Pass opening/lesson context to Play screen and fix Continue FAB": [
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787475136853
+      }
+    ],
+    "3.10 BUG-11 — Display live user data on Home Dashboard": [
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787475136915
+      }
+    ],
+    "3.11 Verify bug condition exploration tests now pass": [
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787475136940
+      }
+    ],
+    "3.12 Verify preservation tests still pass": [
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787475136970
+      }
+    ],
+    "4. Checkpoint — Ensure all tests pass": [
+      {
+        "executionId": "b3a477bf-ffe3-4f5d-9ba4-e786f92102dd",
+        "chatSessionId": "sess_2bdbfd84-a5df-4711-8eca-685b63e1e12a",
+        "timestamp": 1787475137006
+      }
+    ]
+  }
+}

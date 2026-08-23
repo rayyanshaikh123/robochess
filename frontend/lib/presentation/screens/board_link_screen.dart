@@ -135,6 +135,10 @@ class _BoardLinkScreenState extends ConsumerState<BoardLinkScreen> {
         backgroundColor: kBackground,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: kPrimary),
+          onPressed: () => context.pop(),
+        ),
         title: Text('Link Board',
             style: GoogleFonts.spaceGrotesk(
                 fontSize: 16, fontWeight: FontWeight.w700, color: kOnSurface)),

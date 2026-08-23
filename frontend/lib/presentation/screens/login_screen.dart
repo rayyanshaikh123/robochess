@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/config/server_config_provider.dart';
 import '../../core/errors/api_exception.dart';
 import '../providers/session_provider.dart';
 
@@ -179,6 +180,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           label: const Text('PLAY LOCALLY WITHOUT INTERNET'),
                         ),
                       ),
+                      const _ServerConfigButton(),
                     ],
                   ),
                 ),
@@ -202,5 +204,93 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
     );
+  }
+}
+
+/// "Configure server" affordance: shows the active backend URL and opens a
+/// dialog to change it at runtime (BUG-12).
+class _ServerConfigButton extends ConsumerWidget {
+  const _ServerConfigButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final currentUrl = ref.watch(serverConfigProvider);
+    final label = currentUrl.length > 40
+        ? '${currentUrl.substring(0, 37)}...'
+        : currentUrl;
+    return Center(
+      child: TextButton(
+        onPressed: () => _showConfigDialog(context, ref, currentUrl),
+        style: TextButton.styleFrom(
+          foregroundColor: kOnSurfaceVariant,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        ),
+        child: Text(
+          '⚙ Server: $label',
+          style: GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showConfigDialog(
+      BuildContext context, WidgetRef ref, String currentUrl) async {
+    final controller = TextEditingController(text: currentUrl);
+    String? error;
+    await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          backgroundColor: kSurfaceContLow,
+          title: const Text('Configure server'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: controller,
+                style: GoogleFonts.inter(color: kOnSurface),
+                decoration: InputDecoration(
+                  hintText: 'http://192.168.1.42:8000',
+                  hintStyle:
+                      GoogleFonts.inter(color: kOnSurfaceVariant, fontSize: 13),
+                  filled: true,
+                  fillColor: kSurfaceContHighest,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+              if (error != null) ...[
+                const SizedBox(height: 8),
+                Text(error!,
+                    style: GoogleFonts.inter(fontSize: 12, color: kError)),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                final value = controller.text.trim();
+                try {
+                  await ref.read(serverConfigProvider.notifier).update(value);
+                  if (dialogContext.mounted) {
+                    Navigator.of(dialogContext).pop(value);
+                  }
+                } on ArgumentError catch (e) {
+                  setDialogState(() => error = e.message);
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
   }
 }

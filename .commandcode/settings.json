@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(flutter:*)",
+      "Shell(grep:*)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

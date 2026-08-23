@@ -106,9 +106,12 @@ Always install Python packages inside `.venv`. Do not use `sudo pip` or
 
 ## Run the board agent
 
-The agent needs a stable board ID. A device secret is optional: without one it
-runs locally over BLE; with one it also performs backend pairing, heartbeats,
-and session sync. With the virtual environment active:
+The agent needs a stable board ID. A device secret is optional at first: without one it
+runs locally over BLE and waits for the app to bootstrap credentials. During the
+bonded onboarding flow, the app registers the stable board ID, sends the one-time
+secret over BLE, and the agent stores it in `ROBOCHESS_PROVISIONING_FILE`. With a
+stored secret it also performs backend pairing, heartbeats, and session sync. With
+the virtual environment active:
 
 ```bash
 python -m pi_agent.main

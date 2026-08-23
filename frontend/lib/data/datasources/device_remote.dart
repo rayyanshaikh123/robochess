@@ -1,4 +1,5 @@
 import '../../core/network/api_client.dart';
+import '../../domain/models/device_credentials.dart';
 import '../../domain/models/device_model.dart';
 
 class DeviceRemoteDataSource {
@@ -29,12 +30,11 @@ class DeviceRemoteDataSource {
     return DeviceModel.fromJson(data);
   }
 
-  Future<String> onboardingToken({required String deviceId}) async {
+  Future<DeviceCredentials> onboardingToken({required String deviceId}) async {
     final data = await _client.postJson('/device/onboarding-token', body: {
       'device_id': deviceId,
     });
-    return data['onboarding_token']?.toString() ??
-        (throw Exception('Backend did not return an onboarding token'));
+    return DeviceCredentials.fromJson(data);
   }
 
   Future<void> bleLink({required String token}) async {

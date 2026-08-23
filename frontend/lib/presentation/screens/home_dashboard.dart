@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import '../../domain/models/game_state.dart';
 import '../providers/game_provider.dart';
+import '../providers/user_provider.dart';
 
 // ── Colour tokens ──────────────────────────────────────
 const kBackground = Color(0xFF151311);
@@ -19,6 +20,7 @@ const kSecondary = Color(0xFFA2E7FF);
 const kOnSurface = Color(0xFFE7E2DD);
 const kOnSurfaceVariant = Color(0xFFC0CAB4);
 const kOutlineVariant = Color(0xFF414939);
+const kError = Color(0xFFFFB4AB);
 
 // ── Pieces ─────────────────────────────────────────────
 const _whitePieces = {
@@ -56,10 +58,16 @@ class HomeDashboard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final game = ref.watch(gameControllerProvider).valueOrNull;
+    final profileAsync = ref.watch(userProfileProvider);
+    final statsAsync = ref.watch(userStatsProvider);
+
+    final displayName = profileAsync.valueOrNull?.displayName ?? 'Player';
+    final stats = statsAsync.valueOrNull;
+
     return Scaffold(
       backgroundColor: kBackground,
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Column(
             children: [
@@ -73,12 +81,125 @@ class HomeDashboard extends ConsumerWidget {
                   letterSpacing: 2,
                 ),
               ),
-              const SizedBox(height: 30),
+              const SizedBox(height: 20),
+              _GreetingCard(
+                  displayName: displayName, loading: profileAsync.isLoading),
+              const SizedBox(height: 14),
+              _StatsCard(
+                loading: statsAsync.isLoading,
+                gamesPlayed: stats?.gamesPlayed,
+                wins: stats?.wins,
+                losses: stats?.losses,
+                draws: stats?.draws,
+              ),
+              const SizedBox(height: 20),
               _LiveBoardCard(game: game),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+// ── Greeting ───────────────────────────────────────────
+class _GreetingCard extends StatelessWidget {
+  final String displayName;
+  final bool loading;
+  const _GreetingCard({required this.displayName, required this.loading});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: kSurfaceContLow,
+        borderRadius: BorderRadius.circular(14),
+        border: const Border(left: BorderSide(color: kPrimary, width: 4)),
+      ),
+      child: loading
+          ? Container(
+              width: 160,
+              height: 14,
+              decoration: BoxDecoration(
+                color: kSurfaceContHighest,
+                borderRadius: BorderRadius.circular(99),
+              ),
+            )
+          : Row(
+              children: [
+                const Icon(Icons.waving_hand, color: kPrimary, size: 18),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Welcome back, $displayName',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.spaceGrotesk(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: kOnSurface,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+// ── Stats Row ───────────────────────────────────────────
+class _StatsCard extends StatelessWidget {
+  final bool loading;
+  final int? gamesPlayed;
+  final int? wins;
+  final int? losses;
+  final int? draws;
+  const _StatsCard({
+    required this.loading,
+    this.gamesPlayed,
+    this.wins,
+    this.losses,
+    this.draws,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    String text(int? value) => loading || value == null ? '—' : '$value';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: kSurfaceContLow,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _stat('GAMES', text(gamesPlayed), kOnSurface),
+          _stat('WINS', text(wins), kPrimary),
+          _stat('LOSSES', text(losses), kError),
+          _stat('DRAWS', text(draws), kSecondary),
+        ],
+      ),
+    );
+  }
+
+  Widget _stat(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(value,
+            style: GoogleFonts.spaceGrotesk(
+                fontSize: 20, fontWeight: FontWeight.w700, color: color)),
+        const SizedBox(height: 2),
+        Text(label,
+            style: GoogleFonts.inter(
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+                color: kOnSurfaceVariant,
+                letterSpacing: 1)),
+      ],
     );
   }
 }
@@ -196,9 +317,21 @@ class _LiveBoardCard extends StatelessWidget {
               label: const Text('START A GAME'),
             )
           else
-            Text(
-              'Move ${game!.gameVersion}${game!.lastMove == null ? '' : ' • ${game!.lastMove}'}',
-              style: GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                FilledButton.icon(
+                  onPressed: () => context.go('/play'),
+                  icon: const Icon(Icons.play_circle),
+                  label: const Text('RESUME GAME'),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'Move ${game!.gameVersion}${game!.lastMove == null ? '' : ' • ${game!.lastMove}'}',
+                  style:
+                      GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant),
+                ),
+              ],
             ),
         ],
       ),

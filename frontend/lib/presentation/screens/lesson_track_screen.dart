@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../domain/models/opening_context.dart';
+
 const _background = Color(0xFF151311);
 const _surface = Color(0xFF1D1B19);
 const _surfaceHigh = Color(0xFF373431);
@@ -130,7 +132,13 @@ class _LessonCard extends StatelessWidget {
         Align(
           alignment: Alignment.centerRight,
           child: FilledButton.icon(
-            onPressed: () => context.go('/play'),
+            onPressed: () => context.go(
+              '/play',
+              extra: OpeningContext(
+                name: lesson.title,
+                pgn: lesson.objective,
+              ),
+            ),
             icon: const Icon(Icons.play_arrow, size: 16),
             label: const Text('PRACTICE'),
             style: FilledButton.styleFrom(

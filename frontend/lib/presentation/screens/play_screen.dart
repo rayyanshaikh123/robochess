@@ -11,10 +11,12 @@ import '../providers/device_provider.dart';
 import '../providers/board_provider.dart';
 import '../providers/game_provider.dart';
 import '../providers/session_provider.dart';
+import '../providers/user_provider.dart';
 import '../../core/errors/api_exception.dart';
 import '../../core/config/app_config.dart';
 import '../../domain/models/device_model.dart';
 import '../../domain/models/game_state.dart';
+import '../../domain/models/opening_context.dart';
 import '../../domain/models/calibration_frame.dart';
 import '../../domain/voice/voice_service.dart';
 import '../../domain/voice/move_parser.dart';
@@ -83,6 +85,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   String? _pendingLocalUci;
   int? _pendingLocalVersion;
   String? _wsGameId;
+  String _gameMode = 'human_vs_ai';
+  OpeningContext? _openingContext;
 
   bool _gameUsesBoard = false;
   CalibrationFrame? _liveFrame;
@@ -139,6 +143,27 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     });
     _resultSub = _voiceService.resultStream.listen(_handleVoiceResult);
     _loadMicDevices();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final extra = GoRouterState.of(context).extra;
+    if (extra is OpeningContext) {
+      _loadOpeningContext(extra);
+    }
+  }
+
+  void _loadOpeningContext(OpeningContext ctx) {
+    if (_openingContext?.name == ctx.name) return;
+    setState(() => _openingContext = ctx);
+    _game.load_pgn(ctx.pgn);
+    _moveHistory.clear();
+    _selectedSquare = null;
+    _legalDestinations = [];
+    _lastMoveFrom = null;
+    _lastMoveTo = null;
+    _updateStatusMessage();
   }
 
   @override
@@ -243,6 +268,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     setState(() {
       _syncing = true;
       _syncError = null;
+      _gameMode = result.mode;
       _gameUsesBoard = result.useBoard;
       _inGameValidated = result.useBoard; // Board was validated in modal
       _inGameValidationNote = null;
@@ -581,6 +607,44 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         _inGameValidationNote =
             'Pi calibration saved. Validate the board again.';
       });
+    }
+  }
+
+  // ── Resign ──
+  Future<void> _resignGame() async {
+    final gameId = _linkedGameId;
+    if (gameId == null || _game.game_over) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: kSurfaceContLow,
+        title: const Text('Resign?'),
+        content: const Text('Are you sure you want to resign this game?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await ref.read(gameControllerProvider.notifier).resignGame(gameId);
+      if (!mounted) return;
+      setState(() {
+        _syncError = null;
+        _statusMessage = 'You resigned.';
+      });
+    } catch (err) {
+      if (!mounted) return;
+      setState(() => _syncError = 'Resign failed. Please try again.');
     }
   }
 
@@ -963,6 +1027,11 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                         _statusMessage.contains('Check') ? kError : kPrimary)),
           ),
 
+          if (_openingContext != null) ...[
+            _OpeningHintBanner(name: _openingContext!.name),
+            const SizedBox(height: 12),
+          ],
+
           if (_gameUsesBoard && _linkedGameId != null) ...[
             const SizedBox(height: 12),
             _buildLiveBoardPreview(),
@@ -981,8 +1050,12 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           _GameControls(
             onUndo: _undoMove,
             onAnalyze: _linkedGameId != null
-                ? () => context.go('/analysis?game_id=$_linkedGameId')
+                ? () => context.push('/analysis?game_id=$_linkedGameId')
                 : null,
+            onResign: _game.game_over || _linkedGameId == null
+                ? null
+                : _resignGame,
+            gameMode: _gameMode,
           ),
           const SizedBox(height: 12),
           _VoiceCommandButton(
@@ -1900,13 +1973,16 @@ class _StepTile extends StatelessWidget {
   }
 }
 
-class _PlayerRow extends StatelessWidget {
+class _PlayerRow extends ConsumerWidget {
   final chess.Chess game;
   const _PlayerRow({required this.game});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isWhiteTurn = game.turn == chess.Color.WHITE;
+    final profileAsync = ref.watch(userProfileProvider);
+    final displayName =
+        (profileAsync.valueOrNull?.displayName ?? 'Player').toUpperCase();
 
     return Column(children: [
       Container(
@@ -1953,7 +2029,7 @@ class _PlayerRow extends StatelessWidget {
                   color: isWhiteTurn ? kPrimary : kOnSurfaceVariant,
                   letterSpacing: 2)),
           const Spacer(),
-          Text('PLAYER_ONE',
+          Text(displayName,
               style: GoogleFonts.spaceGrotesk(
                   fontSize: 15,
                   fontWeight: FontWeight.w700,
@@ -2309,13 +2385,62 @@ class _InsightChip extends StatelessWidget {
   }
 }
 
-class _GameControls extends StatelessWidget {
-  final VoidCallback? onUndo;
-  final VoidCallback? onAnalyze;
-  const _GameControls({this.onUndo, this.onAnalyze});
+class _OpeningHintBanner extends StatelessWidget {
+  final String name;
+  const _OpeningHintBanner({required this.name});
 
   @override
   Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: kPrimary.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: kPrimary.withOpacity(0.25)),
+      ),
+      child: Row(children: [
+        const Icon(Icons.school, color: kPrimary, size: 18),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('OPENING LESSON',
+                  style: GoogleFonts.inter(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: kPrimary,
+                      letterSpacing: 2)),
+              const SizedBox(height: 3),
+              Text(name,
+                  style: GoogleFonts.spaceGrotesk(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: kOnSurface)),
+            ],
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+class _GameControls extends StatelessWidget {
+  final VoidCallback? onUndo;
+  final VoidCallback? onAnalyze;
+  final VoidCallback? onResign;
+  final String gameMode;
+  const _GameControls({
+    this.onUndo,
+    this.onAnalyze,
+    this.onResign,
+    this.gameMode = 'human_vs_ai',
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final canOfferDraw = gameMode == 'human_vs_human';
     return Row(children: [
       _ControlBtn(
           icon: Icons.undo, label: 'Undo', color: kOnSurface, onTap: onUndo),
@@ -2326,9 +2451,18 @@ class _GameControls extends StatelessWidget {
           color: kSecondary,
           onTap: onAnalyze),
       const SizedBox(width: 12),
-      _ControlBtn(icon: Icons.flag, label: 'Resign', color: kError),
+      _ControlBtn(
+          icon: Icons.flag,
+          label: 'Resign',
+          color: kError,
+          onTap: onResign),
       const SizedBox(width: 12),
-      _ControlBtn(icon: Icons.handshake, label: 'Draw', color: kOnSurface),
+      _ControlBtn(
+        icon: Icons.handshake,
+        label: 'Draw',
+        color: canOfferDraw ? kOnSurface : kOnSurfaceVariant.withOpacity(0.4),
+        onTap: canOfferDraw ? () {} : null,
+      ),
     ]);
   }
 }

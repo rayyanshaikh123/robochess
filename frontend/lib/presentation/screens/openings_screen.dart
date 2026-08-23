@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:chess/chess.dart' as chess_lib;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../widgets/animated_profile_avatar.dart';
+import '../../domain/models/opening_context.dart';
 
 // ── Colour tokens (matching the Learn Section palette) ───────────────────────
 const _kBackground = Color(0xFF151311);
@@ -355,7 +356,13 @@ class _OpeningCard extends StatelessWidget {
                 onPressed: () {
                   Navigator.of(sheetContext).pop();
                   onPractice(opening.name);
-                  context.go('/play');
+                  context.go(
+                    '/play',
+                    extra: OpeningContext(
+                      name: opening.name,
+                      pgn: opening.notation,
+                    ),
+                  );
                 },
                 icon: const Icon(Icons.play_arrow),
                 label: const Text('PRACTICE THIS OPENING'),

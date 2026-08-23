@@ -47,6 +47,12 @@ class GameController extends StateNotifier<AsyncValue<GameStateModel?>> {
     // to handle the actual state update, but it's safe to do so.
     await _repository.undoMove();
   }
+
+  Future<void> resignGame(String gameId) async {
+    await _repository.resignGame(gameId);
+    // Refresh so the game-over status from the backend is reflected locally.
+    await refresh(gameId);
+  }
 }
 
 final gameControllerProvider =

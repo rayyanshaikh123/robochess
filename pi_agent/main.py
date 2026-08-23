@@ -44,12 +44,15 @@ from pi_agent.session_store import SessionStore
 
 
 def main() -> None:
-    if not DEVICE_ID:
+    store = ProvisioningStore()
+    stored_device_id, stored_device_secret = store.get_credentials()
+    device_id = stored_device_id or DEVICE_ID
+    device_secret = stored_device_secret or DEVICE_SECRET
+    if not device_id:
         raise RuntimeError("Set ROBOCHESS_DEVICE_ID (a stable local board identifier)")
 
     api = DeviceApiClient()
     network = NetworkManager()
-    store = ProvisioningStore()
     network_config = {
         "state_path": LOCAL_STATE_PATH,
         "camera_index": CAMERA_INDEX,
@@ -66,19 +69,27 @@ def main() -> None:
         token = store.load().get("onboarding_token")
         if not token:
             return {"status": "no_token"}
-        if not api.device_token and DEVICE_SECRET:
-            api.connect(DEVICE_ID, DEVICE_SECRET)
+        if not api.device_token and device_secret:
+            api.connect(device_id, device_secret)
         if not api.device_token:
             return {"status": "error", "error": "Pi backend credentials are not configured"}
         result = api.claim(token)
-        store.save({})
+        store.clear_onboarding_token()
         network_config["backend_available"] = True
         return {"status": "token_claimed", "device": result}
 
     def on_control(message: dict) -> dict:
+        nonlocal device_id, device_secret
         data = message.get("data") or {}
         token = data.get("onboarding_token")
+        incoming_secret = data.get("device_secret")
         if token:
+            if isinstance(incoming_secret, str) and incoming_secret:
+                if message.get("device_id") != device_id:
+                    return {"status": "error", "error": "Device ID mismatch"}
+                device_secret = incoming_secret
+                device_id = str(message.get("device_id") or device_id)
+                store.set_credentials(device_id, device_secret)
             store.set_onboarding_token(token)
             try:
                 result = claim_pending_token()
@@ -151,7 +162,7 @@ def main() -> None:
     )
     print(f"Network state: {current_network.state} ({current_network.ip_address or 'no IP'})")
     gatt = GattServer(
-        DEVICE_ID, on_control=on_control, on_wifi=on_wifi,
+        device_id, on_control=on_control, on_wifi=on_wifi,
         adapter_address=BLE_ADAPTER or None, name=BLE_NAME or None,
         require_bond=BLE_REQUIRE_BOND,
     ) if BLE_ENABLED else None
@@ -159,9 +170,9 @@ def main() -> None:
         gatt.set_game_handler(game.handle)
         gatt.publish()
 
-    if DEVICE_SECRET:
+    if device_secret:
         try:
-            api.connect(DEVICE_ID, DEVICE_SECRET)
+            api.connect(device_id, device_secret)
             network_config["backend_available"] = True
         except Exception as exc:
             print(f"Backend unavailable; cloud linking is unavailable until this is fixed: {exc}")
@@ -180,13 +191,12 @@ def main() -> None:
     except Exception:
         pass
 
-    heartbeat = None
-    if DEVICE_SECRET:
-        heartbeat = HeartbeatWorker(
-            api, DEVICE_ID, HEARTBEAT_SECONDS, DEVICE_SECRET,
-            session_snapshot=lambda: game.session.snapshot() if game.session else None,
-        )
-        heartbeat.start()
+    heartbeat = HeartbeatWorker(
+        api, device_id, HEARTBEAT_SECONDS,
+        session_snapshot=lambda: game.session.snapshot() if game.session else None,
+        device_secret_provider=lambda: device_secret,
+    )
+    heartbeat.start()
 
     vision = VisionAdapter(game.session, stability_frames=STABLE_LABEL_COUNT)
 

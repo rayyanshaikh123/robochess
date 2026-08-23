@@ -1,0 +1,184 @@
+# Implementation Plan
+
+- [x] 1. Write bug condition exploration test
+  - **Property 1: Bug Condition** - RoboChess Multi-Bug Surface
+  - **CRITICAL**: This test MUST FAIL on unfixed code — failure confirms the bugs exist
+  - **DO NOT attempt to fix the test or the code when it fails**
+  - **NOTE**: This test encodes the expected behavior — it will validate the fixes when it passes after implementation
+  - **GOAL**: Surface counterexamples that demonstrate each bug exists
+  - **Scoped PBT Approach**: For deterministic bugs (BUG-3, BUG-5, BUG-6, BUG-7, BUG-8), scope each property to its concrete failing case. For the STT parser (BUG-4), generate inputs where a connector word follows a file token.
+  - Test details from Bug Condition specifications in design:
+    - **BUG-1** (`isBleFirstScanRace`): Mock `FlutterBluePlus.adapterState` to emit `unknown` then `on` after 100 ms. Call `scan()` on the first tap. Assert no `StateError` is thrown and `startScan` is eventually called. On unfixed code the `StateError` surfaces immediately.
+    - **BUG-3** (`isMissingBackButton`): Widget-test render `BoardLinkScreen`. Assert `find.byIcon(Icons.arrow_back)` finds exactly 1 widget. On unfixed code 0 matches.
+    - **BUG-4** (`isSTTAmbiguous`): Unit-test `parseMove('d to d4', board)`. Assert result is `MoveParseResult.success` with UCI `d2d4` (source `d`, skip connector `to`, destination `d4`). On unfixed code the `to` token is consumed as rank `2`, leaving the destination unreadable.
+    - **BUG-5** (`isGoErrorCrash`): Integration-test pump `PlayScreen` with a live `_linkedGameId`. Tap "Analyze". Assert the navigation stack depth is 2 (Play + Analysis). On unfixed code `context.go()` replaces the stack; tapping back then throws `GoError`.
+    - **BUG-6** (`isDrawButtonShownVsBot`): Widget-test render `_GameControls(gameMode: 'human_vs_ai', ...)`. Assert the Draw `_ControlBtn` has `onTap == null` or is absent. On unfixed code the button is fully enabled.
+    - **BUG-7** (`isResignNoOp`): Widget-test render `_GameControls` with resign wired. Tap "Resign". Assert a confirmation `AlertDialog` is shown. On unfixed code no dialog appears.
+    - **BUG-8** (`isHardcodedPlayerName`): Widget-test provide `userProfileProvider` override returning `displayName: 'Magnus'`. Render `_PlayerRow`. Assert `find.text('MAGNUS')` finds 1 widget. On unfixed code `find.text('PLAYER_ONE')` matches instead.
+    - **BUG-9** (`isOpeningNoContext`): Widget-test tap "PRACTICE THIS OPENING" on `_OpeningCard`. Assert the pushed route's `extra` is an `OpeningContext` instance. On unfixed code the `extra` is `null`.
+    - **BUG-11** (`isStaticDashboard`): Widget-test provide `userProfileProvider` and `userStatsProvider` overrides with resolved data. Render `HomeDashboard`. Assert the user's display name and at least one stats value are rendered. On unfixed code neither appears.
+    - **BUG-12** (`isHardcodedServerUrl`): Unit-test seed `FlutterSecureStorage` with `server_base_url = 'http://192.168.1.1:8000'`. Construct `apiClientProvider` via a `ProviderContainer`. Assert `client.baseUrl == 'http://192.168.1.1:8000'`. On unfixed code `client.baseUrl` still equals `'http://172.20.10.3:8000'` (the compile-time constant), ignoring the persisted value.
+  - Run test on UNFIXED code
+  - **EXPECTED OUTCOME**: Tests FAIL (this is correct — it proves the bugs exist)
+  - Document counterexamples found to understand root cause:
+    - BUG-1: `StateError('Bluetooth is disabled...')` on first scan
+    - BUG-3: Zero `Icons.arrow_back` widgets in `BoardLinkScreen` tree
+    - BUG-4: `MoveParseResult.failure(...)` for `'d to d4'`
+    - BUG-5: Navigation stack depth remains 1; `context.pop()` in Analysis throws `GoError`
+    - BUG-6: Draw `_ControlBtn.onTap` is non-null in bot game mode
+    - BUG-7: No `AlertDialog` found after tapping Resign
+    - BUG-8: `find.text('PLAYER_ONE')` matches; `find.text('MAGNUS')` finds 0
+    - BUG-9: `GoRouterState.extra` is `null` after opening card tap
+    - BUG-11: No display name or stats text found in `HomeDashboard` widget tree
+    - BUG-12: `apiClientProvider.baseUrl` equals `'http://172.20.10.3:8000'` (compile-time constant) even though `'http://192.168.1.1:8000'` was seeded in `FlutterSecureStorage`
+  - Mark task complete when tests are written, run, and failures are documented
+  - _Requirements: 1.1, 1.2, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10, 1.11, 1.12, 1.13, 1.14, 1.15, 1.16, 1.17, 1.18, 1.22, 1.23, 1.24, 1.25_
+
+- [x] 2. Write preservation property tests (BEFORE implementing fix)
+  - **Property 2: Preservation** - Non-Buggy Input Behavior Unchanged
+  - **IMPORTANT**: Follow observation-first methodology — run unfixed code with non-buggy inputs, observe actual outputs, then encode them as property tests
+  - Observe and record the following on UNFIXED code:
+    - BLE subsequent scans: second `_scan()` call with adapter already `on` → scan starts cleanly, no error
+    - BLE disabled: adapter stream never reaches `on` → `StateError('Bluetooth is disabled...')` propagates to UI
+    - STT special commands: `parseMove('undo', board)` → `MoveParseResult.command('UNDO')`
+    - STT clean squares: `parseMove('e2 e4', board)` → `MoveParseResult.success` with UCI `e2e4`
+    - STT illegal move: `parseMove('e2 e5', blockedBoard)` → `MoveParseResult.failure(...)`
+    - Analysis bottom-nav: navigate to Analysis via shell route (bottom nav) → screen loads, back works normally
+    - Draw button in HvH: `_GameControls(gameMode: 'human_vs_human', ...)` → Draw button enabled
+    - Resign dialog cancel: show resign dialog, tap Cancel → game state unchanged
+    - AI row label: `_PlayerRow` renders AI row with "AI LEVEL 8" text unaffected by profile provider changes
+    - Learn default view: `LearnSection` renders without error when no lesson has ever been started
+    - Dashboard board on loading: `userProfileProvider` in loading state → `HomeDashboard` renders chess board without crash
+    - Dashboard no active game: `gameControllerProvider` returns null → "START A GAME" button shown, no crash
+  - Write property-based tests capturing the above observed behaviors:
+    - **BLE Preservation**: For all tap counts > 1 with adapter `on`, `_scan()` succeeds. For adapter permanently off, `StateError` message matches exactly.
+    - **STT Preservation**: Property test: for all token sequences that do NOT contain a connector word immediately after a file token, `parseMove(unfixed)` equals `parseMove(fixed)` (identical `MoveParseResult`).
+    - **Game Controls Preservation**: For `gameMode = 'human_vs_human'`, Draw button `onTap` is non-null. For all game modes, Resign cancel leaves `_game.history` length unchanged.
+    - **Dashboard Provider States**: For all combinations of `(profile: loading|data|error) × (stats: loading|data|error)`, `HomeDashboard` renders without uncaught exceptions.
+  - Run tests on UNFIXED code
+  - **EXPECTED OUTCOME**: Tests PASS (this confirms baseline behavior to preserve)
+  - Mark task complete when tests are written, run, and all passing on unfixed code
+  - _Requirements: 3.1, 3.2, 3.5, 3.6, 3.7, 3.8, 3.9, 3.10, 3.11, 3.12, 3.13, 3.14, 3.15, 3.16, 3.17, 3.19, 3.21, 3.22_
+
+- [ ] 3. Fix all 11 RoboChess bugs
+
+  - [-] 3.1 BUG-1 — Fix BLE adapter state race condition
+    - File: `lib/core/ble/robochess_ble.dart`, function `scan()`
+    - Replace `await FlutterBluePlus.adapterState.first` with a `.firstWhere()` stream wait that skips `unknown` / `turningOn` states, with a 5-second timeout that falls back to `BluetoothAdapterState.off`
+    - Only throw `StateError('Bluetooth is disabled...')` when the resolved state is not `on`
+    - _Bug_Condition: `isBleFirstScanRace(X)` where `X.tapCount == 1 AND NOT X.adapterStateConfirmed`_
+    - _Expected_Behavior: `scan()` awaits adapter confirmation, then calls `startScan` without error_
+    - _Preservation: subsequent scans and genuine-disabled-BT error path unchanged (Requirements 3.1, 3.2)_
+    - _Requirements: 2.1, 2.2_
+
+  - [-] 3.2 BUG-2 — Fix device-not-found in provisioning flow
+    - File: `lib/data/repositories/device_repository.dart` and/or `lib/data/datasources/device_remote.dart`
+    - Audit `onboardingToken()`: remove any local-store precondition check; the raw `deviceId` from `connectAndReadDeviceId()` is the sole input to the network call
+    - Verify the provisioning sequence in `ble_provision_screen.dart` uses `deviceId` directly throughout all steps
+    - _Bug_Condition: `isDeviceNotFound(X)` where `X.provisionStep == 'checkStatus' AND NOT X.deviceInLocalStore`_
+    - _Expected_Behavior: `onboardingToken(deviceId: deviceId)` succeeds without requiring a prior local-store entry_
+    - _Preservation: successful provision still calls `deviceListProvider.notifier.load()` before navigating to `/connect` (Requirement 3.3)_
+    - _Requirements: 2.3, 2.4_
+
+  - [-] 3.3 BUG-3 — Add back button to BoardLinkScreen
+    - File: `lib/presentation/screens/board_link_screen.dart`, `_BoardLinkScreenState.build()` → `AppBar`
+    - Add `leading: IconButton(icon: const Icon(Icons.arrow_back, color: kPrimary), onPressed: () => context.pop())` to the existing `AppBar` constructor
+    - _Bug_Condition: `isMissingBackButton(X)` where `X.screen == 'BoardLinkScreen'`_
+    - _Expected_Behavior: AppBar contains a back arrow that pops the route_
+    - _Preservation: BLE scan push to `/connect/ble`, code entry, and form submit behavior unchanged (Requirements 3.5, 3.6)_
+    - _Requirements: 2.5, 2.6_
+
+  - [-] 3.4 BUG-4 — Fix STT token ambiguity in move parser
+    - File: `lib/domain/voice/move_parser.dart`, function `_parseSquare()`
+    - Add constant `const _connectorWords = {'to', 'too', 'for'};`
+    - In `_parseSquare`, when building a two-token file+rank pair, add guard: `&& !_connectorWords.contains(tokens[idx + 1])` before consuming the next token as a rank
+    - Add `'be': 'b'` to `_fileMap` for the common "be" → b STT mis-transcription
+    - _Bug_Condition: `isSTTAmbiguous(X)` where a connector word follows a file token inside `_parseSquare`_
+    - _Expected_Behavior: connector words are never consumed as ranks; destination square is read correctly from subsequent tokens_
+    - _Preservation: `undo`/`resign`/castle commands, clean square tokens, illegal-move errors all return identical `MoveParseResult` (Requirements 3.7, 3.8)_
+    - _Requirements: 2.7, 2.8, 2.9_
+
+  - [-] 3.5 BUG-5 — Fix GoError when navigating back from Analysis
+    - File: `lib/presentation/screens/play_screen.dart`, `_PlayScreenState.build()` → `_GameControls(onAnalyze:)` lambda
+    - Replace `context.go('/analysis?game_id=$_linkedGameId')` with `context.push('/analysis?game_id=$_linkedGameId')`
+    - _Bug_Condition: `isGoErrorCrash(X)` where `X.navigationType == 'go' AND X.currentRoute == '/analysis'`_
+    - _Expected_Behavior: Play screen stays on the navigation stack; `context.pop()` in Analysis returns to Play without error_
+    - _Preservation: Analysis screen via bottom-nav shell route continues to work (Requirements 3.9, 3.10)_
+    - _Requirements: 2.10, 2.11_
+
+  - [~] 3.6 BUG-6 — Disable Draw button when playing against bot
+    - File: `lib/presentation/screens/play_screen.dart`
+    - Add `String _gameMode = 'human_vs_ai'` field to `_PlayScreenState`
+    - In `_startGameFlow()`, after receiving `result`, set `_gameMode = result.mode` inside `setState()`
+    - Add `final String gameMode` parameter to `_GameControls`
+    - In `_GameControls.build()`, pass `onTap: null` to the Draw `_ControlBtn` (or hide it entirely) when `gameMode != 'human_vs_human'`; visually dim with reduced opacity when disabled
+    - _Bug_Condition: `isDrawButtonShownVsBot(X)` where `X.gameMode IN ['human_vs_ai', 'phone_vs_board']`_
+    - _Expected_Behavior: Draw button disabled/hidden for bot game modes_
+    - _Preservation: Draw button remains enabled for `human_vs_human`; mode re-evaluation on new game start (Requirements 3.11, 3.12)_
+    - _Requirements: 2.12, 2.13_
+
+  - [~] 3.7 BUG-7 — Wire up Resign button with confirmation and API call
+    - Files: `play_screen.dart`, `game_provider.dart`, `game_repository.dart`, `game_remote.dart`
+    - `play_screen.dart`: Add `onResign: VoidCallback?` to `_GameControls`; wire it to "Resign" `_ControlBtn`; implement `_resignGame()` in `_PlayScreenState` — show `showDialog` asking "Resign?", on confirm call `ref.read(gameControllerProvider.notifier).resignGame(_linkedGameId!)`, on failure set `_syncError`
+    - `game_provider.dart`: Add `Future<void> resignGame(String gameId)` to `GameController`
+    - `game_repository.dart`: Add `Future<void> resignGame(String gameId)` delegating to `_remote.resignGame(gameId)`
+    - `game_remote.dart`: Add `resignGame(gameId)` → `POST /games/{gameId}/resign`; catch 404/network errors and rethrow as `ApiException`
+    - _Bug_Condition: `isResignNoOp(X)` where `X.buttonTapped == 'resign' AND NOT X.handlerAssigned`_
+    - _Expected_Behavior: tap Resign → confirmation dialog; confirm → backend called, game-over state shown; graceful error on 404_
+    - _Preservation: dialog cancel leaves game state unmodified; already-over game disables Resign (Requirements 3.13, 3.14)_
+    - _Requirements: 2.14, 2.15, 2.16_
+
+  - [~] 3.8 BUG-8 — Show authenticated username in PlayerRow
+    - File: `lib/presentation/screens/play_screen.dart`, class `_PlayerRow`
+    - Convert `_PlayerRow` from `StatelessWidget` to `ConsumerWidget`
+    - Read `ref.watch(userProfileProvider)` and use `profileAsync.valueOrNull?.displayName ?? 'Player'` in place of the hard-coded `'PLAYER_ONE'` string
+    - Add the required `flutter_riverpod` import if not already present in scope
+    - _Bug_Condition: `isHardcodedPlayerName(X)` where `X.playerNameSource == 'hardcoded'`_
+    - _Expected_Behavior: renders `displayName.toUpperCase()` from `userProfileProvider` when resolved_
+    - _Preservation: AI player row label unchanged; display name shows correctly on re-navigation without re-fetch (Requirements 3.15, 3.16)_
+    - _Requirements: 2.17, 2.18_
+
+  - [~] 3.9 BUG-9 & BUG-10 — Pass opening/lesson context to Play screen and fix Continue FAB
+    - Files: `domain/models/opening_context.dart` (new), `openings_screen.dart`, `lesson_track_screen.dart`, `learn_section.dart`, `play_screen.dart`
+    - Create `lib/domain/models/opening_context.dart` with `class OpeningContext { final String name; final String pgn; const OpeningContext({required this.name, required this.pgn}); }`
+    - `openings_screen.dart` — `_openLesson()`: change `context.go('/play')` to `context.go('/play', extra: OpeningContext(name: opening.name, pgn: opening.notation))`
+    - `lesson_track_screen.dart` — `_LessonCard.build()`: change `context.go('/play')` to `context.go('/play', extra: OpeningContext(name: lesson.title, pgn: lesson.objective))`
+    - `learn_section.dart` — `_CategoryCard.build()`: persist `category.route` to `FlutterSecureStorage(key: 'last_lesson_route')` when a card is tapped; `_ContinueFAB`: read persisted key and push that route (fallback `'/learn/openings'`)
+    - `play_screen.dart`: add `OpeningContext? _openingContext` field; in `didChangeDependencies()` read `GoRouterState.of(context).extra as OpeningContext?`; if non-null, call `_loadOpeningContext(ctx)` which calls `_game.load_pgn(ctx.pgn)` and sets `_openingContext`; add a collapsible `_OpeningHintBanner` widget above the board when `_openingContext != null`
+    - _Bug_Condition: `isOpeningNoContext(X)` where `X.navigationType == 'go(/play)' AND NOT X.openingContext`; `isLessonFlowNeverInitialized(X)` where `X.continueFabTarget == 'hardcoded:/learn/openings'`_
+    - _Expected_Behavior: Play screen receives `OpeningContext`, loads position, shows hint banner; Continue FAB goes to last-visited track_
+    - _Preservation: regular new game (no extra) starts from initial position with no lesson overlay; default Learn view unaffected when no lesson ever started (Requirements 3.17, 3.19)_
+    - _Requirements: 2.19, 2.20, 2.21, 2.22, 2.23_
+
+  - [~] 3.10 BUG-11 — Display live user data on Home Dashboard
+    - File: `lib/presentation/screens/home_dashboard.dart`, `HomeDashboard.build()`
+    - Add `ref.watch(userProfileProvider)` and `ref.watch(userStatsProvider)` (import `user_provider.dart`)
+    - Render a greeting row above the board: use `AsyncValue.when(data:, loading:, error:)` to show `"Welcome back, [displayName]"` or a skeleton `Container` while loading
+    - Render a stats row: games played and win/loss record from `userStatsProvider`, or `'—'` placeholders while loading
+    - When `game != null`, add a "RESUME GAME" `FilledButton` alongside the existing "Start a Game" button
+    - _Bug_Condition: `isStaticDashboard(X)` where `NOT X.dataSourcesUsed.contains('userProfileProvider') AND NOT X.dataSourcesUsed.contains('userStatsProvider')`_
+    - _Expected_Behavior: display name and stats rendered when providers resolve; loading skeletons shown while loading_
+    - _Preservation: chess board continues to render; "Start a Game" button unaffected when no game active; no crash on loading/error states (Requirements 3.21, 3.22)_
+    - _Requirements: 2.24, 2.25, 2.26_
+
+  - [~] 3.11 Verify bug condition exploration tests now pass
+    - **Property 1: Expected Behavior** - RoboChess Multi-Bug Surface
+    - **IMPORTANT**: Re-run the SAME tests from task 1 — do NOT write new tests
+    - The tests from task 1 encode the expected behavior for all 11 bugs
+    - When these tests pass, they confirm the expected behavior is satisfied for each bug condition
+    - Run all bug condition exploration tests from step 1 against the fixed code
+    - **EXPECTED OUTCOME**: All tests PASS (confirms bugs are fixed)
+    - _Requirements: 2.1, 2.5, 2.7, 2.10, 2.12, 2.14, 2.17, 2.19, 2.24_
+
+  - [~] 3.12 Verify preservation tests still pass
+    - **Property 2: Preservation** - Non-Buggy Input Behavior Unchanged
+    - **IMPORTANT**: Re-run the SAME tests from task 2 — do NOT write new tests
+    - Run all preservation property tests from step 2 against the fixed code
+    - **EXPECTED OUTCOME**: All tests PASS (confirms no regressions)
+    - Confirm that subsequent BLE scans, STT special commands, Draw button in HvH, Resign cancel, AI row label, default Learn view, and Dashboard board/loading states all behave identically to unfixed code
+
+- [~] 4. Checkpoint — Ensure all tests pass
+  - Run the full Flutter test suite: `flutter test`
+  - Verify all 12 sub-tasks above are marked complete
+  - Confirm no new lint warnings introduced: `flutter analyze`
+  - Ensure all tests pass; ask the user if questions arise

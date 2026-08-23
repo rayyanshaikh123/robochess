@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import '../widgets/animated_profile_avatar.dart';
@@ -288,11 +289,23 @@ class _CategoryCard extends StatelessWidget {
   final _Category category;
   const _CategoryCard({required this.category});
 
+  static const _lastLessonKey = 'last_lesson_route';
+  static const _storage = FlutterSecureStorage();
+
+  Future<void> _openCategory(BuildContext context) async {
+    final route = category.route;
+    if (route == null) return;
+    // Remember the last active lesson track so the CONTINUE LESSON FAB can
+    // resume it instead of always defaulting to /learn/openings.
+    await _storage.write(key: _lastLessonKey, value: route);
+    if (context.mounted) context.push(route);
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: category.route != null
-          ? () => context.push(category.route!)
+          ? () => _openCategory(context)
           : null,
       child: Container(
         decoration: BoxDecoration(
@@ -520,7 +533,28 @@ class _BentoRow extends StatelessWidget {
 }
 
 // ── Continue Lesson FAB ───────────────────────────────────────────────────────
-class _ContinueFAB extends StatelessWidget {
+class _ContinueFAB extends StatefulWidget {
+  @override
+  State<_ContinueFAB> createState() => _ContinueFABState();
+}
+
+class _ContinueFABState extends State<_ContinueFAB> {
+  static const _lastLessonKey = 'last_lesson_route';
+  static const _storage = FlutterSecureStorage();
+  String _route = '/learn/openings';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLastRoute();
+  }
+
+  Future<void> _loadLastRoute() async {
+    final saved = await _storage.read(key: _lastLessonKey);
+    if (!mounted || saved == null || saved.isEmpty) return;
+    setState(() => _route = saved);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -541,7 +575,7 @@ class _ContinueFAB extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: () => context.push('/learn/openings'),
+          onTap: () => context.push(_route),
           borderRadius: BorderRadius.circular(14),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),

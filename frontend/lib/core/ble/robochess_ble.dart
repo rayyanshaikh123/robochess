@@ -20,8 +20,8 @@ class RoboChessBleDevice {
       ? result.device.platformName
       : 'RoboChess board';
   String get deviceId => result.advertisementData.serviceData.values
-      .expand((bytes) => bytes)
-      .isNotEmpty
+          .expand((bytes) => bytes)
+          .isNotEmpty
       ? result.advertisementData.serviceData.values
           .expand((bytes) => bytes)
           .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
@@ -42,9 +42,25 @@ class RoboChessBleClient {
   final Map<String, Timer> _chunkExpiry = {};
   Future<void> _writeQueue = Future<void>.value();
 
-  Stream<List<ScanResult>> scan({Duration timeout = const Duration(seconds: 8)}) async* {
-    if (await FlutterBluePlus.adapterState.first != BluetoothAdapterState.on) {
-      throw StateError('Bluetooth is disabled. Turn on Bluetooth and try again.');
+  Stream<List<ScanResult>> scan(
+      {Duration timeout = const Duration(seconds: 8)}) async* {
+    // The first value emitted by adapterState may be a stale cached value
+    // (unknown / turningOn) while the Bluetooth stack is still initialising.
+    // Await a confirmed state (anything but the transitional values) with a
+    // short timeout so a genuinely disabled adapter still fails fast.
+    final state = await FlutterBluePlus.adapterState
+        .firstWhere(
+          (s) =>
+              s != BluetoothAdapterState.unknown &&
+              s != BluetoothAdapterState.turningOn,
+        )
+        .timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => BluetoothAdapterState.off,
+        );
+    if (state != BluetoothAdapterState.on) {
+      throw StateError(
+          'Bluetooth is disabled. Turn on Bluetooth and try again.');
     }
     await FlutterBluePlus.startScan(
       withServices: [Guid(roboChessServiceUuid)],
@@ -54,7 +70,8 @@ class RoboChessBleClient {
   }
 
   Future<String> connectAndReadDeviceId(BluetoothDevice device) async {
-    await device.connect(timeout: const Duration(seconds: 15), autoConnect: false);
+    await device.connect(
+        timeout: const Duration(seconds: 15), autoConnect: false);
     // iOS owns the pairing UI; Android also bonds automatically on the first
     // authenticated write. Do not force a platform-specific bond dialog here.
     _device = device;
@@ -63,7 +80,8 @@ class RoboChessBleClient {
       (item) => item.uuid == Guid(roboChessServiceUuid),
       orElse: () => throw StateError('RoboChess BLE service not found'),
     );
-    BluetoothCharacteristic find(String uuid) => service.characteristics.firstWhere(
+    BluetoothCharacteristic find(String uuid) =>
+        service.characteristics.firstWhere(
           (item) => item.uuid == Guid(uuid),
           orElse: () => throw StateError('BLE characteristic not found: $uuid'),
         );
@@ -89,17 +107,26 @@ class RoboChessBleClient {
   void _handleFrame(List<int> bytes) {
     try {
       final frame = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
-      if (frame['t'] == 'chunk' && frame['v']?.toString() == bleProtocolVersion) {
+      if (frame['t'] == 'chunk' &&
+          frame['v']?.toString() == bleProtocolVersion) {
         final id = frame['id']?.toString();
         final index = frame['i'];
         final total = frame['n'];
         final payload = frame['p'];
-        if (id == null || index is! int || total is! int || payload is! String || index < 0 || index >= total) return;
-        final chunks = _chunks.putIfAbsent(id, () => List<List<int>>.filled(total, const []));
-        _chunkExpiry.putIfAbsent(id, () => Timer(const Duration(seconds: 10), () {
-              _chunks.remove(id);
-              _chunkExpiry.remove(id);
-            }));
+        if (id == null ||
+            index is! int ||
+            total is! int ||
+            payload is! String ||
+            index < 0 ||
+            index >= total) return;
+        final chunks = _chunks.putIfAbsent(
+            id, () => List<List<int>>.filled(total, const []));
+        _chunkExpiry.putIfAbsent(
+            id,
+            () => Timer(const Duration(seconds: 10), () {
+                  _chunks.remove(id);
+                  _chunkExpiry.remove(id);
+                }));
         if (chunks.length != total) {
           _chunks.remove(id);
           _chunkExpiry.remove(id)?.cancel();
@@ -109,7 +136,9 @@ class RoboChessBleClient {
         if (chunks.every((item) => item.isNotEmpty)) {
           _chunks.remove(id);
           _chunkExpiry.remove(id)?.cancel();
-          _messages.add(jsonDecode(utf8.decode(chunks.expand((item) => item).toList())) as Map<String, dynamic>);
+          _messages.add(
+              jsonDecode(utf8.decode(chunks.expand((item) => item).toList()))
+                  as Map<String, dynamic>);
         }
         return;
       }
@@ -119,13 +148,21 @@ class RoboChessBleClient {
     }
   }
 
-  Future<void> sendOnboardingToken(String deviceId, String token) async {
+  Future<void> sendOnboardingToken(
+    String deviceId,
+    String token, {
+    String? deviceSecret,
+  }) async {
     await _writeChunks(_control, {
       'version': bleProtocolVersion,
       'request_id': DateTime.now().microsecondsSinceEpoch.toString(),
       'type': 'onboarding.token',
       'device_id': deviceId,
-      'data': {'onboarding_token': token},
+      'data': {
+        'onboarding_token': token,
+        if (deviceSecret != null && deviceSecret.isNotEmpty)
+          'device_secret': deviceSecret,
+      },
     });
   }
 
@@ -139,9 +176,11 @@ class RoboChessBleClient {
     });
   }
 
-  Future<void> sendControl(Map<String, dynamic> value) => _writeChunks(_control, value);
+  Future<void> sendControl(Map<String, dynamic> value) =>
+      _writeChunks(_control, value);
 
-  Future<void> _writeChunks(BluetoothCharacteristic? characteristic, Map<String, dynamic> value) {
+  Future<void> _writeChunks(
+      BluetoothCharacteristic? characteristic, Map<String, dynamic> value) {
     // Keep commands ordered. This matters when a user submits the next move
     // while the previous command's state notification is still arriving.
     final operation = _writeQueue.then<void>(
@@ -152,14 +191,17 @@ class RoboChessBleClient {
     return operation;
   }
 
-  Future<void> _writeChunksNow(BluetoothCharacteristic? characteristic, Map<String, dynamic> value) async {
-    if (characteristic == null) throw StateError('BLE characteristic is unavailable');
+  Future<void> _writeChunksNow(BluetoothCharacteristic? characteristic,
+      Map<String, dynamic> value) async {
+    if (characteristic == null)
+      throw StateError('BLE characteristic is unavailable');
     // BlueZ can expose the RoboChess secure-write characteristic as either
     // WRITE or WRITE WITHOUT RESPONSE, depending on the Android Bluetooth
     // stack.  Requesting a response unconditionally makes
     // flutter_blue_plus reject the latter *before* the message reaches Pi.
     final supportsWrite = characteristic.properties.write;
-    final supportsWriteWithoutResponse = characteristic.properties.writeWithoutResponse;
+    final supportsWriteWithoutResponse =
+        characteristic.properties.writeWithoutResponse;
     if (!supportsWrite && !supportsWriteWithoutResponse) {
       throw StateError(
         'BLE characteristic ${characteristic.uuid} is not writable. '

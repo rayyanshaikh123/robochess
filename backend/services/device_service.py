@@ -19,6 +19,7 @@ from backend.repositories.device_repo import (
     unlink_by_user,
     update_status,
     update_ble_pair_token,
+    update_device_secret,
     consume_onboarding_token,
     save_onboarding_token,
     update_device_metadata,
@@ -151,26 +152,54 @@ async def create_onboarding_token(
     db: AsyncIOMotorDatabase, user_id: str, device_id: str
 ) -> tuple[Optional[dict], Optional[str]]:
     device = await get_by_device_id(db, device_id)
-    if not device:
-        return None, "Device not found"
-    current_user_id = device.get("user_id")
+    device_secret = None
+
+    if device is None:
+        settings = load_settings()
+        device_secret = secrets.token_urlsafe(32)
+        pairing_expires_at = datetime.now(timezone.utc) + timedelta(
+            minutes=settings.pairing_code_minutes
+        )
+        try:
+            device = await create_device(
+                db,
+                device_id=device_id,
+                device_secret_hash=hash_password(device_secret),
+                pairing_code="",
+                pairing_expires_at=pairing_expires_at,
+                hardware_id=device_id,
+            )
+        except Exception:
+            device = await get_by_device_id(db, device_id)
+            if device is None:
+                raise
+            device_secret = None
+    current_user_id = device.get("user_id") if device else None
     if current_user_id and str(current_user_id) != user_id:
         return None, "Device already linked"
+
+    # Rotate credentials for every unlinked device so a failed BLE transfer
+    # can be retried without exposing an existing secret.
+    if device_secret is None and device and not current_user_id:
+        device_secret = secrets.token_urlsafe(32)
+        await update_device_secret(db, device_id, hash_password(device_secret))
 
     settings = load_settings()
     token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(
         minutes=settings.ble_pair_token_minutes
     )
-    # Store only a bcrypt hash. The plaintext is returned once to the app.
     await save_onboarding_token(
         db, device_id, hash_password(token), expires_at, user_id
     )
-    return {
+    data = {
         "device_id": device_id,
         "onboarding_token": token,
         "expires_at": expires_at,
-    }, None
+    }
+    if device_secret is not None:
+        data["device_secret"] = device_secret
+    return data, None
 
 
 async def claim_device(

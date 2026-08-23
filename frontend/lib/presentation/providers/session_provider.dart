@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/config/app_config.dart';
+import '../../core/config/server_config_provider.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/token_store.dart';
 import '../../core/network/ws_client.dart';
@@ -15,8 +16,9 @@ import '../../domain/models/auth_session.dart';
 final tokenStoreProvider = Provider<TokenStore>((ref) => TokenStore());
 
 final apiClientProvider = Provider<ApiClient>((ref) {
+  final baseUrl = ref.watch(serverConfigProvider);
   return ApiClient(
-      baseUrl: AppConfig.apiBaseUrl,
+      baseUrl: baseUrl,
       tokenStore: ref.read(tokenStoreProvider),
       timeout: Duration(seconds: AppConfig.apiTimeoutSeconds));
 });
@@ -34,7 +36,12 @@ final gameRepositoryProvider = Provider<GameRepository>((ref) {
 });
 
 final gameSocketProvider = Provider<GameSocketClient>((ref) {
-  return GameSocketClient(wsBaseUrl: AppConfig.wsBaseUrl);
+  final httpBase = ref.watch(serverConfigProvider);
+  final wsBase = httpBase
+          .replaceFirst(RegExp(r'^https://'), 'wss://')
+          .replaceFirst(RegExp(r'^http://'), 'ws://') +
+      '/ws';
+  return GameSocketClient(wsBaseUrl: wsBase);
 });
 
 class SessionController extends StateNotifier<AsyncValue<AuthSession?>> {

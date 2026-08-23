@@ -36,4 +36,6 @@ class GameRepository {
   }
 
   Future<void> undoMove() => _remote.undoMove();
+
+  Future<void> resignGame(String gameId) => _remote.resignGame(gameId);
 }

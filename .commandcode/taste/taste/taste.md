@@ -1,0 +1,12 @@
+# Taste
+- Communicates problems by pasting raw terminal output/error logs (uvicorn, pip, Flutter/Xcode builds, adb, tcpdump, SSH sessions) as the request and expects the agent to diagnose from the logs, often with terse imperatives like "fix", "retry", "try again", "check". Confidence: 0.95
+- Wants concrete, copy-pasteable run commands and step-by-step manual test checklists ("tell me how to test it manually", "send proper list", "give me proper command to run") rather than conceptual explanations. Confidence: 0.85
+- Writes detailed implementation plans and treats plan constraints as binding — implement the plan as written instead of improvising or silently dropping requirements. Confidence: 0.8
+- Does not want cloud/paid service credentials (e.g., Roboflow API keys, model URLs) invented, hard-coded, or enabled; leave such integrations as disabled placeholders until the user explicitly supplies the credentials and asks to enable them. Confidence: 0.85
+- Requires offline/local-first operation: camera calibration, local games, and BLE pairing must keep working without internet, MongoDB, or the backend; cloud sync is optional and must never block local features. Confidence: 0.85
+- Prefers minimal dependencies, especially on constrained hardware like the Raspberry Pi, and questions why heavy/unneeded libraries are present. Confidence: 0.7
+- Tests on physical devices (Android phone and iPhone) plus a Raspberry Pi over a phone hotspot, and expects the app to work on both Android and iOS, not just emulators/simulators. Confidence: 0.65
+- Values accurate project documentation (README, protocol docs) kept in sync with the actual implementation. Confidence: 0.6
+- Prefers a test-driven workflow: write failing tests that characterize each bug before implementing the fix, then verify the suite passes — tests-first, fixes-after. Confidence: 0.65
+- Prefers automated end-to-end device provisioning/recovery flows over manual secret entry or editing device environment variables, including transferring credentials over the existing authenticated BLE connection and persisting them on the device. Confidence: 0.8
+- Prefers sequential, one-at-a-time execution over dispatching work in parallel (e.g., after a rate limit on batching), checking the current state first before continuing. Confidence: 0.5

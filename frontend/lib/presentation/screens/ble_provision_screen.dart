@@ -26,7 +26,6 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
   bool _scanning = false;
   bool _working = false;
   bool? _needsWifi;
-  String? _selectedDeviceId;
   String? _selectedRemoteId;
 
   @override
@@ -77,7 +76,6 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
       await _ble.disconnect();
       final deviceId =
           await _ble.connectAndReadDeviceId(candidate.result.device);
-      _selectedDeviceId = deviceId;
       _selectedRemoteId = candidate.result.device.remoteId.str;
       if (_needsWifi != true) {
         setState(() => _message = 'Checking the board network...');
@@ -114,10 +112,17 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
             () => _message = 'Enter the Wi-Fi network and password first.');
         return;
       }
-      setState(() => _message = 'Requesting secure onboarding token...');
-      final token = await ref
+      setState(() =>
+          _message = 'Registering board and requesting secure credentials...');
+      final credentials = await ref
           .read(deviceRepositoryProvider)
           .onboardingToken(deviceId: deviceId);
+      if (credentials.deviceSecret == null) {
+        throw StateError(
+          'The backend did not return a device secret. Reset the board provisioning '
+          'credentials and try again.',
+        );
+      }
       // Reconnect once more because the cloud request can outlive an iOS
       // BLE connection interval.
       await _ble.disconnect();
@@ -127,7 +132,11 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
         final status = (message['data'] as Map?)?['status'];
         return status == 'token_claimed' || status == 'error';
       }).timeout(const Duration(seconds: 15));
-      await _ble.sendOnboardingToken(deviceId, token);
+      await _ble.sendOnboardingToken(
+        deviceId,
+        credentials.onboardingToken,
+        deviceSecret: credentials.deviceSecret,
+      );
       if (_needsWifi == true) {
         setState(() => _message = 'Sending Wi-Fi credentials...');
         final wifiResponse = _ble.messages.firstWhere((message) {

@@ -10,7 +10,7 @@ import 'move_parse_result.dart';
 
 const _fileMap = {
   'a': 'a', 'alpha': 'a',
-  'b': 'b', 'bravo': 'b', 'bee': 'b',
+  'b': 'b', 'bravo': 'b', 'bee': 'b', 'be': 'b',
   'c': 'c', 'charlie': 'c', 'see': 'c', 'sea': 'c',
   'd': 'd', 'delta': 'd', 'dee': 'd',
   'e': 'e', 'echo': 'e',
@@ -40,6 +40,11 @@ const _promotionMap = {
 
 const _skipWords = {'to', 'takes', 'captures', 'x', 'goes', 'moves', 'at', 'on'};
 
+/// Words that double as both connectors and rank digits ('to' → '2',
+/// 'for' → '4'). Inside [_parseSquare] they must never be consumed as a
+/// rank — the skip loop handles them as connectors instead.
+const _connectorWords = {'to', 'too', 'for'};
+
 // ── Normalisation ────────────────────────────────────────────────────────────
 
 String _normalize(String text) {
@@ -68,7 +73,9 @@ String _normalize(String text) {
   // File word
   if (_fileMap.containsKey(tok)) {
     final fileChar = _fileMap[tok]!;
-    if (idx + 1 < tokens.length && _rankMap.containsKey(tokens[idx + 1])) {
+    if (idx + 1 < tokens.length &&
+        _rankMap.containsKey(tokens[idx + 1]) &&
+        !_connectorWords.contains(tokens[idx + 1])) {
       // Make sure the next token isn't a "skip word" being used as a rank
       // "to" and "for" could be connectors, but they're also in _rankMap
       // Only treat as rank if the previous token is a file

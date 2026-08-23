@@ -92,6 +92,17 @@ async def update_ble_pair_token(
     )
 
 
+async def update_device_secret(
+    db: AsyncIOMotorDatabase,
+    device_id: str,
+    device_secret_hash: str,
+) -> None:
+    await db[DEVICES].update_one(
+        {"device_id": device_id},
+        {"$set": {"device_secret_hash": device_secret_hash}},
+    )
+
+
 async def update_status(db: AsyncIOMotorDatabase, device_id: str, status: str) -> None:
     now = datetime.now(timezone.utc)
     await db[DEVICES].update_one(
