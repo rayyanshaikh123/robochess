@@ -109,7 +109,8 @@ class LocalApiHost:
         PermissionError traceback on every request.
         """
         try:
-            self._save_calibration(data)
+            self.state_path.mkdir(parents=True, exist_ok=True)
+            self.calibration_path.write_text(json.dumps(data, indent=2))
         except OSError as exc:
             raise HTTPException(
                 500,
@@ -311,8 +312,7 @@ class LocalApiHost:
                 }
             if rook_note:
                 data["note"] = rook_note
-            self.state_path.mkdir(parents=True, exist_ok=True)
-            self.calibration_path.write_text(json.dumps(data, indent=2))
+            self._save_calibration(data)
             if self.detector is not None:
                 self.detector.last_error = None
             return {"status": "ok", "message": "Calibration saved", "data": data}
