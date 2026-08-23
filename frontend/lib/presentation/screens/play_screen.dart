@@ -1676,6 +1676,46 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
                     index == 0 ? _OpponentType.bot : _OpponentType.friend;
               }),
             ),
+            if (_opponent == _OpponentType.friend) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: kSurfaceContLow,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: kOutlineVariant.withOpacity(0.2)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Two players, this device',
+                        style: GoogleFonts.inter(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: kOnSurface)),
+                    const SizedBox(height: 4),
+                    Text(
+                        'Take turns on the same screen or board. To play someone '
+                        'remotely instead, challenge them from your friends list.',
+                        style: GoogleFonts.inter(
+                            fontSize: 11, color: kOnSurfaceVariant)),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => context.go('/play/friends'),
+                        icon: const Icon(Icons.group, size: 16),
+                        label: Text('PLAY WITH FRIENDS ONLINE',
+                            style: GoogleFonts.inter(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             if (_opponent == _OpponentType.bot) ...[
               const SizedBox(height: 16),
               Row(

@@ -1,7 +1,7 @@
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from backend.db.collections import BOARD_SESSION_CONFLICTS, BOARD_SESSIONS, DEVICES, GAMES, MOVES, PUZZLE_ATTEMPTS, REFRESH_TOKENS, USERS
-from backend.db.collections import PUZZLES
+from backend.db.collections import CHALLENGES, FRIENDSHIPS, GAME_CHATS, PUZZLES
 
 
 async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
@@ -25,3 +25,25 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await db[BOARD_SESSIONS].create_index([("device_id", 1), ("session_id", 1)], unique=True)
     await db[BOARD_SESSIONS].create_index("updated_at")
     await db[BOARD_SESSION_CONFLICTS].create_index([("device_id", 1), ("session_id", 1), ("created_at", -1)])
+    # Display name is searched case-insensitively by prefix; the plain index
+    # still serves the anchored regex used by user search.
+    await db[USERS].create_index("display_name")
+    # One row per pair, with the pair stored sorted (user_a < user_b), so this
+    # single constraint rejects duplicates AND reverse duplicates.
+    await db[FRIENDSHIPS].create_index([("user_a", 1), ("user_b", 1)], unique=True)
+    await db[FRIENDSHIPS].create_index([("user_a", 1), ("status", 1)])
+    await db[FRIENDSHIPS].create_index([("user_b", 1), ("status", 1)])
+    # Only one challenge may be pending between a given ordered pair; rejected
+    # and cancelled rows stay for history, so the constraint is partial.
+    await db[CHALLENGES].create_index(
+        [("challenger_id", 1), ("challenged_id", 1)],
+        unique=True,
+        partialFilterExpression={"status": "pending"},
+        name="challenges_unique_pending",
+    )
+    await db[CHALLENGES].create_index([("challenged_id", 1), ("status", 1)])
+    await db[CHALLENGES].create_index([("challenger_id", 1), ("status", 1)])
+    await db[CHALLENGES].create_index("expires_at")
+    await db[GAMES].create_index("user_players")
+    await db[GAMES].create_index([("user_players", 1), ("status", 1)])
+    await db[GAME_CHATS].create_index([("game_id", 1), ("created_at", 1)])

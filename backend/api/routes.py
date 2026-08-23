@@ -1704,6 +1704,36 @@ def _tag_move(cp_loss: int, played_uci: str, best_uci: str | None) -> str:
     if cp_loss <= 250:
         return "mistake"
     return "blunder"
+@router.post("/game/{game_id}/resign", response_model=ApiResponse)
+async def game_resign(game_id: str, db=Depends(get_db)) -> ApiResponse:
+    """Resign a solo or board game.
+
+    Friend games are deliberately excluded: they carry a `user_players` list and
+    must go through `/multiplayer/games/{id}/resign`, which checks that the
+    caller is actually one of the two players.
+    """
+    from backend.repositories.multiplayer_repo import get_game as _get_game
+
+    game = await _get_game(db, game_id)
+    if not game:
+        return error("Game not found")
+    if game.get("user_players"):
+        return error("Use the multiplayer resign endpoint for friend games")
+
+    ended, err = await end_game(db, game_id, "resigned")
+    if err:
+        return error(err)
+    state, state_err = await get_game_state(db, game_id)
+    if state_err:
+        return error(state_err)
+    from backend.realtime.manager import manager as ws_manager_local
+
+    await ws_manager_local.send_to_game(
+        game_id, {"type": "game.state", "data": state}
+    )
+    return ok("Game resigned", state)
+
+
 @router.post("/game/undo", response_model=ApiResponse)
 async def game_undo(db=Depends(get_db)) -> ApiResponse:
     manager = GameManager.get_instance()
@@ -1779,6 +1809,38 @@ async def game_reset(db=Depends(get_db)) -> ApiResponse:
     return ok("Game reset", data)
 
 
+async def _may_join_game_room(db, game_id: str, ws_user_id: str | None) -> bool:
+    """Whether this connection is allowed into a game's room.
+
+    Games with a ``user_players`` list are friend games and are restricted to
+    their participants. Everything else (solo, board, puzzle games) predates
+    this feature and stays open so existing clients keep working.
+    """
+    from backend.repositories.multiplayer_repo import get_game as _get_game
+
+    game = await _get_game(db, game_id)
+    if not game:
+        return True  # let the normal "Game not found" path report it
+    participants = game.get("user_players") or []
+    if not participants:
+        return True
+    return bool(ws_user_id) and ws_user_id in participants
+
+
+async def _announce_presence(game_id: str, ws_user_id: str | None, joined: bool) -> None:
+    if not ws_user_id:
+        return
+    from backend.realtime.events import PLAYER_JOINED, PLAYER_LEFT
+
+    await ws_manager.send_to_game(
+        game_id,
+        {
+            "type": PLAYER_JOINED if joined else PLAYER_LEFT,
+            "data": {"game_id": game_id, "user_id": ws_user_id},
+        },
+    )
+
+
 @router.websocket("/ws")
 async def ws_state(websocket: WebSocket, db=Depends(get_db)) -> None:
     await websocket.accept()
@@ -1791,6 +1853,10 @@ async def ws_state(websocket: WebSocket, db=Depends(get_db)) -> None:
                 ws_user_id = token_data.get("sub")
         except Exception:
             ws_user_id = None
+    if ws_user_id:
+        # Bind the socket to its user so the server can address that player
+        # directly (friend requests, challenges) without knowing a game id.
+        ws_manager.bind_user(websocket, ws_user_id)
     current_game_id: str | None = None
     device_rooms: set[str] = set()
     try:
@@ -1804,10 +1870,21 @@ async def ws_state(websocket: WebSocket, db=Depends(get_db)) -> None:
                     await websocket.send_json({"type": "error", "message": "game_id required"})
                     continue
 
+                # A friend game is private: only its two participants may
+                # subscribe. Single-player/board games keep the old open
+                # behaviour so existing flows are unaffected.
+                if not await _may_join_game_room(db, game_id, ws_user_id):
+                    await websocket.send_json(
+                        {"type": "error", "message": "Not authorized for this game"}
+                    )
+                    continue
+
                 if current_game_id and current_game_id != game_id:
                     ws_manager.disconnect(current_game_id, websocket)
+                    await _announce_presence(current_game_id, ws_user_id, joined=False)
                 current_game_id = game_id
                 await ws_manager.connect(game_id, websocket)
+                await _announce_presence(game_id, ws_user_id, joined=True)
 
                 game, err = await get_game_state(db, game_id)
                 if err:
@@ -1914,5 +1991,7 @@ async def ws_state(websocket: WebSocket, db=Depends(get_db)) -> None:
     finally:
         if current_game_id:
             ws_manager.disconnect(current_game_id, websocket)
+            await _announce_presence(current_game_id, ws_user_id, joined=False)
         for room in list(device_rooms):
             ws_manager.disconnect(room, websocket)
+        ws_manager.unbind_user(websocket)

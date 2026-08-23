@@ -108,3 +108,40 @@ class ModelLoadRequest(BaseModel):
 
 class ManualCalibrationRequest(BaseModel):
     corners: list[list[float]]
+
+
+class FriendRequestCreate(BaseModel):
+    user_id: str = Field(min_length=1, max_length=64)
+
+
+class FriendRemoveRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=64)
+
+
+class ChallengeCreateRequest(BaseModel):
+    opponent_id: str = Field(min_length=1, max_length=64)
+    time_control: Optional[str] = Field(default=None, max_length=32)
+    # "app" for on-screen play, or a linked device id to play on a board.
+    surface: str = Field(default="app", max_length=64)
+    color: str = Field(default="random", max_length=8)
+
+
+class ChallengeAcceptRequest(BaseModel):
+    surface: str = Field(default="app", max_length=64)
+
+
+class RematchRequest(BaseModel):
+    game_id: str = Field(min_length=1, max_length=64)
+
+
+class MultiplayerMoveRequest(BaseModel):
+    uci: str = Field(min_length=4, max_length=6)
+    expected_version: Optional[int] = None
+
+
+class DrawResponseRequest(BaseModel):
+    accept: bool
+
+
+class ChatMessageRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=500)

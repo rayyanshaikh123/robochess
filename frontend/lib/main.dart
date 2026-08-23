@@ -7,6 +7,9 @@ import 'presentation/screens/login_screen.dart';
 import 'presentation/screens/main_scaffold.dart';
 import 'presentation/screens/home_dashboard.dart';
 import 'presentation/screens/play_screen.dart';
+import 'presentation/screens/friends_screen.dart';
+import 'presentation/screens/multiplayer_games_screen.dart';
+import 'presentation/screens/multiplayer_game_screen.dart';
 import 'presentation/screens/analysis_screen.dart';
 import 'presentation/screens/learn_section.dart';
 import 'presentation/screens/openings_screen.dart';
@@ -50,7 +53,16 @@ GoRouter _buildRouter(WidgetRef ref) {
         builder: (c, s, shell) => MainScaffold(navigationShell: shell),
         branches: [
           StatefulShellBranch(routes: [GoRoute(path: '/home', builder: (c, s) => const HomeDashboard())]),
-          StatefulShellBranch(routes: [GoRoute(path: '/play', builder: (c, s) => const PlayScreen())]),
+          StatefulShellBranch(routes: [
+            GoRoute(path: '/play', builder: (c, s) => const PlayScreen()),
+            GoRoute(path: '/play/friends', builder: (c, s) => const FriendsScreen()),
+            GoRoute(path: '/play/games', builder: (c, s) => const MultiplayerGamesScreen()),
+            GoRoute(
+              path: '/play/game/:gameId',
+              builder: (c, s) =>
+                  MultiplayerGameScreen(gameId: s.pathParameters['gameId'] ?? ''),
+            ),
+          ]),
           StatefulShellBranch(routes: [
             GoRoute(path: '/analysis', builder: (c, s) => AnalysisScreen(gameId: s.uri.queryParameters['game_id']))
           ]),
