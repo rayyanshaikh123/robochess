@@ -1,4 +1,5 @@
 import os
+import tempfile
 from pathlib import Path
 
 
@@ -65,7 +66,40 @@ UNO_TIMEOUT_SECONDS = float(_get_env("ROBOCHESS_UNO_TIMEOUT_SECONDS", "8"))
 UNO_SIMULATOR = _get_env_bool("ROBOCHESS_UNO_SIMULATOR", "1")
 LOCAL_API_HOST = _get_env("ROBOCHESS_LOCAL_API_HOST", "0.0.0.0")
 LOCAL_API_PORT = int(_get_env("ROBOCHESS_LOCAL_API_PORT", "8765"))
-LOCAL_STATE_PATH = _get_env("ROBOCHESS_LOCAL_STATE_PATH", "/var/lib/robochess/state")
+def _resolve_state_path(preferred: str) -> str:
+    """Pick a state directory the current user can actually write to.
+
+    The packaged systemd unit runs as root and uses /var/lib/robochess, but
+    running the agent by hand (`python -m pi_agent.main`) must not fail: fall
+    back to the per-user state directory rather than raising PermissionError on
+    every calibration write.
+    """
+    candidates = [preferred]
+    xdg_state = os.environ.get("XDG_STATE_HOME")
+    candidates.append(
+        os.path.join(xdg_state, "robochess", "state") if xdg_state
+        else os.path.expanduser("~/.local/state/robochess/state")
+    )
+    candidates.append(os.path.join(tempfile.gettempdir(), "robochess-state"))
+
+    for candidate in candidates:
+        try:
+            directory = Path(candidate)
+            directory.mkdir(parents=True, exist_ok=True)
+            probe = directory / ".write-test"
+            probe.touch()
+            probe.unlink()
+        except OSError:
+            continue
+        if candidate != preferred:
+            print(f"[warn] {preferred} is not writable; using {candidate} instead")
+        return candidate
+    return preferred
+
+
+LOCAL_STATE_PATH = _resolve_state_path(
+    _get_env("ROBOCHESS_LOCAL_STATE_PATH", "/var/lib/robochess/state")
+)
 CAMERA_INDEX = int(_get_env("ROBOCHESS_CAMERA_INDEX", "0"))
 CAMERA_WIDTH = int(_get_env("ROBOCHESS_CAPTURE_WIDTH", "800"))
 CAMERA_HEIGHT = int(_get_env("ROBOCHESS_CAPTURE_HEIGHT", "600"))

@@ -102,6 +102,21 @@ class LocalApiHost:
             self.config["internet_check_timeout"],
         ).to_dict()
 
+    def _save_calibration(self, data: dict) -> None:
+        """Persist calibration, reporting a write failure as a clean 500.
+
+        Without this a non-writable state directory surfaced as an unhandled
+        PermissionError traceback on every request.
+        """
+        try:
+            self._save_calibration(data)
+        except OSError as exc:
+            raise HTTPException(
+                500,
+                f"Cannot write calibration to {self.state_path}: {exc.strerror}. "
+                "Set ROBOCHESS_LOCAL_STATE_PATH to a writable directory.",
+            ) from exc
+
     def _capture(self):
         if self.detector is not None:
             try:
@@ -256,9 +271,8 @@ class LocalApiHost:
                 raise HTTPException(422, "Calibration corners must be unique")
             if payload.board_orientation not in {"white_bottom", "black_bottom"}:
                 raise HTTPException(422, "Invalid board orientation")
-            self.state_path.mkdir(parents=True, exist_ok=True)
             data = {"corners": corners, "board_orientation": payload.board_orientation}
-            self.calibration_path.write_text(json.dumps(data, indent=2))
+            self._save_calibration(data)
             if self.detector is not None:
                 self.detector.last_error = None
             return {"status": "ok", "message": "Calibration saved", "data": data}
