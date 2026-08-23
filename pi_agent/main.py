@@ -101,13 +101,8 @@ def main() -> None:
                     return {"status": "token_saved"}
                 return {"status": "error", "error": str(exc)}
         if message.get("type") == "network.status":
-            # This runs inside the BlueZ GATT write callback. Do not perform
-            # the external connectivity probe here: a slow DNS/HTTPS check
-            # can prevent the BLE acknowledgement from reaching iOS before
-            # the app's timeout. The app only needs the local Wi-Fi state;
-            # cloud reachability is verified by the device connect/claim call.
             return {"status": "network_status", "network": network.status(
-                False,
+                INTERNET_CHECK_ENABLED,
                 INTERNET_CHECK_URL,
                 INTERNET_CHECK_TIMEOUT_SECONDS,
             ).to_dict() | {"backend_available": api.device_token is not None}}
