@@ -53,12 +53,12 @@ GoRouter _buildRouter(WidgetRef ref) {
         builder: (c, s, shell) => MainScaffold(navigationShell: shell),
         branches: [
           StatefulShellBranch(routes: [GoRoute(path: '/home', builder: (c, s) => const HomeDashboard())]),
+          StatefulShellBranch(routes: [GoRoute(path: '/play', builder: (c, s) => const PlayScreen())]),
           StatefulShellBranch(routes: [
-            GoRoute(path: '/play', builder: (c, s) => const PlayScreen()),
-            GoRoute(path: '/play/friends', builder: (c, s) => const FriendsScreen()),
-            GoRoute(path: '/play/games', builder: (c, s) => const MultiplayerGamesScreen()),
+            GoRoute(path: '/friends', builder: (c, s) => const FriendsScreen()),
+            GoRoute(path: '/friends/games', builder: (c, s) => const MultiplayerGamesScreen()),
             GoRoute(
-              path: '/play/game/:gameId',
+              path: '/friends/game/:gameId',
               builder: (c, s) =>
                   MultiplayerGameScreen(gameId: s.pathParameters['gameId'] ?? ''),
             ),

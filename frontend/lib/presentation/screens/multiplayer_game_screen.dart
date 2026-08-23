@@ -189,8 +189,9 @@ class _MultiplayerGameScreenState
         backgroundColor: kBackground,
         elevation: 0,
         leading: IconButton(
+          tooltip: 'Back',
           icon: const Icon(Icons.arrow_back, color: kOnSurfaceVariant),
-          onPressed: () => context.go('/play/games'),
+          onPressed: () => context.go('/friends/games'),
         ),
         title: Text('FRIEND GAME',
             style: GoogleFonts.spaceGrotesk(

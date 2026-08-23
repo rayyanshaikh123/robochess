@@ -125,13 +125,13 @@ Widget _wrap(Widget child, List<Override> overrides) {
     routes: [
       GoRoute(path: '/', builder: (_, __) => child),
       GoRoute(
-          path: '/play/games',
+          path: '/friends/games',
           builder: (_, __) => const Scaffold(body: Text('games route'))),
       GoRoute(
-          path: '/play/friends',
+          path: '/friends',
           builder: (_, __) => const Scaffold(body: Text('friends route'))),
       GoRoute(
-          path: '/play/game/:gameId',
+          path: '/friends/game/:gameId',
           builder: (_, __) => const Scaffold(body: Text('game route'))),
     ],
   );

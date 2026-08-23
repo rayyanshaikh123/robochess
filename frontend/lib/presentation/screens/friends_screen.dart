@@ -60,7 +60,7 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
 
   void _openGame(String gameId) {
     if (!mounted || gameId.isEmpty) return;
-    context.go('/play/game/$gameId');
+    context.go('/friends/game/$gameId');
   }
 
   void _toast(String message, {bool isError = false}) {
@@ -120,7 +120,7 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
         actions: [
           IconButton(
             tooltip: 'Your games',
-            onPressed: () => context.go('/play/games'),
+            onPressed: () => context.go('/friends/games'),
             icon: const Icon(Icons.sports_esports, color: kOnSurfaceVariant),
           ),
         ],

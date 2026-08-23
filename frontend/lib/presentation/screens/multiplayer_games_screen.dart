@@ -40,6 +40,11 @@ class _MultiplayerGamesScreenState
       appBar: AppBar(
         backgroundColor: kBackground,
         elevation: 0,
+        leading: IconButton(
+          tooltip: 'Back',
+          icon: const Icon(Icons.arrow_back, color: kOnSurfaceVariant),
+          onPressed: () => context.go('/friends'),
+        ),
         title: Text('YOUR GAMES',
             style: GoogleFonts.spaceGrotesk(
                 fontSize: 16,
@@ -49,7 +54,7 @@ class _MultiplayerGamesScreenState
         actions: [
           IconButton(
             tooltip: 'Friends',
-            onPressed: () => context.go('/play/friends'),
+            onPressed: () => context.go('/friends'),
             icon: const Icon(Icons.group, color: kOnSurfaceVariant),
           ),
         ],
@@ -100,7 +105,7 @@ class _MultiplayerGamesScreenState
                       .map((game) => _GameCard(
                             game: game,
                             onOpen: () =>
-                                context.go('/play/game/${game.gameId}'),
+                                context.go('/friends/game/${game.gameId}'),
                           ))
                       .toList(),
                 );

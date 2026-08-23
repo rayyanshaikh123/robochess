@@ -1703,7 +1703,7 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
-                        onPressed: () => context.go('/play/friends'),
+                        onPressed: () => context.go('/friends'),
                         icon: const Icon(Icons.group, size: 16),
                         label: Text('PLAY WITH FRIENDS ONLINE',
                             style: GoogleFonts.inter(
