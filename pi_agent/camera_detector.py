@@ -36,6 +36,17 @@ class PiCameraDetector:
             os.getenv("ROBOCHESS_VISION_MODE", "").strip().lower() == "cloud"
             or os.getenv("ROBOCHESS_ROBOFLOW_ENABLED", "0").strip().lower()
             in {"1", "true", "yes", "on"}
+            or (
+                (
+                    os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip()
+                    or os.getenv("ROBOFLOW_API_KEY", "").strip()
+                )
+                and (
+                    os.getenv("ROBOCHESS_ROBOFLOW_MODEL_URL", "").strip()
+                    or os.getenv("ROBOFLOW_MODEL_URL", "").strip()
+                    or "/" in self.model_path
+                )
+            )
         )
         cloud_url = os.getenv("ROBOCHESS_ROBOFLOW_MODEL_URL", "").strip() or os.getenv(
             "ROBOFLOW_MODEL_URL", ""
@@ -43,16 +54,24 @@ class PiCameraDetector:
         cloud_key = os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip() or os.getenv(
             "ROBOFLOW_API_KEY", ""
         ).strip()
-        if not self.model_path and not (cloud_enabled and cloud_url and cloud_key):
-            self.last_error = "ROBOCHESS_MODEL_PATH is not configured"
+        if not self.model_path and not (cloud_enabled and cloud_key):
+            self.last_error = "Configure a local model path or Roboflow model/key"
             return
         try:
             from backend.board_recognizer import BoardRecognizer
             self.recognizer = BoardRecognizer(self.model_path, self.confidence)
             if not self.recognizer.is_ready:
-                self.last_error = "Local model could not be loaded"
+                self.last_error = "Vision model could not be loaded"
+            else:
+                self.last_error = None
         except Exception as exc:
             self.last_error = str(exc)
+
+    def load_model(self) -> None:
+        with self._lock:
+            self.recognizer = None
+            self.last_error = None
+            self._load_recognizer()
 
     @property
     def model_available(self) -> bool:

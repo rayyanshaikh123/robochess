@@ -4,6 +4,7 @@
 - Writes detailed implementation plans and treats plan constraints as binding — implement the plan as written instead of improvising or silently dropping requirements. Confidence: 0.8
 - Does not want cloud/paid service credentials (e.g., Roboflow API keys, model URLs) invented, hard-coded, or enabled; leave such integrations as disabled placeholders until the user explicitly supplies the credentials and asks to enable them. Confidence: 0.85
 - Requires offline/local-first operation: camera calibration, local games, and BLE pairing must keep working without internet, MongoDB, or the backend; cloud sync is optional and must never block local features. Confidence: 0.85
+- Wants ML/chessboard vision inference to run locally on the Raspberry Pi agent, using Pi-hosted model configuration rather than routing inference through the backend or a cloud service. Confidence: 0.95
 - Prefers minimal dependencies, especially on constrained hardware like the Raspberry Pi, and questions why heavy/unneeded libraries are present. Confidence: 0.7
 - Tests on physical devices (Android phone and iPhone) plus a Raspberry Pi over a phone hotspot, and expects the app to work on both Android and iOS, not just emulators/simulators. Confidence: 0.65
 - Values accurate project documentation (README, protocol docs) kept in sync with the actual implementation. Confidence: 0.6

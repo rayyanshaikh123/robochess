@@ -175,6 +175,30 @@ class LocalApiHost:
                 "game": self.game.session.snapshot() if self.game.session else None,
             }}
 
+        @self.app.get("/local/model/status")
+        def model_status():
+            if self.detector is None:
+                return {"status": "error", "data": {
+                    "model_available": False,
+                    "last_error": "Camera detector is not configured",
+                }}
+            return {"status": "ok", "data": self.detector.status()}
+
+        @self.app.post("/local/model/load")
+        def load_model():
+            if self.detector is None:
+                raise HTTPException(503, "Camera detector is not configured")
+            try:
+                self.detector.load_model()
+            except Exception as exc:
+                raise HTTPException(503, str(exc)) from exc
+            data = self.detector.status()
+            if not data.get("model_available"):
+                raise HTTPException(
+                    503, data.get("last_error") or "Vision model is not ready"
+                )
+            return {"status": "ok", "data": data}
+
         @self.app.get("/local/network/status")
         def network_status():
             return {"status": "ok", "data": {**self._network(), "backend_available": self.config.get("backend_available", False)}}
@@ -253,6 +277,82 @@ class LocalApiHost:
         def validate_calibration():
             data = self._read_calibration()
             return {"status": "ok" if data else "error", "data": data}
+
+        @self.app.get("/local/calibration/debug")
+        def calibration_debug():
+            if self.detector is None or not self.detector.model_available:
+                raise HTTPException(503, "Pi vision model is not ready")
+            try:
+                frame = self.detector.capture_frame()
+                self.detector._apply_calibration()
+                warped = self.detector.recognizer.warp_frame(frame)
+                detections = self.detector.recognizer.detect(warped)
+                by_class = {}
+                for detection in detections:
+                    by_class.setdefault(detection["class_name"], []).append(
+                        round(float(detection["confidence"]), 3)
+                    )
+                return {"status": "ok", "data": {
+                    "model_ref": self.detector.recognizer.model_ref,
+                    "raw_detections_total": len(detections),
+                    "by_class": by_class,
+                    "tip": (
+                        "Detections found. If validation still fails, adjust calibration corners."
+                        if detections else
+                        "No pieces detected. Check the camera view and Roboflow model."
+                    ),
+                    "vision": self.detector.status(),
+                }}
+            except Exception as exc:
+                raise HTTPException(503, f"Pi calibration diagnostics failed: {exc}") from exc
+
+        @self.app.post("/local/calibration/force")
+        def force_validate():
+            if self.detector is None or not self.detector.model_available:
+                raise HTTPException(503, "Pi vision model is not ready")
+            return {"status": "ok", "data": {
+                "valid": True,
+                "warning": "Position was not verified by the camera.",
+                "vision": self.detector.status(),
+            }}
+
+        @self.app.post("/local/calibration/validate-start")
+        def validate_start():
+            if self.detector is None or not self.detector.model_available:
+                raise HTTPException(503, "Pi vision model is not ready")
+            if not self.detector.calibrated:
+                raise HTTPException(409, "Board is not calibrated")
+            try:
+                frame = self.detector.capture_frame()
+                self.detector._apply_calibration()
+                state = self.detector.recognizer.detections_to_state_dict(
+                    self.detector.recognizer.detect(
+                        self.detector.recognizer.warp_frame(frame)
+                    ),
+                    self.detector.recognizer.BOARD_SIZE,
+                    self.detector.recognizer.BOARD_SIZE,
+                    self.detector.confidence,
+                )
+                expected = self.detector.recognizer.expected_initial_state()
+                missing = sum(1 for sq, value in expected.items() if value and not state.get(sq))
+                extra = sum(1 for sq, value in state.items() if value and not expected.get(sq))
+                wrong_color = sum(
+                    1 for sq, value in state.items()
+                    if value and expected.get(sq) and value.split("_", 1)[0] != expected[sq].split("_", 1)[0]
+                )
+                valid = missing <= 16 and extra <= 6 and wrong_color == 0
+                return {"status": "ok", "data": {
+                    "valid": valid,
+                    "pieces_detected": sum(1 for value in state.values() if value),
+                    "summary": {
+                        "missing": missing,
+                        "extra": extra,
+                        "wrong_color": wrong_color,
+                    },
+                    "vision": self.detector.status(),
+                }}
+            except Exception as exc:
+                raise HTTPException(503, f"Pi board validation failed: {exc}") from exc
 
         @self.app.post("/local/game/start")
         def start_game():

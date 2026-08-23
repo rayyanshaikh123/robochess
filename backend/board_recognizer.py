@@ -183,19 +183,27 @@ class BoardRecognizer:
         self.model_ref = str(model_path).strip()
         self.vision_mode = os.getenv("ROBOCHESS_VISION_MODE", "auto").strip().lower()
         self.cloud_only = self.vision_mode == "cloud"
-        self.roboflow_enabled = (
-            self.cloud_only
-            or os.getenv("ROBOCHESS_ROBOFLOW_ENABLED", "0").strip().lower()
-            in {"1", "true", "yes", "on"}
-        )
         self.roboflow_model_url = (
             os.getenv("ROBOCHESS_ROBOFLOW_MODEL_URL", "").strip()
             or os.getenv("ROBOFLOW_MODEL_URL", "").strip()
         )
-        self.cloud_model_id = (
+        self.cloud_api_key = (
+            os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip()
+            or os.getenv("ROBOFLOW_API_KEY", "").strip()
+        )
+        configured_cloud = os.getenv("ROBOCHESS_ROBOFLOW_ENABLED", "0").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        model_id = (
             parse_cloud_model_id(self.roboflow_model_url)
             or parse_cloud_model_id(self.model_ref)
-        ) if self.roboflow_enabled else None
+        )
+        self.roboflow_enabled = (
+            self.cloud_only
+            or configured_cloud
+            or bool(model_id and self.cloud_api_key)
+        )
+        self.cloud_model_id = model_id if self.roboflow_enabled else None
         self.model_path: Optional[Path] = (
             None if self.cloud_only else (Path(self.model_ref) if self.model_ref else None)
         )
@@ -243,7 +251,7 @@ class BoardRecognizer:
         parsed = urlparse(model_url)
         if parsed.scheme and parsed.netloc:
             return f"{parsed.scheme}://{parsed.netloc}"
-        return model_url.rstrip("/")
+        return "https://detect.roboflow.com"
 
     def _load_cloud_model(self) -> None:
         if not self.cloud_api_key or not self.cloud_base_url:

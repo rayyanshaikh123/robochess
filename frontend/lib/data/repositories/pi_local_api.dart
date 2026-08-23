@@ -23,6 +23,84 @@ class PiLocalApi {
         (jsonDecode(response.body) as Map)['data'] as Map);
   }
 
+  Future<Map<String, dynamic>> modelStatus() async {
+    final response = await client
+        .get(_uri('/local/model/status'))
+        .timeout(_requestTimeout);
+    return _data(response, 'Pi model status failed');
+  }
+
+  Future<Map<String, dynamic>> loadModel() async {
+    final response = await client
+        .post(_uri('/local/model/load'))
+        .timeout(_requestTimeout);
+    return _data(response, 'Pi model load failed');
+  }
+
+  Future<Map<String, dynamic>> validateStart() async {
+    final response = await client
+        .post(_uri('/local/calibration/validate-start'))
+        .timeout(_requestTimeout);
+    return _data(response, 'Pi board validation failed');
+  }
+
+  Future<Map<String, dynamic>> debugCalibration() async {
+    final response = await client
+        .get(_uri('/local/calibration/debug'))
+        .timeout(_requestTimeout);
+    return _data(response, 'Pi calibration diagnostics failed');
+  }
+
+  Future<Map<String, dynamic>> forceValidate() async {
+    final response = await client
+        .post(_uri('/local/calibration/force'))
+        .timeout(_requestTimeout);
+    return _data(response, 'Pi force validation failed');
+  }
+
+  Future<Map<String, dynamic>> startGame() async {
+    final response = await client
+        .post(_uri('/local/game/start'))
+        .timeout(_requestTimeout);
+    return _data(response, 'Pi game start failed');
+  }
+
+  Future<Map<String, dynamic>> detectMove() async {
+    final response = await client
+        .post(_uri('/local/move/detect'))
+        .timeout(_requestTimeout);
+    return _data(response, 'Pi move detection failed');
+  }
+
+  Future<Map<String, dynamic>> analyzeAndReply() async {
+    final response = await client
+        .post(_uri('/local/move/analyze-and-reply'))
+        .timeout(_requestTimeout);
+    return _data(response, 'Pi move analysis failed');
+  }
+
+  Future<Map<String, dynamic>> autoDetectReady() async {
+    final response = await client
+        .get(_uri('/local/move/auto-detect-ready'))
+        .timeout(_requestTimeout);
+    return _data(response, 'Pi auto-detection failed');
+  }
+
+  Future<Map<String, dynamic>> _data(
+      http.Response response, String fallback) async {
+    Map<String, dynamic> payload = const {};
+    try {
+      payload = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+    } catch (_) {}
+    if (response.statusCode >= 400 || payload['status'] == 'error') {
+      final detail = payload['detail']?.toString() ??
+          payload['message']?.toString() ??
+          fallback;
+      throw Exception(detail);
+    }
+    return Map<String, dynamic>.from((payload['data'] as Map?) ?? const {});
+  }
+
   Future<Uint8List> cameraFrame({
     bool preview = false,
     Duration timeout = _cameraRequestTimeout,

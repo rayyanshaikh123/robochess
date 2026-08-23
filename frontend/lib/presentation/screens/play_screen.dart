@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:chess/chess.dart' as chess;
 import 'package:flutter/material.dart';
@@ -261,7 +262,10 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: kBackground,
-      builder: (_) => _PreGameSheet(device: device),
+       builder: (_) => _PreGameSheet(
+         device: device,
+         localApi: PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl),
+       ),
     );
     if (result == null) return;
 
@@ -285,6 +289,13 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                 result.useBoard && device != null ? [device.deviceId] : null,
           );
       if (result.useBoard) {
+        try {
+          await PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl).startGame();
+        } catch (_) {
+          if (mounted) {
+            setState(() => _syncError = 'Pi game session could not be started.');
+          }
+        }
         _fetchLiveFrame();
         _startAutoDetect();
       } else {
@@ -308,9 +319,14 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   Future<void> _fetchLiveFrame() async {
     if (_livePreviewLoading) return;
+    final piApi = PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl);
     setState(() => _livePreviewLoading = true);
     try {
-      final frame = await ref.read(boardRepositoryProvider).capturePreview();
+      final frame = CalibrationFrame(
+        imageBase64: base64Encode(await piApi.cameraFrame(preview: true)),
+        width: 800,
+        height: 600,
+      );
       if (!mounted) return;
       setState(() {
         _liveFrame = frame;
@@ -318,47 +334,11 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         _livePreviewLoading = false;
       });
     } catch (_) {
-      // Fallback: keep preview usable even if calibrated preview endpoint fails.
-      try {
-        final feed = await ref.read(boardRepositoryProvider).pollCameraFeed();
-        if (!mounted) return;
-        final imageBase64 = feed['image_base64']?.toString() ?? '';
-        final width = int.tryParse(feed['width']?.toString() ?? '') ??
-            _liveFrame?.width ??
-            0;
-        final height = int.tryParse(feed['height']?.toString() ?? '') ??
-            _liveFrame?.height ??
-            0;
-        final status = feed['status']?.toString() ?? '';
-
-        if (imageBase64.isNotEmpty) {
-          setState(() {
-            _liveFrame = CalibrationFrame(
-              imageBase64: imageBase64,
-              width: width,
-              height: height,
-            );
-            _livePreviewError = null;
-            _livePreviewLoading = false;
-          });
-          return;
-        }
-
-        setState(() {
-          _livePreviewError = status == 'not_calibrated'
-              ? 'Camera is live, but board is not calibrated yet.'
-              : status == 'model_not_ready'
-                  ? 'Camera is live, but model is not loaded yet.'
-                  : 'Snapshot unavailable.';
-          _livePreviewLoading = false;
-        });
-      } catch (_) {
-        if (!mounted) return;
-        setState(() {
-          _livePreviewError = 'Snapshot unavailable.';
-          _livePreviewLoading = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _livePreviewError = 'Snapshot unavailable.';
+        _livePreviewLoading = false;
+      });
     }
   }
 
@@ -1517,7 +1497,8 @@ class _PreGameResult {
 
 class _PreGameSheet extends ConsumerStatefulWidget {
   final DeviceModel? device;
-  const _PreGameSheet({this.device});
+  final PiLocalApi localApi;
+  const _PreGameSheet({this.device, required this.localApi});
 
   @override
   ConsumerState<_PreGameSheet> createState() => _PreGameSheetState();
@@ -1560,16 +1541,14 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
 
   Future<void> _loadModel() async {
     await _runStep(() async {
-      await ref.read(boardRepositoryProvider).loadModel(
-            modelPath: AppConfig.boardModelRef,
-          );
+      await widget.localApi.loadModel();
       setState(() => _modelLoaded = true);
     });
   }
 
   Future<void> _autoCalibrate() async {
     await _runStep(() async {
-      await ref.read(boardRepositoryProvider).autoCalibrate();
+      await widget.localApi.autoCalibrate();
       setState(() {
         _calibrated = true;
         _validated = false;
@@ -1592,8 +1571,7 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
   Future<void> _validateBoard() async {
     if (_busy) return; // Prevent multiple simultaneous validations
     await _runStep(() async {
-      final result = await ref.read(boardRepositoryProvider).validateStart();
-      final data = result['data'] as Map<String, dynamic>? ?? {};
+      final data = await widget.localApi.validateStart();
       final valid = data['valid'] == true;
       final detected = data['pieces_detected'] as int? ?? 0;
       final summary = data['summary'] as Map<String, dynamic>? ?? {};
@@ -1622,7 +1600,7 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
 
   Future<void> _forceValidate() async {
     await _runStep(() async {
-      await ref.read(boardRepositoryProvider).forceValidate();
+      await widget.localApi.forceValidate();
       setState(() {
         _validated = true;
         _validationNote = 'Force-validated: Using assumed initial position.';
@@ -1632,8 +1610,7 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
 
   Future<void> _debugCalibration() async {
     await _runStep(() async {
-      final result = await ref.read(boardRepositoryProvider).debugCalibration();
-      final data = result['data'] as Map<String, dynamic>? ?? {};
+      final data = await widget.localApi.debugCalibration();
       final total = data['raw_detections_total'];
       final tip = data['tip'];
       setState(() {
