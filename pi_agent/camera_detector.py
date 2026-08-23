@@ -98,25 +98,80 @@ class PiCameraDetector:
             self.recognizer.calibrate([(float(p[0]), float(p[1])) for p in corners])
 
     def _video_nodes(self) -> list[str]:
-        return sorted(glob.glob("/dev/video*"))
+        return sorted(glob.glob("/dev/video*"),
+                      key=lambda path: self._node_index(path) or 0)
+
+    @staticmethod
+    def _node_index(path: str) -> int | None:
+        try:
+            return int(path.replace("/dev/video", ""))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _node_name(path: str) -> str:
+        """Driver-reported name, e.g. 'bcm2835-isp' or 'HD Webcam C270'."""
+        index = PiCameraDetector._node_index(path)
+        if index is None:
+            return ""
+        try:
+            with open(f"/sys/class/video4linux/video{index}/name") as handle:
+                return handle.read().strip()
+        except OSError:
+            return ""
+
+    @staticmethod
+    def _is_capture_device(path: str) -> bool | None:
+        """Whether a node can actually capture video.
+
+        A Pi publishes many /dev/video* nodes that are ISP or codec endpoints
+        rather than cameras. Opening one never yields a frame and can block for
+        ~10s inside select(), so they must be excluded before probing. Returns
+        None when the capability cannot be determined (non-Linux, or the ioctl
+        is unsupported), so the caller can fall back to trying everything.
+        """
+        try:
+            import fcntl
+            import struct
+        except ImportError:
+            return None
+
+        # VIDIOC_QUERYCAP = _IOR('V', 0, struct v4l2_capability), 104 bytes.
+        VIDIOC_QUERYCAP = 0x80685600
+        V4L2_CAP_VIDEO_CAPTURE = 0x00000001
+        V4L2_CAP_DEVICE_CAPS = 0x80000000
+        buffer = bytearray(104)
+        try:
+            with open(path, "rb", buffering=0) as handle:
+                fcntl.ioctl(handle, VIDIOC_QUERYCAP, buffer, True)
+        except OSError:
+            return False
+        except Exception:
+            return None
+        capabilities, device_caps = struct.unpack_from("<II", buffer, 84)
+        # device_caps describes this specific node; capabilities covers the
+        # whole physical device, which on a Pi spans many nodes.
+        effective = device_caps if capabilities & V4L2_CAP_DEVICE_CAPS else capabilities
+        return bool(effective & V4L2_CAP_VIDEO_CAPTURE)
+
+    def _capture_nodes(self) -> list[str]:
+        """Video nodes that report capture capability."""
+        nodes = self._video_nodes()
+        checked = [(node, self._is_capture_device(node)) for node in nodes]
+        if all(result is None for _, result in checked):
+            # Capability probing unavailable; fall back to trying everything.
+            return nodes
+        return [node for node, result in checked if result]
 
     def _candidate_indices(self) -> list[int]:
-        """Indices worth trying, configured one first.
-
-        On a Pi the configured index is often wrong: the bcm2835 codec occupies
-        the low /dev/video* nodes, so a USB webcam commonly lands on video1 or
-        higher. Probing the rest means a wrong index self-corrects instead of
-        failing forever.
-        """
-        candidates = [self.camera_index]
-        for node in self._video_nodes():
-            try:
-                index = int(node.replace("/dev/video", ""))
-            except ValueError:
-                continue
-            if index not in candidates:
-                candidates.append(index)
-        return candidates
+        """Capture-capable indices, the configured one first if it qualifies."""
+        indices = [index for index in
+                   (self._node_index(node) for node in self._capture_nodes())
+                   if index is not None]
+        if self.camera_index in indices:
+            indices.remove(self.camera_index)
+            indices.insert(0, self.camera_index)
+        return indices
 
     def _diagnose(self) -> str:
         """Explain why no camera could be opened, in terms the user can act on."""
@@ -124,12 +179,21 @@ class PiCameraDetector:
         if not nodes:
             return ("no /dev/video* devices exist - check the camera is plugged "
                     "in and, for a Pi Camera Module, that it is enabled")
-        unreadable = [node for node in nodes if not os.access(node, os.R_OK)]
+
+        capture = self._capture_nodes()
+        if not capture:
+            names = sorted({self._node_name(node) for node in nodes} - {""})
+            described = f" (they are {', '.join(names)} nodes)" if names else ""
+            return (f"{len(nodes)} video devices exist but none can capture"
+                    f"{described} - no camera is connected. Re-seat the USB "
+                    "camera, or for a CSI camera module check `rpicam-hello`")
+
+        unreadable = [node for node in capture if not os.access(node, os.R_OK)]
         if unreadable:
             return (f"no permission to read {', '.join(unreadable)} - add the "
                     "service user to the 'video' group and restart")
-        return (f"{', '.join(nodes)} exist but none returned a frame - another "
-                "process may still hold the camera")
+        return (f"{', '.join(capture)} can capture but returned no frame - "
+                "another process may still hold the camera")
 
     def _release(self) -> None:
         if self._camera is not None:
@@ -232,6 +296,10 @@ class PiCameraDetector:
                 "index": self.camera_index,
                 "opened": bool(self._camera is not None and self._camera.isOpened()),
                 "devices": self._video_nodes(),
+                "capture_devices": self._capture_nodes(),
+                "device_names": {
+                    node: self._node_name(node) for node in self._video_nodes()
+                },
             },
         }
 
