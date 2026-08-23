@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Shell(flutter:*)",
-      "Shell(grep:*)"
+      "Shell(grep:*)",
+      "Shell(./.venv/bin/python:*)"
     ],
     "deny": [],
     "defaultMode": "default"

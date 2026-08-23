@@ -1,8 +1,9 @@
+from datetime import datetime, timedelta, timezone
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from backend.services.device_service import create_onboarding_token
-from backend.core.security import verify_password
+from backend.core.security import hash_password, verify_password
+from backend.services.device_service import claim_device, create_onboarding_token
 
 
 class DeviceBootstrapTests(unittest.IsolatedAsyncioTestCase):
@@ -32,6 +33,25 @@ class DeviceBootstrapTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(data)
         self.assertEqual(error, "Device already linked")
         rotate.assert_not_awaited()
+
+    async def test_claim_accepts_naive_database_expiry_and_consumes_token(self):
+        token = "onboarding-token"
+        device = {
+            "device_id": "board-001",
+            "onboarding_token_hash": hash_password(token),
+            "onboarding_token_expires_at": datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=5),
+            "onboarding_user_id": "user-1",
+            "user_id": None,
+        }
+        with patch("backend.services.device_service.get_by_device_id", AsyncMock(return_value=device)), \
+             patch("backend.services.device_service.consume_onboarding_token", AsyncMock(return_value=True)), \
+             patch("backend.services.device_service.link_user", AsyncMock()) as link, \
+             patch("backend.services.device_service.update_device_metadata", AsyncMock()):
+            data, error = await claim_device(None, "board-001", token)
+
+        self.assertIsNone(error)
+        self.assertEqual(data, {"device_id": "board-001", "status": "online"})
+        link.assert_awaited_once_with(None, "board-001", "user-1")
 
 
 if __name__ == "__main__":

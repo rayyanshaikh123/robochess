@@ -144,6 +144,7 @@ async def consume_onboarding_token(
             "provisioned_at": datetime.now(timezone.utc),
         }},
     )
+    return result.modified_count == 1
 
 
 async def list_by_user(db: AsyncIOMotorDatabase, user_id: str) -> list[dict]:

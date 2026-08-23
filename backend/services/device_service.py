@@ -27,6 +27,14 @@ from backend.repositories.device_repo import (
 from backend.realtime.manager import manager as ws_manager
 
 _LOCAL_HARDWARE_ID = "local"
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 DEVICE_STATES = {
     "unpaired", "ble_connected", "provisioning_wifi", "wifi_connecting",
     "wifi_connected", "server_connecting", "online", "offline", "error",
@@ -210,7 +218,7 @@ async def claim_device(
         return None, "Device not found"
     token_hash = device.get("onboarding_token_hash")
     expires_at = device.get("onboarding_token_expires_at")
-    if not token_hash or not expires_at or expires_at <= datetime.now(timezone.utc):
+    if not token_hash or not expires_at or _as_utc(expires_at) <= datetime.now(timezone.utc):
         return None, "Onboarding token expired"
     if not verify_password(onboarding_token, token_hash):
         return None, "Invalid onboarding token"
