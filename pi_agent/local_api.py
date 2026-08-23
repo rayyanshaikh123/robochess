@@ -119,7 +119,16 @@ class LocalApiHost:
                 self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.config["height"]))
             ok, frame = self._camera.read()
         if not ok:
-            raise HTTPException(503, "Camera frame unavailable")
+            import glob
+
+            nodes = sorted(glob.glob("/dev/video*"))
+            detail = (
+                "no /dev/video* devices exist - check the camera is connected"
+                if not nodes
+                else f"index {self.config['camera_index']} gave no frame; "
+                     f"available devices: {', '.join(nodes)}"
+            )
+            raise HTTPException(503, f"Camera frame unavailable: {detail}")
         return frame
 
     def _jpeg(self, frame):

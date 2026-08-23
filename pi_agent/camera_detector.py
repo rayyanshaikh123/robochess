@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import glob
 import json
 import os
 import threading
@@ -96,32 +97,103 @@ class PiCameraDetector:
         if corners and len(corners) == 4:
             self.recognizer.calibrate([(float(p[0]), float(p[1])) for p in corners])
 
+    def _video_nodes(self) -> list[str]:
+        return sorted(glob.glob("/dev/video*"))
+
+    def _candidate_indices(self) -> list[int]:
+        """Indices worth trying, configured one first.
+
+        On a Pi the configured index is often wrong: the bcm2835 codec occupies
+        the low /dev/video* nodes, so a USB webcam commonly lands on video1 or
+        higher. Probing the rest means a wrong index self-corrects instead of
+        failing forever.
+        """
+        candidates = [self.camera_index]
+        for node in self._video_nodes():
+            try:
+                index = int(node.replace("/dev/video", ""))
+            except ValueError:
+                continue
+            if index not in candidates:
+                candidates.append(index)
+        return candidates
+
+    def _diagnose(self) -> str:
+        """Explain why no camera could be opened, in terms the user can act on."""
+        nodes = self._video_nodes()
+        if not nodes:
+            return ("no /dev/video* devices exist - check the camera is plugged "
+                    "in and, for a Pi Camera Module, that it is enabled")
+        unreadable = [node for node in nodes if not os.access(node, os.R_OK)]
+        if unreadable:
+            return (f"no permission to read {', '.join(unreadable)} - add the "
+                    "service user to the 'video' group and restart")
+        return (f"{', '.join(nodes)} exist but none returned a frame - another "
+                "process may still hold the camera")
+
+    def _release(self) -> None:
+        if self._camera is not None:
+            try:
+                self._camera.release()
+            except Exception:
+                pass
+            self._camera = None
+
+    def _try_open(self, cv2, index: int, backend: int, size: tuple[int, int]):
+        """Open one index/backend/size combination, or None if it yields nothing."""
+        camera = cv2.VideoCapture(index, backend)
+        if not camera.isOpened():
+            camera.release()
+            return None
+        # The C270 exposes V4L2 MJPEG/YUYV modes; selecting MJPEG explicitly
+        # avoids unsupported-resolution negotiation failures.
+        camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH, size[0])
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, size[1])
+        ok, frame = camera.read()
+        if not ok or frame is None:
+            camera.release()
+            return None
+        return camera, frame
+
+    def _open_any(self, cv2):
+        """Find a working camera, trying V4L2 first then any other backend."""
+        backends = [getattr(cv2, "CAP_V4L2", 0), getattr(cv2, "CAP_ANY", 0)]
+        sizes = [(self.width, self.height), (800, 600), (640, 480)]
+        for index in self._candidate_indices():
+            for backend in backends:
+                for size in sizes:
+                    opened = self._try_open(cv2, index, backend, size)
+                    if opened is None:
+                        continue
+                    camera, frame = opened
+                    # Remember what worked so later frames skip the probing.
+                    self.camera_index = index
+                    self.last_error = None
+                    return camera, frame
+        return None
+
     def capture_frame(self):
         try:
             import cv2
         except ImportError as exc:
             raise RuntimeError("OpenCV is not installed") from exc
+
         with self._lock:
-            if self._camera is None or not self._camera.isOpened():
-                # The C270 exposes V4L2 MJPEG/YUYV modes.  Explicitly selecting
-                # V4L2 and MJPEG avoids unsupported 820x620 negotiation failures.
-                self._camera = cv2.VideoCapture(self.camera_index, cv2.CAP_V4L2)
-                self._camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-                self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-                self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-            ok, frame = self._camera.read()
-            if not ok:
-                # Fall back to a mode supported by the C270 if an old .env
-                # still requests an unsupported resolution.
-                self._camera.release()
-                self._camera = cv2.VideoCapture(self.camera_index, cv2.CAP_V4L2)
-                self._camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-                self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, 800)
-                self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 600)
+            if self._camera is not None and self._camera.isOpened():
                 ok, frame = self._camera.read()
-        if not ok:
-            raise RuntimeError("Camera frame unavailable")
-        return frame
+                if ok and frame is not None:
+                    return frame
+                # The device went away mid-session; drop it and re-probe.
+                self._release()
+
+            opened = self._open_any(cv2)
+            if opened is None:
+                reason = self._diagnose()
+                self.last_error = f"Camera unavailable: {reason}"
+                raise RuntimeError(self.last_error)
+            self._camera, frame = opened
+            return frame
 
     def _rotation_cw(self) -> int:
         """Post-warp rotation that brings rank 1 to the bottom of the image."""
@@ -154,6 +226,13 @@ class PiCameraDetector:
             "model_path_configured": bool(self.model_path),
             "last_error": self.last_error,
             "detector": recognizer_status,
+            # Surfaced so a camera problem can be diagnosed from the app
+            # instead of only from the Pi's console.
+            "camera": {
+                "index": self.camera_index,
+                "opened": bool(self._camera is not None and self._camera.isOpened()),
+                "devices": self._video_nodes(),
+            },
         }
 
     def detect_candidates(self, session) -> list[str]:
