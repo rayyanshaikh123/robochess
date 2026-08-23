@@ -8,6 +8,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from pi_agent.calibration import rotate_warped
+
 
 class PiCameraDetector:
     """Owns the camera and translates calibrated frames into legal UCI moves.
@@ -121,11 +123,27 @@ class PiCameraDetector:
             raise RuntimeError("Camera frame unavailable")
         return frame
 
+    def _rotation_cw(self) -> int:
+        """Post-warp rotation that brings rank 1 to the bottom of the image."""
+        try:
+            return int(self._read_calibration().get("rotation_cw", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _warp(self, frame):
+        """Top-down board view, oriented so rank 1 is at the bottom.
+
+        The recognizer's own warp always lands the image's top-left corner at
+        the warped origin, so board orientation has to be corrected here rather
+        than by reordering the calibration corners.
+        """
+        return rotate_warped(self.recognizer.warp_frame(frame), self._rotation_cw())
+
     def preview_frame(self):
         frame = self.capture_frame()
         if self.recognizer:
             self._apply_calibration()
-            return self.recognizer.warp_frame(frame) if self.calibrated else frame
+            return self._warp(frame) if self.calibrated else frame
         return frame
 
     def status(self) -> dict:
@@ -147,7 +165,7 @@ class PiCameraDetector:
         try:
             self._apply_calibration()
             frame = self.capture_frame()
-            warped = self.recognizer.warp_frame(frame)
+            warped = self._warp(frame)
             detections = self.recognizer.detect(warped)
             state = self.recognizer.detections_to_state_dict(
                 detections, warped.shape[1], warped.shape[0], self.confidence

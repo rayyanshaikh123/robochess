@@ -105,9 +105,24 @@ PIECE_TYPE_TO_NAME = {
 ALL_SQUARES = [chess.square_name(sq) for sq in chess.SQUARES]
 
 
+#: FEN single-letter class labels, as used by the robochess-phase-2 Roboflow
+#: model. Colour is encoded by CASE: "R" is a white rook, "r" a black one.
+FEN_LETTER_TO_TYPE = {
+    "p": "pawn", "n": "knight", "b": "bishop",
+    "r": "rook", "q": "queen", "k": "king",
+}
+
+
 def normalize_class_name(name: str) -> str:
     """Normalize class labels from various datasets into canonical names."""
-    cleaned = name.strip().lower().replace(" ", "_").replace("-", "_")
+    raw = str(name).strip()
+    # Single-letter FEN labels must be resolved BEFORE lowercasing, which would
+    # otherwise collapse "R" and "r" into the same string and silently discard
+    # the colour -- leaving every detection unmappable.
+    if len(raw) == 1 and raw.lower() in FEN_LETTER_TO_TYPE:
+        color = "white" if raw.isupper() else "black"
+        return f"{color}_{FEN_LETTER_TO_TYPE[raw.lower()]}"
+    cleaned = raw.lower().replace(" ", "_").replace("-", "_")
     # Common dataset typo seen in some Roboflow exports.
     cleaned = cleaned.replace("qawn", "pawn")
     return cleaned

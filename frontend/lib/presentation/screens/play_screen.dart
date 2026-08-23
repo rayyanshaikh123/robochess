@@ -1558,7 +1558,9 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
 
   Future<void> _manualCalibrate() async {
     final ok = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const ManualCalibrationScreen()),
+      MaterialPageRoute(
+        builder: (_) => ManualCalibrationScreen(localApi: widget.localApi),
+      ),
     );
     if (ok == true) {
       setState(() {

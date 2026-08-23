@@ -239,10 +239,11 @@ class UnoController:
     #: Squares needing a human hand, e.g. promotion swaps the machine cannot do.
     manual_actions: list[str] = field(default_factory=list)
     _graveyard_used: int = 0
+    _magnet_engaged: bool = False
 
     def ensure_homed(self) -> dict:
         """Verify the Uno has homed before any coordinate motion."""
-        status = self.status()
+        status = self.read_status()
         if status.homed is not True:
             raise UnoError("Gantry is not homed; send gantry.home before moving")
         return status.as_dict()
@@ -265,12 +266,17 @@ class UnoController:
         self.command("PING", TIMEOUT_SHORT_S)
         return True
 
+    def read_status(self) -> GantryStatus:
+        """Parsed status, for callers that need to inspect fields."""
+        return GantryStatus.parse(self.command("STATUS", TIMEOUT_SHORT_S))
+
     def status(self) -> dict:
-        return GantryStatus.parse(self.command("STATUS", TIMEOUT_SHORT_S)).as_dict()
+        """JSON-friendly status, as surfaced over BLE and the local HTTP API."""
+        return self.read_status().as_dict()
 
     def home(self) -> None:
         self.command("HOME", TIMEOUT_HOME_S)
-        status = self.status()
+        status = self.read_status()
         if status.homed is not True:
             raise UnoError("Uno acknowledged HOME but did not report HOMED=1")
 
@@ -278,7 +284,13 @@ class UnoController:
         self.command("STOP", TIMEOUT_SHORT_S)
 
     def magnet(self, on: bool) -> None:
+        # Mark the coil as live *before* the write: if the command fails
+        # half-way we must still assume it may be energised.
+        if on:
+            self._magnet_engaged = True
         self.command(f"MAG {'ON' if on else 'OFF'}", TIMEOUT_SHORT_S)
+        if not on:
+            self._magnet_engaged = False
         time.sleep(MAGNET_SETTLE_S)
 
     def move_to(self, x: float, y: float) -> None:
@@ -337,11 +349,19 @@ class UnoController:
         self._graveyard_used += 1
 
     def _release_quietly(self) -> None:
-        """Never leave an energised coil on a halted machine."""
+        """Never leave an energised coil on a halted machine.
+
+        A failure before the magnet was ever switched on (a pre-flight check,
+        say) has nothing to release, so stay off the wire entirely.
+        """
+        if not self._magnet_engaged:
+            return
         try:
             self.transport.send("MAG OFF", TIMEOUT_SHORT_S)
         except Exception:
             pass
+        finally:
+            self._magnet_engaged = False
 
     def close(self) -> None:
         self.transport.close()

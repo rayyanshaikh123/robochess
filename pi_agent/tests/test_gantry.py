@@ -122,7 +122,7 @@ class UnoControllerTests(unittest.TestCase):
         self.assertEqual(verbs.count("MAG"), 2)
         # Magnet on only after arriving at the source square.
         self.assertEqual(verbs[0], "STATUS")
-        self.assertEqual(transport.commands[1], "MOVEXY")
+        self.assertEqual(transport.commands[1].split()[0], "MOVEXY")
         self.assertEqual(transport.commands[2], "MAG ON")
         self.assertEqual(verbs[-1], "MOVEXY")  # parked at the end
 
@@ -149,11 +149,30 @@ class UnoControllerTests(unittest.TestCase):
         uno.execute(motion_plan(board, chess.Move.from_uci("a7a8q")))
         self.assertTrue(any("a8" in action for action in uno.manual_actions))
 
-    def test_error_reply_raises_and_releases_the_magnet(self):
+    def test_failure_mid_drag_releases_the_magnet(self):
+        class FailingMove(SimulatedTransport):
+            """Succeeds until the carriage is holding a piece, then faults."""
+
+            def send(self, command, timeout):
+                if len(self.commands) >= 3 and command.split()[0].upper() == "MOVEXY":
+                    self.commands.append(command)
+                    return False, ["ERR LIMIT_X"]
+                return super().send(command, timeout)
+
+        transport = FailingMove()
+        uno = UnoController(transport, retries=0)
+        with self.assertRaises(UnoError):
+            uno.execute(motion_plan(chess.Board(), chess.Move.from_uci("e2e4")))
+        self.assertIn("MAG ON", transport.commands)
+        # An energised coil must never be left on a halted machine.
+        self.assertEqual(transport.commands[-1], "MAG OFF")
+
+    def test_preflight_failure_leaves_the_magnet_alone(self):
+        # Nothing was ever energised, so there is nothing to release.
         uno, transport = self._controller(fail=True)
         with self.assertRaises(UnoError):
             uno.execute(motion_plan(chess.Board(), chess.Move.from_uci("e2e4")))
-        self.assertIn("MAG OFF", transport.commands)
+        self.assertNotIn("MAG", [c.split()[0] for c in transport.commands])
 
     def test_illegal_move_is_refused_at_planning_time(self):
         with self.assertRaises(UnoError):

@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
+from pi_agent.calibration import CalibrationError, calibrate_from_rooks
 from pi_agent.network_manager import NetworkManager
 
 
@@ -256,18 +257,38 @@ class LocalApiHost:
         @self.app.post("/local/calibration/auto")
         def auto_calibration():
             frame = self._capture()
-            corners = detect_board_corners(frame)
-            if corners is None:
-                raise HTTPException(
-                    422,
-                    "Could not detect a board. Place the full board in frame with a clear border.",
-                )
+            data = None
+            rook_note = None
+            # The four corner rooks locate the board AND reveal which end is
+            # white's, so they are tried before the geometry-only fallback.
+            if self.detector is not None and self.detector.model_available:
+                try:
+                    detections = self.detector.recognizer.detect(frame)
+                    data = calibrate_from_rooks(detections)
+                except CalibrationError as exc:
+                    rook_note = str(exc)
+                except Exception as exc:  # model/runtime trouble, not a bad board
+                    rook_note = f"rook calibration unavailable: {exc}"
+            else:
+                rook_note = "vision model not loaded; orientation not detected"
+
+            if data is None:
+                corners = detect_board_corners(frame)
+                if corners is None:
+                    raise HTTPException(
+                        422,
+                        "Could not detect a board. Place the full board in frame "
+                        f"with a clear border. ({rook_note})",
+                    )
+                data = {
+                    "corners": corners,
+                    "board_orientation": "white_bottom",
+                    "rotation_cw": 0,
+                    "method": "contour_quad",
+                }
+            if rook_note:
+                data["note"] = rook_note
             self.state_path.mkdir(parents=True, exist_ok=True)
-            data = {
-                "corners": corners,
-                "board_orientation": "white_bottom",
-                "method": "contour_quad",
-            }
             self.calibration_path.write_text(json.dumps(data, indent=2))
             if self.detector is not None:
                 self.detector.last_error = None
