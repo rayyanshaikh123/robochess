@@ -187,7 +187,7 @@ def api_game_move():
         return fail("gantry is still working on the previous move")
     try:
         if data.get("san"):
-            move = GAME.parse(data["san"])
+            print(f"[DEBUG SERVER] parsing {data.get("san")} with FEN {GAME.board.fen()}"); move = GAME.parse(data["san"])
         elif data.get("from") and data.get("to"):
             move = GAME.move_from_squares(data["from"], data["to"], data.get("promotion"))
         else:
@@ -220,7 +220,7 @@ def api_game_preview():
     data = request.get_json(force=True, silent=True) or {}
     try:
         if data.get("san"):
-            move = GAME.parse(data["san"])
+            print(f"[DEBUG SERVER] parsing {data.get("san")} with FEN {GAME.board.fen()}"); move = GAME.parse(data["san"])
         else:
             move = GAME.move_from_squares(data.get("from", ""), data.get("to", ""),
                                           data.get("promotion"))
@@ -232,6 +232,21 @@ def api_game_preview():
 @app.route("/api/game/reset", methods=["POST"])
 def api_game_reset():
     GAME.reset()
+    return ok(game=GAME.status())
+
+
+@app.route("/api/game/set_fen", methods=["POST"])
+def api_game_set_fen():
+    print("[DEBUG SERVER] api_game_set_fen called!")
+    """Silently update the internal board state without moving the gantry."""
+    data = request.get_json(force=True, silent=True) or {}
+    fen = data.get("fen")
+    if not fen:
+        return fail("set_fen requires a fen string")
+    try:
+        GAME.set_fen(fen)
+    except ValueError as exc:
+        return fail(exc)
     return ok(game=GAME.status())
 
 

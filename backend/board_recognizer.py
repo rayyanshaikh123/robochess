@@ -147,15 +147,130 @@ def parse_piece_label(label: Optional[str]) -> tuple[Optional[str], Optional[str
 
 
 def order_points(pts):
-    """Order 4 points as: top-left, top-right, bottom-right, bottom-left."""
-    rect = np.zeros((4, 2), dtype="float32")
-    s = pts.sum(axis=1)
-    rect[0] = pts[np.argmin(s)]
-    rect[2] = pts[np.argmax(s)]
-    diff = np.diff(pts, axis=1)
-    rect[1] = pts[np.argmin(diff)]
-    rect[3] = pts[np.argmax(diff)]
-    return rect
+    """Order 4 distinct points as: top-left, top-right, bottom-right, bottom-left."""
+    pts = np.array(pts, dtype="float32")
+    # Sort points by x-coordinate to get left and right halves
+    x_sorted = pts[np.argsort(pts[:, 0]), :]
+    
+    left_most = x_sorted[:2, :]
+    right_most = x_sorted[2:, :]
+    
+    # Sort left half by y-coordinate to get top-left and bottom-left
+    left_most = left_most[np.argsort(left_most[:, 1]), :]
+    tl, bl = left_most[0], left_most[1]
+    
+    # Sort right half by y-coordinate to get top-right and bottom-right
+    right_most = right_most[np.argsort(right_most[:, 1]), :]
+    tr, br = right_most[0], right_most[1]
+    
+    return np.array([tl, tr, br, bl], dtype="float32")
+
+
+def piece_base_point(detection: dict) -> tuple[float, float]:
+    """Where a piece meets the board, in image pixels."""
+    bbox = detection.get("bbox")
+    if bbox and len(bbox) == 4:
+        x1, _y1, x2, y2 = (float(v) for v in bbox)
+        return ((x1 + x2) / 2.0, y2)
+    center = detection.get("center")
+    if center and len(center) == 2:
+        return (float(center[0]), float(center[1]))
+    raise RuntimeError("detection has neither bbox nor center")
+
+
+def expand_from_centroid(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Scale points outward using a perspective-correct homography."""
+    print(f"DEBUG: expand_from_centroid called with points={points}")
+    src = np.array([
+        [0.5, 0.5],
+        [7.5, 0.5],
+        [7.5, 7.5],
+        [0.5, 7.5]
+    ], dtype="float32")
+    
+    dst = np.array([
+        [0.0, 0.0],
+        [8.0, 0.0],
+        [8.0, 8.0],
+        [0.0, 8.0]
+    ], dtype="float32")
+    
+    pixel_pts = np.array(points, dtype="float32")
+    H, status = cv2.findHomography(src, pixel_pts)
+    print(f"DEBUG: H=\n{H}\nstatus=\n{status}")
+    
+    if H is None or H.size == 0:
+        print("DEBUG: Homography failed! Falling back to linear expansion.")
+        cx = sum(p[0] for p in points) / len(points)
+        cy = sum(p[1] for p in points) / len(points)
+        return [(cx + (x - cx) * (8.0/7.0), cy + (y - cy) * (8.0/7.0)) for x, y in points]
+        
+    expanded = cv2.perspectiveTransform(np.array([dst]), H)[0]
+    print(f"DEBUG: expanded=\n{expanded}")
+    
+    # Check for degenerate output (all points identical)
+    unique_pts = set((round(x,1), round(y,1)) for x, y in expanded)
+    if len(unique_pts) == 1:
+        print("DEBUG: Degenerate homography output! Falling back to linear expansion.")
+        cx = sum(p[0] for p in points) / len(points)
+        cy = sum(p[1] for p in points) / len(points)
+        return [(cx + (x - cx) * (8.0/7.0), cy + (y - cy) * (8.0/7.0)) for x, y in points]
+        
+    return [(float(x), float(y)) for x, y in expanded]
+
+
+def _pick_rooks(detections: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Find the two white rooks and two black rooks furthest apart (most likely the corners)."""
+    def get_rooks(name: str) -> list[dict]:
+        # Do not hardcode a high confidence threshold; the base detect() already filters by 0.05.
+        matches = [d for d in detections if d.get("class_name") == name]
+        if len(matches) <= 2:
+            return matches
+        
+        # If > 2, pick the pair with the maximum Euclidean distance
+        best_pair = None
+        max_dist = -1
+        for i in range(len(matches)):
+            for j in range(i + 1, len(matches)):
+                p1 = piece_base_point(matches[i])
+                p2 = piece_base_point(matches[j])
+                dist = (p1[0] - p2[0])**2 + (p1[1] - p2[1])**2
+                if dist > max_dist:
+                    max_dist = dist
+                    best_pair = [matches[i], matches[j]]
+        return best_pair or matches[:2]
+
+    return get_rooks("white_rook"), get_rooks("black_rook")
+
+
+def calibrate_from_rooks(detections: list[dict]) -> dict:
+    """Derive board corners from the four corner rooks in the starting position."""
+    white, black = _pick_rooks(detections)
+    if len(white) < 2 or len(black) < 2:
+        raise RuntimeError(
+            f"Need 2 white and 2 black rooks, found {len(white)} white and "
+            f"{len(black)} black -- set the board to its starting position."
+        )
+
+    white_points = [piece_base_point(d) for d in white]
+    black_points = [piece_base_point(d) for d in black]
+    all_points = np.array(white_points + black_points, dtype="float32")
+    ordered = order_points(all_points)
+    
+    # Sanity check: do these 4 points form a board?
+    # The top two points and bottom two points should be separated by a significant Y distance
+    tl, tr, br, bl = ordered
+    if abs(tl[1] - bl[1]) < 150 or abs(tr[1] - br[1]) < 150:
+        raise RuntimeError("Detected rooks do not form a valid board shape (too flat). YOLO likely missed the bottom pieces. Please use the 'Calibrate' button to click the 4 corners manually.")
+        
+    corners = expand_from_centroid([(float(pt[0]), float(pt[1])) for pt in ordered])
+    confidences = [float(d.get("confidence", 0.0)) for d in white + black]
+    
+    print(f"[OK] Board calibrated with corners: {corners}")
+    return {
+        "corners": [[round(x, 2), round(y, 2)] for x, y in corners],
+        "min_confidence": round(min(confidences), 4),
+    }
 
 
 def parse_cloud_model_id(model_ref: str) -> Optional[str]:
@@ -604,15 +719,16 @@ class BoardRecognizer:
         Returns:
             Square name like "e4", or None if out of bounds.
         """
-        file_idx = int(cx / (frame_w / 8))
-        rank_idx = int(cy / (frame_h / 8))
-        file_idx = max(0, min(7, file_idx))
-        rank_idx = max(0, min(7, rank_idx))
-
-        # Convert: rank_idx=0 → rank 8 (top of image), rank_idx=7 → rank 1 (bottom)
-        file_char = chr(ord('a') + file_idx)
-        rank_num = 8 - rank_idx
-        return f"{file_char}{rank_num}"
+        sq_w = frame_w / 8.0
+        sq_h = frame_h / 8.0
+        file_idx = int(cx // sq_w)
+        rank_idx = 7 - int(cy // sq_h)
+        if getattr(self, "is_flipped", False):
+            file_idx = 7 - file_idx
+            rank_idx = 7 - rank_idx
+        if 0 <= file_idx <= 7 and 0 <= rank_idx <= 7:
+            return f"{chr(ord('a') + file_idx)}{rank_idx + 1}"
+        return None
 
     def detections_to_board(self, detections: list[dict],
                             frame_w: int, frame_h: int) -> chess.Board:

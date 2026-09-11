@@ -20,6 +20,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+import urllib.request
+import urllib.error
 
 import chess
 import chess.engine
@@ -42,9 +44,9 @@ except ImportError:
     load_dotenv = None
 
 try:
-    from backend.board_recognizer import BoardRecognizer
+    from backend.board_recognizer import BoardRecognizer, calibrate_from_rooks
 except ImportError:
-    from board_recognizer import BoardRecognizer
+    from board_recognizer import BoardRecognizer, calibrate_from_rooks
 
 
 ROOT = Path(__file__).parent.resolve()
@@ -430,22 +432,24 @@ class RoboChessControlCenter(tk.Tk):
 
         controls = ttk.Frame(parent, style="Panel.TFrame")
         controls.grid(row=5, column=0, sticky="ew", pady=(12, 0))
-        for index in range(7):
+        for index in range(8):
             controls.columnconfigure(index, weight=1)
 
         ttk.Button(controls, text="Calibrate", style="Small.TButton", command=self.begin_calibration).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        ttk.Button(controls, text="Clear", style="Small.TButton", command=self.clear_calibration).grid(row=0, column=1, sticky="ew", padx=6)
-        ttk.Button(controls, text="Capture", style="Small.TButton", command=self.trigger_manual_capture).grid(row=0, column=2, sticky="ew", padx=6)
+        ttk.Button(controls, text="Auto Cal", style="Small.TButton", command=self.auto_calibrate).grid(row=0, column=1, sticky="ew", padx=6)
+        ttk.Button(controls, text="Clear", style="Small.TButton", command=self.clear_calibration).grid(row=0, column=2, sticky="ew", padx=6)
+        ttk.Button(controls, text="Capture", style="Small.TButton", command=self.trigger_manual_capture).grid(row=0, column=3, sticky="ew", padx=6)
         self.validate_button = ttk.Button(
             controls,
             text="Validate start",
             style="Small.TButton",
             command=self.validate_starting_position,
         )
-        self.validate_button.grid(row=0, column=3, sticky="ew", padx=6)
-        ttk.Button(controls, text="Pause", style="Small.TButton", command=self.toggle_pause).grid(row=0, column=4, sticky="ew", padx=6)
-        ttk.Button(controls, text="New game", style="Small.TButton", command=self.new_game).grid(row=0, column=5, sticky="ew", padx=6)
-        ttk.Button(controls, text="Engine reply", style="Small.TButton", command=self.apply_engine_move).grid(row=0, column=6, sticky="ew", padx=(6, 0))
+        self.validate_button.grid(row=0, column=4, sticky="ew", padx=6)
+        ttk.Button(controls, text="Pause", style="Small.TButton", command=self.toggle_pause).grid(row=0, column=5, sticky="ew", padx=6)
+        ttk.Button(controls, text="New game", style="Small.TButton", command=self.new_game).grid(row=0, column=6, sticky="ew", padx=6)
+        ttk.Button(controls, text="Engine reply", style="Small.TButton", command=self.apply_engine_move).grid(row=0, column=7, sticky="ew", padx=6)
+        ttk.Button(controls, text="Flip Board", style="Small.TButton", command=self.flip_board_perspective).grid(row=0, column=8, sticky="ew", padx=(6, 0))
 
     def _build_game_panel(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
@@ -1107,6 +1111,12 @@ class RoboChessControlCenter(tk.Tk):
     # Actions
     # ------------------------------------------------------------------
 
+    def flip_board_perspective(self) -> None:
+        self.recognizer.is_flipped = not getattr(self.recognizer, "is_flipped", False)
+        side = "Black" if self.recognizer.is_flipped else "White"
+        self.status_message = f"Camera perspective flipped: Viewing from {side}'s side"
+        self._schedule_capture("manual", force_initial=False)
+
     def trigger_manual_capture(self, event: Optional[tk.Event] = None) -> None:
         self._schedule_capture("manual", force_initial=False)
 
@@ -1202,14 +1212,26 @@ class RoboChessControlCenter(tk.Tk):
             stable_state: dict[str, Optional[str]] = {sq: None for sq in all_squares}
             for sq in all_squares:
                 label_counts: dict[str, int] = {}
+                occupancy_count = 0
                 for sample_state in samples:
                     label = sample_state.get(sq)
                     if label:
                         label_counts[label] = label_counts.get(label, 0) + 1
-                if label_counts:
-                    best_label, best_count = max(label_counts.items(), key=lambda item: item[1])
-                    if best_count >= STABLE_LABEL_MIN_COUNT:
+                        occupancy_count += 1
+                        
+                if OCCUPANCY_ONLY:
+                    # In occupancy mode, we don't care if the class flickers (e.g. Pawn vs Bishop).
+                    # We just care that ANY piece was detected consistently.
+                    if occupancy_count >= STABLE_LABEL_MIN_COUNT:
+                        # Just grab the most frequent label it saw, even if it wasn't stable.
+                        # It doesn't matter what class it is, as long as it's not None.
+                        best_label = max(label_counts.items(), key=lambda item: item[1])[0]
                         stable_state[sq] = best_label
+                else:
+                    if label_counts:
+                        best_label, best_count = max(label_counts.items(), key=lambda item: item[1])
+                        if best_count >= STABLE_LABEL_MIN_COUNT:
+                            stable_state[sq] = best_label
 
             curr_board = recognizer.state_dict_to_board(stable_state)
             curr_fen = curr_board.board_fen()
@@ -1540,6 +1562,47 @@ class RoboChessControlCenter(tk.Tk):
             self.tracking_prev_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             time.sleep(0.2)
 
+    def auto_calibrate(self) -> None:
+        with self.state_lock:
+            if self.recognizer is None:
+                self.status_message = "Load the model before calibration."
+                return
+            frame = None if self.latest_frame is None else self.latest_frame.copy()
+            
+        if frame is None:
+            self.status_message = "No camera frame available."
+            messagebox.showwarning("Auto Calibrate", "No camera frame available. Please start the camera first.")
+            return
+
+        try:
+            detections = self.recognizer.detect(frame)
+            import os
+            debug_vis = self.recognizer.draw_detections(frame, detections)
+            cv2.imwrite(os.path.expanduser("~/.gemini/antigravity-ide/brain/35bb8b48-a035-46d9-ab5e-37542b1b8a1a/scratch/debug_raw_detections.jpg"), debug_vis)
+            data = calibrate_from_rooks(detections)
+            corners = data["corners"]
+            corners = [(float(x), float(y)) for x, y in corners]
+            # Draw the corners too
+            for pt in corners:
+                cv2.circle(debug_vis, (int(pt[0]), int(pt[1])), 10, (0, 0, 255), -1)
+            cv2.imwrite(os.path.expanduser("~/.gemini/antigravity-ide/brain/35bb8b48-a035-46d9-ab5e-37542b1b8a1a/scratch/debug_raw_detections_with_corners.jpg"), debug_vis)
+        except Exception as exc:
+            self.status_message = f"Auto Calibrate failed: {exc}"
+            messagebox.showwarning("Auto Calibrate", f"Could not automatically detect the board:\n\n{exc}")
+            return
+
+        with self.state_lock:
+            self.calibration_points = corners
+            self.recognizer.calibrate(self.calibration_points)
+            self.app_config.calibration_points = self.calibration_points
+            self.app_config.save(self.config_path)
+            self.initial_board_validated = False
+            self.phase = "playing"
+            self.calibration_mode = False
+            self.status_message = "Auto Calibration successful! Verify the grid overlays the board."
+            self.canvas_click_hint.set("")
+            self.step_status_var.set("Step 3/4: Ready to play")
+
     def begin_calibration(self) -> None:
         with self.state_lock:
             if self.recognizer is None:
@@ -1686,6 +1749,25 @@ class RoboChessControlCenter(tk.Tk):
             else:
                 self.status_message = f"New game started. You are {human_side}, engine is {engine_side}. Sync the real board."
                 self.step_status_var.set("Step 3/4: Human move" if self.phase == "waiting_human" else "Step 1/4: Setup")
+                
+            # Tell the gantry to reset its game state and go home
+            try:
+                urllib.request.urlopen("http://127.0.0.1:8000/api/game/reset", data=b"{}", timeout=1.0)
+                urllib.request.urlopen("http://127.0.0.1:8000/api/home", data=b"{}", timeout=1.0)
+                print("[INFO] Sent reset and homing commands to gantry server.")
+            except Exception as exc:
+                try:
+                    if hasattr(exc, "read"):
+                        err_msg = exc.read().decode("utf-8")
+                        if "not connected" in err_msg:
+                            print("[INFO] Gantry not connected, skipping homing.")
+                        else:
+                            print(f"[WARN] Failed to send reset/home: {err_msg}")
+                    else:
+                        print(f"[WARN] Failed to send reset/home to gantry server: {exc}")
+                except Exception:
+                    print(f"[WARN] Failed to send reset/home to gantry server: {exc}")
+                
         self._refresh_connection_text()
 
     def apply_engine_move(self) -> None:
@@ -1717,6 +1799,7 @@ class RoboChessControlCenter(tk.Tk):
             return
 
         with self.state_lock:
+            fen_before_move = self.board.fen(); print(f"[DEBUG] Sending set_fen: {fen_before_move}")
             san = self.board.san(move)
             side = "white" if self.board.turn == chess.WHITE else "black"
             self.board.push(move)
@@ -1736,7 +1819,36 @@ class RoboChessControlCenter(tk.Tk):
             self.candidate_move_streak = 0
             self.next_snapshot_at = 0.0
             self.stable_count = 0
-            self.status_message = f"Engine move: {san}. Place the piece on the board, then wait for sync."
+            
+            # Send the move to the physical gantry controller
+            try:
+                # 1. Sync the board state so the gantry knows about the human's move
+                sync_req = urllib.request.Request(
+                    "http://127.0.0.1:8000/api/game/set_fen",
+                    data=json.dumps({"fen": fen_before_move}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}
+                )
+                urllib.request.urlopen(sync_req, timeout=1.0)
+                
+                # 2. Command the gantry to play the engine's move
+                req = urllib.request.Request(
+                    "http://127.0.0.1:8000/api/game/move",
+                    data=json.dumps({"san": san}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}
+                )
+                with urllib.request.urlopen(req, timeout=1.0) as response:
+                    resp_data = json.loads(response.read().decode("utf-8"))
+                    if resp_data.get("ok"):
+                        self.status_message = f"Gantry executing: {san}. Waiting for sync..."
+                    else:
+                        self.status_message = f"Gantry rejected {san}. Move manually. Error: {resp_data.get('error')}"
+            except urllib.error.HTTPError as e:
+                err_msg = e.read().decode("utf-8")
+                print(f"[WARN] Gantry server returned error: {err_msg}")
+                self.status_message = f"Gantry error: {san}. Place the piece manually."
+            except Exception as exc:
+                print(f"[WARN] Failed to send move to gantry controller: {exc}")
+                self.status_message = f"Engine move: {san}. Place the piece on the board, then wait for sync."
             self.engine_status_var.set(f"Last engine move: {san}")
             self.step_status_var.set("Step 3/4: Human move")
 

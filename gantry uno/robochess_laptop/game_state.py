@@ -71,7 +71,9 @@ class GameState:
         }
 
     def san_history(self):
-        replay = chess.Board()
+        replay = self.board.copy()
+        while replay.move_stack:
+            replay.pop()
         out = []
         for mv in self.board.move_stack:
             out.append(replay.san(mv))
