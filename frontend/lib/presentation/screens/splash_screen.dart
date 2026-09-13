@@ -68,9 +68,13 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
         // First-time users flow: Splash -> Onboarding -> Login
         context.go('/onboarding');
       } else {
-        // Returning users flow: if logged in -> Home, else -> Login
-        final session = ref.read(sessionProvider).valueOrNull;
-        if (session != null) {
+        // Returning users flow: wait for secure-session restoration before routing.
+        final sessionState = ref.read(sessionProvider);
+        if (!sessionState.hasValue) {
+          _navTimer = Timer(const Duration(milliseconds: 100), _navigateNext);
+          return;
+        }
+        if (sessionState.valueOrNull != null) {
           context.go('/home');
         } else {
           context.go('/login');

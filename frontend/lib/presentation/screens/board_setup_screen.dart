@@ -115,8 +115,8 @@ class _BoardSetupScreenState extends ConsumerState<BoardSetupScreen> {
             onPressed: setup?.ready == true && !state.setupLoading
                 ? () async {
                     await ref.read(localBoardProvider.notifier).confirmSetup();
-                    if (context.mounted &&
-                        ref.read(localBoardProvider).piState != null) {
+                    if (!context.mounted) return;
+                    if (ref.read(localBoardProvider).piState != null) {
                       context.go('/local');
                     }
                   }

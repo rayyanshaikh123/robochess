@@ -37,10 +37,15 @@ final gameRepositoryProvider = Provider<GameRepository>((ref) {
 
 final gameSocketProvider = Provider<GameSocketClient>((ref) {
   final httpBase = ref.watch(serverConfigProvider);
-  final wsBase = httpBase
-          .replaceFirst(RegExp(r'^https://'), 'wss://')
-          .replaceFirst(RegExp(r'^http://'), 'ws://') +
-      '/ws';
+  final uri = Uri.parse(httpBase);
+  final wsBase = uri
+      .replace(
+        scheme: uri.scheme == 'https' ? 'wss' : 'ws',
+        path: '/ws',
+        query: '',
+        fragment: '',
+      )
+      .toString();
   return GameSocketClient(wsBaseUrl: wsBase);
 });
 

@@ -17,20 +17,33 @@ class ServerConfigNotifier extends StateNotifier<String> {
   Future<void> _load() async {
     final url = await _store.loadBaseUrl();
     if (url != null && url.isNotEmpty) {
-      state = url;
+      try {
+        state = _normalize(url);
+      } on ArgumentError {
+        await _store.clear();
+      }
     }
+  }
+
+  static String _normalize(String value) {
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null ||
+        (uri.scheme != 'http' && uri.scheme != 'https') ||
+        uri.host.isEmpty ||
+        (uri.path != '' && uri.path != '/') ||
+        uri.query.isNotEmpty ||
+        uri.fragment.isNotEmpty) {
+      throw ArgumentError('Enter a valid HTTP or HTTPS server URL');
+    }
+    return uri.replace(path: '').toString().replaceFirst(RegExp(r'/$'), '');
   }
 
   /// Validates and persists a new base URL, then updates state so
   /// `apiClientProvider` / `gameSocketProvider` rebuild reactively.
   Future<void> update(String url) async {
-    final trimmed = url.trim();
-    if (trimmed.isEmpty ||
-        !(trimmed.startsWith('http://') || trimmed.startsWith('https://'))) {
-      throw ArgumentError('Enter a valid HTTP or HTTPS URL');
-    }
-    await _store.saveBaseUrl(trimmed);
-    state = trimmed;
+    final normalized = _normalize(url);
+    await _store.saveBaseUrl(normalized);
+    state = normalized;
   }
 
   Future<void> reset() async {

@@ -14,6 +14,7 @@ import '../providers/board_theme_provider.dart';
 import '../providers/device_provider.dart';
 import '../providers/board_provider.dart';
 import '../providers/game_provider.dart';
+import '../providers/local_board_provider.dart';
 import '../providers/session_provider.dart';
 import '../providers/user_provider.dart';
 import '../../core/errors/api_exception.dart';
@@ -114,6 +115,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   int _linkedGameVersion = 0;
   bool _syncing = false;
   String? _syncError;
+  String? _piConnectionError;
   String? _pendingLocalUci;
   int? _pendingLocalVersion;
   String? _wsGameId;
@@ -218,6 +220,10 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   }
 
   // ── Resolve human color from the chosen side ──
+  String get _piBaseUrl =>
+      ref.read(localBoardProvider).localApiBaseUrl ??
+      AppConfig.piLocalApiBaseUrl;
+
   chess.Color _humanColor() {
     return _setupSide == 'black' ? chess.Color.BLACK : chess.Color.WHITE;
   }
@@ -310,7 +316,9 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           break;
         }
       }
-      final promo = chosenMove.promotion != null ? chosenMove.promotion.toString().toLowerCase() : '';
+      final promo = chosenMove.promotion != null
+          ? chosenMove.promotion.toString().toLowerCase()
+          : '';
       final uci = '${chosenMove.fromAlgebraic}${chosenMove.toAlgebraic}$promo';
       final ok = _applyUciMove(uci);
       if (ok) {
@@ -354,16 +362,17 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: kBackground,
-       builder: (_) => _PreGameSheet(
-         device: device,
-         localApi: PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl),
-       ),
+      builder: (_) => _PreGameSheet(
+        device: device,
+        localApi: PiLocalApi(baseUrl: _piBaseUrl),
+      ),
     );
     if (result == null) return;
 
     setState(() {
       _syncing = true;
       _syncError = null;
+      _piConnectionError = null;
       _gameMode = result.mode;
       _gameUsesBoard = result.useBoard;
       _inGameValidated = result.useBoard; // Board was validated in modal
@@ -386,14 +395,22 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           );
       if (result.useBoard) {
         try {
-          await PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl).startGame();
-        } catch (_) {
+          await PiLocalApi(baseUrl: _piBaseUrl).startGame();
           if (mounted) {
-            setState(() => _syncError = 'Pi game session could not be started.');
+            setState(() => _piConnectionError = null);
           }
+          _fetchLiveFrame();
+          _startAutoDetect();
+        } catch (error) {
+          if (mounted) {
+            setState(() {
+              _piConnectionError =
+                  'Cannot reach the Pi at $_piBaseUrl. Check that the phone and Pi are on the same network and the agent is running.';
+              _gameUsesBoard = false;
+            });
+          }
+          _autoDetectTimer?.cancel();
         }
-        _fetchLiveFrame();
-        _startAutoDetect();
       } else {
         _clearSnapshot();
         _autoDetectTimer?.cancel();
@@ -415,7 +432,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   Future<void> _fetchLiveFrame() async {
     if (_livePreviewLoading) return;
-    final piApi = PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl);
+    final piApi = PiLocalApi(baseUrl: _piBaseUrl);
     setState(() => _livePreviewLoading = true);
     try {
       final frame = CalibrationFrame(
@@ -673,7 +690,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => ManualCalibrationScreen(
-          localApi: PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl),
+          localApi: PiLocalApi(baseUrl: _piBaseUrl),
         ),
       ),
     );
@@ -1124,7 +1141,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     _statusMessage = '$winner won on time!';
     _showGameOverDialog(
       title: '$winner Won on Time!',
-      subtitle: '${timedOutColor == chess.Color.WHITE ? "White" : "Black"} ran out of time.',
+      subtitle:
+          '${timedOutColor == chess.Color.WHITE ? "White" : "Black"} ran out of time.',
     );
   }
 
@@ -1153,14 +1171,14 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   Future<void> _setupLoadModel() async {
     await _runSetupStep(() async {
-      await PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl).loadModel();
+      await PiLocalApi(baseUrl: _piBaseUrl).loadModel();
       setState(() => _setupModelLoaded = true);
     });
   }
 
   Future<void> _setupAutoCalibrate() async {
     await _runSetupStep(() async {
-      await PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl).autoCalibrate();
+      await PiLocalApi(baseUrl: _piBaseUrl).autoCalibrate();
       setState(() {
         _setupCalibrated = true;
         _setupValidated = false;
@@ -1172,7 +1190,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => ManualCalibrationScreen(
-          localApi: PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl),
+          localApi: PiLocalApi(baseUrl: _piBaseUrl),
         ),
       ),
     );
@@ -1187,7 +1205,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   Future<void> _setupValidateBoard() async {
     if (_setupBusy) return;
     await _runSetupStep(() async {
-      final data = await PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl).validateStart();
+      final data = await PiLocalApi(baseUrl: _piBaseUrl).validateStart();
       final valid = data['valid'] == true;
       final detected = data['pieces_detected'] as int? ?? 0;
       final summary = data['summary'] as Map<String, dynamic>? ?? {};
@@ -1200,7 +1218,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       setState(() {
         _setupValidated = valid;
         if (valid) {
-          _setupValidationNote = 'Position valid ✓  ($detected/32 pieces detected)';
+          _setupValidationNote =
+              'Position valid ✓  ($detected/32 pieces detected)';
         } else {
           final parts = <String>[];
           if (missing > 0) parts.add('$missing missing');
@@ -1216,10 +1235,11 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   Future<void> _setupForceValidate() async {
     await _runSetupStep(() async {
-      await PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl).forceValidate();
+      await PiLocalApi(baseUrl: _piBaseUrl).forceValidate();
       setState(() {
         _setupValidated = true;
-        _setupValidationNote = 'Force-validated: Using standard starting position.';
+        _setupValidationNote =
+            'Force-validated: Using standard starting position.';
       });
     });
   }
@@ -1227,7 +1247,9 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   Future<void> _startMatchFromSetup(DeviceModel? device) async {
     final mode = _setupOpponent == _OpponentType.bot
         ? 'human_vs_ai'
-        : (_setupOpponent == _OpponentType.friend ? 'human_vs_human' : 'online');
+        : (_setupOpponent == _OpponentType.friend
+            ? 'human_vs_human'
+            : 'online');
     final useBoard = _setupSurface == _PlaySurface.board;
 
     setState(() {
@@ -1271,10 +1293,11 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
       if (useBoard) {
         try {
-          await PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl).startGame();
+          await PiLocalApi(baseUrl: _piBaseUrl).startGame();
         } catch (_) {
           if (mounted) {
-            setState(() => _syncError = 'Pi game session could not be started.');
+            setState(
+                () => _syncError = 'Pi game session could not be started.');
           }
         }
         _fetchLiveFrame();
@@ -1326,7 +1349,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: kSurfaceContLow,
-        title: Text('Leave Match?', style: GoogleFonts.outfit(fontWeight: FontWeight.w700)),
+        title: Text('Leave Match?',
+            style: GoogleFonts.outfit(fontWeight: FontWeight.w700)),
         content: const Text(
           'Your match progress is preserved. You can resume this match at any time from Match Setup.',
         ),
@@ -1361,7 +1385,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Column(
           children: [
-            const Icon(Icons.emoji_events_rounded, color: Colors.amber, size: 48),
+            const Icon(Icons.emoji_events_rounded,
+                color: Colors.amber, size: 48),
             const SizedBox(height: 8),
             Text(
               title,
@@ -1402,8 +1427,20 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   // ── Captured Pieces Data ──────────────────────────────────────────────────
   _CapturedData _calculateCaptured(chess.Chess game) {
-    final Map<String, int> whiteRemaining = {'p': 0, 'n': 0, 'b': 0, 'r': 0, 'q': 0};
-    final Map<String, int> blackRemaining = {'p': 0, 'n': 0, 'b': 0, 'r': 0, 'q': 0};
+    final Map<String, int> whiteRemaining = {
+      'p': 0,
+      'n': 0,
+      'b': 0,
+      'r': 0,
+      'q': 0
+    };
+    final Map<String, int> blackRemaining = {
+      'p': 0,
+      'n': 0,
+      'b': 0,
+      'r': 0,
+      'q': 0
+    };
 
     for (var file = 0; file < 8; file++) {
       final f = String.fromCharCode('a'.codeUnitAt(0) + file);
@@ -1481,7 +1518,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         sectionBadge: 'MATCH SETUP',
         actions: [
           IconButton(
-            icon: const Icon(Icons.palette_outlined, color: kOnSurface, size: 20),
+            icon:
+                const Icon(Icons.palette_outlined, color: kOnSurface, size: 20),
             tooltip: 'Chessboard Theme',
             onPressed: () => _showBoardThemeSheet(context),
           ),
@@ -1500,7 +1538,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                 color: kPrimary.withValues(alpha: 0.1),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(color: kPrimary.withValues(alpha: 0.35), width: 1.5),
+                  side: BorderSide(
+                      color: kPrimary.withValues(alpha: 0.35), width: 1.5),
                 ),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(16),
@@ -1516,7 +1555,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                             color: kPrimary,
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 28),
+                          child: const Icon(Icons.play_arrow_rounded,
+                              color: Colors.white, size: 28),
                         ),
                         const SizedBox(width: 14),
                         Expanded(
@@ -1543,7 +1583,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                             ],
                           ),
                         ),
-                        const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: kPrimary),
+                        const Icon(Icons.arrow_forward_ios_rounded,
+                            size: 16, color: kPrimary),
                       ],
                     ),
                   ),
@@ -1578,7 +1619,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                     subtitle: 'Play AI Bot',
                     icon: Icons.smart_toy_outlined,
                     isSelected: _setupOpponent == _OpponentType.bot,
-                    onTap: () => setState(() => _setupOpponent = _OpponentType.bot),
+                    onTap: () =>
+                        setState(() => _setupOpponent = _OpponentType.bot),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -1588,7 +1630,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                     subtitle: '2 Players',
                     icon: Icons.people_outline,
                     isSelected: _setupOpponent == _OpponentType.friend,
-                    onTap: () => setState(() => _setupOpponent = _OpponentType.friend),
+                    onTap: () =>
+                        setState(() => _setupOpponent = _OpponentType.friend),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -1598,7 +1641,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                     subtitle: 'Multiplayer',
                     icon: Icons.public,
                     isSelected: _setupOpponent == _OpponentType.online,
-                    onTap: () => setState(() => _setupOpponent = _OpponentType.online),
+                    onTap: () =>
+                        setState(() => _setupOpponent = _OpponentType.online),
                   ),
                 ),
               ],
@@ -1607,7 +1651,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
             // If vs Computer: Bot Difficulty
             if (_setupOpponent == _OpponentType.bot) ...[
               const SizedBox(height: 18),
-              _buildSectionHeader('BOT DIFFICULTY (ELO)', Icons.psychology_outlined),
+              _buildSectionHeader(
+                  'BOT DIFFICULTY (ELO)', Icons.psychology_outlined),
               const SizedBox(height: 10),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -1616,13 +1661,17 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                   children: [
                     _buildDifficultyChip(level: 1, label: 'Novice', elo: '800'),
                     const SizedBox(width: 8),
-                    _buildDifficultyChip(level: 3, label: 'Casual', elo: '1200'),
+                    _buildDifficultyChip(
+                        level: 3, label: 'Casual', elo: '1200'),
                     const SizedBox(width: 8),
-                    _buildDifficultyChip(level: 5, label: 'Intermediate', elo: '1500'),
+                    _buildDifficultyChip(
+                        level: 5, label: 'Intermediate', elo: '1500'),
                     const SizedBox(width: 8),
-                    _buildDifficultyChip(level: 8, label: 'Advanced', elo: '1800'),
+                    _buildDifficultyChip(
+                        level: 8, label: 'Advanced', elo: '1800'),
                     const SizedBox(width: 8),
-                    _buildDifficultyChip(level: 10, label: 'Grandmaster', elo: '2200'),
+                    _buildDifficultyChip(
+                        level: 10, label: 'Grandmaster', elo: '2200'),
                   ],
                 ),
               ),
@@ -1694,7 +1743,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
             const SizedBox(height: 18),
             // Section 4: Playing Surface
-            _buildSectionHeader('PLAYING SURFACE', Icons.sports_kabaddi_outlined),
+            _buildSectionHeader(
+                'PLAYING SURFACE', Icons.sports_kabaddi_outlined),
             const SizedBox(height: 10),
             Row(
               children: [
@@ -1704,7 +1754,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                     subtitle: 'Digital App Play',
                     icon: Icons.smartphone_rounded,
                     isSelected: _setupSurface == _PlaySurface.app,
-                    onTap: () => setState(() => _setupSurface = _PlaySurface.app),
+                    onTap: () =>
+                        setState(() => _setupSurface = _PlaySurface.app),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -1714,7 +1765,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                     subtitle: 'Physical Robotic Board',
                     icon: Icons.grid_on_rounded,
                     isSelected: _setupSurface == _PlaySurface.board,
-                    onTap: () => setState(() => _setupSurface = _PlaySurface.board),
+                    onTap: () =>
+                        setState(() => _setupSurface = _PlaySurface.board),
                   ),
                 ),
               ],
@@ -1732,11 +1784,13 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
               width: double.infinity,
               height: 52,
               child: ElevatedButton(
-                onPressed: _syncing ? null : () => _startMatchFromSetup(activeDevice),
+                onPressed:
+                    _syncing ? null : () => _startMatchFromSetup(activeDevice),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: kPrimary,
                   foregroundColor: kOnPrimary,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
                   elevation: 4,
                   shadowColor: kPrimary.withValues(alpha: 0.4),
                 ),
@@ -1744,7 +1798,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                     ? const SizedBox(
                         width: 24,
                         height: 24,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2.5),
                       )
                     : Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -1809,7 +1864,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
         side: BorderSide(
-          color: isSelected ? kPrimary : kOutlineVariant.withValues(alpha: 0.15),
+          color:
+              isSelected ? kPrimary : kOutlineVariant.withValues(alpha: 0.15),
           width: isSelected ? 2 : 1,
         ),
       ),
@@ -1821,7 +1877,10 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: iconColor ?? (isSelected ? kPrimary : kOnSurfaceVariant), size: 24),
+              Icon(icon,
+                  color:
+                      iconColor ?? (isSelected ? kPrimary : kOnSurfaceVariant),
+                  size: 24),
               const SizedBox(height: 6),
               Text(
                 title,
@@ -1847,7 +1906,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     );
   }
 
-  Widget _buildDifficultyChip({required int level, required String label, required String elo}) {
+  Widget _buildDifficultyChip(
+      {required int level, required String label, required String elo}) {
     final isSelected = _setupDifficulty == level;
     return Material(
       color: isSelected ? kPrimary : kSurfaceContLow,
@@ -1927,7 +1987,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     );
   }
 
-  Widget _buildBoardSetupWizard(BuildContext context, DeviceModel? activeDevice) {
+  Widget _buildBoardSetupWizard(
+      BuildContext context, DeviceModel? activeDevice) {
     final isLinked = activeDevice != null;
 
     return Container(
@@ -1948,7 +2009,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                   color: kPrimary.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.checklist_rounded, color: kPrimary, size: 20),
+                child: const Icon(Icons.checklist_rounded,
+                    color: kPrimary, size: 20),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -1966,7 +2028,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                     ),
                     Text(
                       'Complete hardware readiness before launching match',
-                      style: GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant),
+                      style: GoogleFonts.inter(
+                          fontSize: 11, color: kOnSurfaceVariant),
                     ),
                   ],
                 ),
@@ -2047,8 +2110,13 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                       ),
                       child: Center(
                         child: _setupValidated
-                            ? const Icon(Icons.check, size: 14, color: Colors.white)
-                            : Text('4', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w800, color: kOnSurfaceVariant)),
+                            ? const Icon(Icons.check,
+                                size: 14, color: Colors.white)
+                            : Text('4',
+                                style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    color: kOnSurfaceVariant)),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -2066,7 +2134,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                           ),
                           Text(
                             'Place all 32 pieces in standard starting squares (ranks 1-2 & 7-8).',
-                            style: GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant),
+                            style: GoogleFonts.inter(
+                                fontSize: 11, color: kOnSurfaceVariant),
                           ),
                         ],
                       ),
@@ -2077,11 +2146,19 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                 Row(
                   children: [
                     OutlinedButton.icon(
-                      onPressed: () => setState(() => _setupShowCamera = !_setupShowCamera),
-                      icon: Icon(_setupShowCamera ? Icons.videocam_off_outlined : Icons.videocam_outlined, size: 16),
-                      label: Text(_setupShowCamera ? 'HIDE CAM' : 'PREVIEW CAM', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700)),
+                      onPressed: () =>
+                          setState(() => _setupShowCamera = !_setupShowCamera),
+                      icon: Icon(
+                          _setupShowCamera
+                              ? Icons.videocam_off_outlined
+                              : Icons.videocam_outlined,
+                          size: 16),
+                      label: Text(_setupShowCamera ? 'HIDE CAM' : 'PREVIEW CAM',
+                          style: GoogleFonts.inter(
+                              fontSize: 10, fontWeight: FontWeight.w700)),
                       style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
                         minimumSize: Size.zero,
                       ),
                     ),
@@ -2090,12 +2167,20 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                       child: FilledButton.icon(
                         onPressed: _setupBusy ? null : _setupValidateBoard,
                         icon: _setupBusy
-                            ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                            : const Icon(Icons.center_focus_strong_rounded, size: 16),
-                        label: Text('VERIFY PIECES', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700)),
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                    color: Colors.white, strokeWidth: 2))
+                            : const Icon(Icons.center_focus_strong_rounded,
+                                size: 16),
+                        label: Text('VERIFY PIECES',
+                            style: GoogleFonts.inter(
+                                fontSize: 10, fontWeight: FontWeight.w700)),
                         style: FilledButton.styleFrom(
                           backgroundColor: kPrimary,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
                           minimumSize: Size.zero,
                         ),
                       ),
@@ -2110,7 +2195,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                       height: 160,
                       width: double.infinity,
                       child: PiLiveCameraView(
-                        baseUrl: AppConfig.piLocalApiBaseUrl,
+                        baseUrl: _piBaseUrl,
                       ),
                     ),
                   ),
@@ -2174,7 +2259,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
               ),
               child: Text(
                 _setupError!,
-                style: GoogleFonts.inter(fontSize: 11, color: kError, fontWeight: FontWeight.w600),
+                style: GoogleFonts.inter(
+                    fontSize: 11, color: kError, fontWeight: FontWeight.w600),
               ),
             ),
           ],
@@ -2244,34 +2330,46 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                 ),
                 Text(
                   subtitle,
-                  style: GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant),
+                  style:
+                      GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant),
                 ),
               ],
             ),
           ),
           const SizedBox(width: 8),
-          if (secondaryLabel != null && onSecondaryAction != null && !isComplete) ...[
+          if (secondaryLabel != null &&
+              onSecondaryAction != null &&
+              !isComplete) ...[
             OutlinedButton(
               onPressed: busy ? null : onSecondaryAction,
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 minimumSize: Size.zero,
               ),
-              child: Text(secondaryLabel, style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w700)),
+              child: Text(secondaryLabel,
+                  style: GoogleFonts.inter(
+                      fontSize: 9, fontWeight: FontWeight.w700)),
             ),
             const SizedBox(width: 6),
           ],
           FilledButton(
             onPressed: busy ? null : onAction,
             style: FilledButton.styleFrom(
-              backgroundColor: isComplete ? kPrimary.withValues(alpha: 0.2) : kPrimary,
+              backgroundColor:
+                  isComplete ? kPrimary.withValues(alpha: 0.2) : kPrimary,
               foregroundColor: isComplete ? kPrimary : kOnPrimary,
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               minimumSize: Size.zero,
             ),
             child: busy
-                ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : Text(actionLabel, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w800)),
+                ? const SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
+                : Text(actionLabel,
+                    style: GoogleFonts.inter(
+                        fontSize: 10, fontWeight: FontWeight.w800)),
           ),
         ],
       ),
@@ -2279,7 +2377,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   }
 
   // ── VIEW 2: Chess.com Style Active Game Arena ─────────────────────────────
-  Widget _buildChessComGameScreen(BuildContext context, DeviceModel? activeDevice) {
+  Widget _buildChessComGameScreen(
+      BuildContext context, DeviceModel? activeDevice) {
     final captured = _calculateCaptured(_game);
     final isWhiteTurn = _game.turn == chess.Color.WHITE;
     final profileAsync = ref.watch(userProfileProvider);
@@ -2292,10 +2391,13 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     final topClock = topIsWhite ? _whiteClock : _blackClock;
     final topName = topIsUser
         ? userDisplayName
-        : (_gameMode == 'human_vs_ai' ? 'RoboBot (Level $_setupDifficulty)' : 'Opponent');
+        : (_gameMode == 'human_vs_ai'
+            ? 'RoboBot (Level $_setupDifficulty)'
+            : 'Opponent');
     final topRating = topIsUser ? '1200' : '${700 + _setupDifficulty * 150}';
     final topCaptured = topIsWhite ? captured.blackLost : captured.whiteLost;
-    final topAdvantage = topIsWhite ? captured.whiteAdvantage : captured.blackAdvantage;
+    final topAdvantage =
+        topIsWhite ? captured.whiteAdvantage : captured.blackAdvantage;
 
     // Bottom player is White if not flipped, Black if flipped
     final bottomIsUser = true;
@@ -2304,10 +2406,15 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     final bottomClock = bottomIsWhite ? _whiteClock : _blackClock;
     final bottomName = bottomIsUser
         ? userDisplayName
-        : (_gameMode == 'human_vs_ai' ? 'RoboBot (Level $_setupDifficulty)' : 'Opponent');
-    final bottomRating = bottomIsUser ? '1200' : '${700 + _setupDifficulty * 150}';
-    final bottomCaptured = bottomIsWhite ? captured.blackLost : captured.whiteLost;
-    final bottomAdvantage = bottomIsWhite ? captured.whiteAdvantage : captured.blackAdvantage;
+        : (_gameMode == 'human_vs_ai'
+            ? 'RoboBot (Level $_setupDifficulty)'
+            : 'Opponent');
+    final bottomRating =
+        bottomIsUser ? '1200' : '${700 + _setupDifficulty * 150}';
+    final bottomCaptured =
+        bottomIsWhite ? captured.blackLost : captured.whiteLost;
+    final bottomAdvantage =
+        bottomIsWhite ? captured.whiteAdvantage : captured.blackAdvantage;
 
     return Scaffold(
       backgroundColor: kBackground,
@@ -2322,17 +2429,20 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
             : (_gameMode == 'human_vs_human' ? 'PASS & PLAY' : 'ONLINE MATCH'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.palette_outlined, color: kOnSurface, size: 20),
+            icon:
+                const Icon(Icons.palette_outlined, color: kOnSurface, size: 20),
             tooltip: 'Chessboard Theme',
             onPressed: () => _showBoardThemeSheet(context),
           ),
           IconButton(
-            icon: const Icon(Icons.sync_alt_rounded, color: kOnSurface, size: 20),
+            icon:
+                const Icon(Icons.sync_alt_rounded, color: kOnSurface, size: 20),
             tooltip: 'Flip Board',
             onPressed: () => setState(() => _boardFlipped = !_boardFlipped),
           ),
           IconButton(
-            icon: const Icon(Icons.settings_outlined, color: kOnSurface, size: 20),
+            icon: const Icon(Icons.settings_outlined,
+                color: kOnSurface, size: 20),
             tooltip: 'Match Settings',
             onPressed: _confirmExitToSetup,
           ),
@@ -2345,11 +2455,66 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           padding: const EdgeInsets.fromLTRB(14, 6, 14, 80),
           child: Column(
             children: [
+              if (_piConnectionError != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  margin: const EdgeInsets.only(bottom: 10),
+                  decoration: BoxDecoration(
+                    color: kError.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: kError.withValues(alpha: 0.35)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.wifi_off_rounded,
+                              color: kError, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Pi board unavailable',
+                              style: GoogleFonts.outfit(
+                                fontWeight: FontWeight.w800,
+                                color: kError,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '$_piConnectionError\nCheck the Pi agent and local network, then retry.',
+                        style: GoogleFonts.inter(
+                            fontSize: 11, color: kOnSurfaceVariant),
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: _fetchLiveFrame,
+                            icon: const Icon(Icons.refresh, size: 16),
+                            label: const Text('Retry connection'),
+                          ),
+                          TextButton(
+                            onPressed: () => context.go('/connect'),
+                            child: const Text('Open board setup'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
               // Check or Sync Warning Banner
               if (_statusMessage.contains('Check') || _syncError != null)
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                   margin: const EdgeInsets.only(bottom: 8),
                   decoration: BoxDecoration(
                     color: _syncError != null
@@ -2393,7 +2558,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                       top: 12,
                       right: 12,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: Colors.black87,
                           borderRadius: BorderRadius.circular(6),
@@ -2402,9 +2568,19 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Container(width: 6, height: 6, decoration: const BoxDecoration(color: Colors.greenAccent, shape: BoxShape.circle)),
+                            Container(
+                                width: 6,
+                                height: 6,
+                                decoration: const BoxDecoration(
+                                    color: Colors.greenAccent,
+                                    shape: BoxShape.circle)),
                             const SizedBox(width: 6),
-                            Text('BOARD SYNCED', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: 1)),
+                            Text('BOARD SYNCED',
+                                style: GoogleFonts.inter(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                    letterSpacing: 1)),
                           ],
                         ),
                       ),
@@ -2457,7 +2633,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                 selectedMicId: _selectedMicId,
                 micDevicesLoading: _micDevicesLoading,
                 micDropdownOpen: _micDropdownOpen,
-                onToggle: () => setState(() => _voiceExpanded = !_voiceExpanded),
+                onToggle: () =>
+                    setState(() => _voiceExpanded = !_voiceExpanded),
                 onMicToggle: _onMicToggle,
                 onRefreshMics: _loadMicDevices,
                 onMicSelected: _selectMicDevice,
@@ -2495,7 +2672,9 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         color: isTurn ? kPrimary.withValues(alpha: 0.07) : kSurfaceContLow,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isTurn ? kPrimary.withValues(alpha: 0.6) : kOutlineVariant.withValues(alpha: 0.15),
+          color: isTurn
+              ? kPrimary.withValues(alpha: 0.6)
+              : kOutlineVariant.withValues(alpha: 0.15),
           width: isTurn ? 1.5 : 1,
         ),
       ),
@@ -2512,7 +2691,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: kSecondary.withValues(alpha: 0.3)),
               ),
-              child: const Icon(Icons.smart_toy_rounded, color: kSecondary, size: 20),
+              child: const Icon(Icons.smart_toy_rounded,
+                  color: kSecondary, size: 20),
             )
           else
             Container(
@@ -2547,7 +2727,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                     ),
                     const SizedBox(width: 6),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 1.5),
                       decoration: BoxDecoration(
                         color: kSurfaceContHighest,
                         borderRadius: BorderRadius.circular(4),
@@ -2568,7 +2749,9 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                   children: [
                     if (capturedPieces.isNotEmpty)
                       Text(
-                        capturedPieces.map((p) => _pieceGlyph(p, isWhitePieceColor)).join(' '),
+                        capturedPieces
+                            .map((p) => _pieceGlyph(p, isWhitePieceColor))
+                            .join(' '),
                         style: const TextStyle(fontSize: 13, height: 1.1),
                       )
                     else
@@ -2601,10 +2784,13 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
-              color: isTurn ? kPrimary.withValues(alpha: 0.18) : kSurfaceContHighest.withValues(alpha: 0.5),
+              color: isTurn
+                  ? kPrimary.withValues(alpha: 0.18)
+                  : kSurfaceContHighest.withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: isTurn ? kPrimary : kOutlineVariant.withValues(alpha: 0.2),
+                color:
+                    isTurn ? kPrimary : kOutlineVariant.withValues(alpha: 0.2),
                 width: isTurn ? 1.5 : 1,
               ),
               boxShadow: isTurn
@@ -2644,7 +2830,10 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         child: Center(
           child: Text(
             'Make your first move to begin',
-            style: GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant, fontStyle: FontStyle.italic),
+            style: GoogleFonts.inter(
+                fontSize: 12,
+                color: kOnSurfaceVariant,
+                fontStyle: FontStyle.italic),
           ),
         ),
       );
@@ -2681,7 +2870,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                       ),
                       const SizedBox(width: 3),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: isLast && move[2] == null
                               ? kPrimary.withValues(alpha: 0.15)
@@ -2693,16 +2883,21 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                           style: GoogleFonts.inter(
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
-                            color: isLast && move[2] == null ? kPrimary : kOnSurface,
+                            color: isLast && move[2] == null
+                                ? kPrimary
+                                : kOnSurface,
                           ),
                         ),
                       ),
                       if (move[2] != null) ...[
                         const SizedBox(width: 3),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: isLast ? kPrimary.withValues(alpha: 0.15) : Colors.transparent,
+                            color: isLast
+                                ? kPrimary.withValues(alpha: 0.15)
+                                : Colors.transparent,
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
@@ -2750,7 +2945,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
             icon: Icons.flag_outlined,
             label: 'Resign',
             color: kError,
-            onTap: _game.game_over || _linkedGameId == null ? null : _resignGame,
+            onTap:
+                _game.game_over || _linkedGameId == null ? null : _resignGame,
           ),
           if (canOfferDraw)
             _buildToolbarItem(
@@ -2813,7 +3009,9 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: onTap == null ? color.withValues(alpha: 0.3) : color, size: 20),
+            Icon(icon,
+                color: onTap == null ? color.withValues(alpha: 0.3) : color,
+                size: 20),
             const SizedBox(height: 3),
             Text(
               label,
@@ -2842,7 +3040,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           PiLiveCameraView(
-            baseUrl: AppConfig.piLocalApiBaseUrl,
+            baseUrl: _piBaseUrl,
             onCalibrate: _manualPiCalibrate,
           ),
           const SizedBox(height: 12),
@@ -3018,136 +3216,153 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   // ── Interactive board builder ──
   Widget _buildChessBoard(BuildContext context) {
-    final isHumanTurn = _gameMode != 'human_vs_ai' || _game.turn == _humanColor();
+    final isHumanTurn =
+        _gameMode != 'human_vs_ai' || _game.turn == _humanColor();
     final inputEnabled = !_gameUsesBoard && !_game.game_over && isHumanTurn;
     final boardTheme = ref.watch(boardThemeProvider);
-    return AspectRatio(
-      aspectRatio: 1,
-      child: Container(
-        decoration: BoxDecoration(
-          color: boardTheme.frameColor,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: kWoodBrassAccent.withOpacity(0.4),
-            width: 2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF4A2E1B).withOpacity(0.22),
-              blurRadius: 24,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        padding: const EdgeInsets.all(8),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: GridView.builder(
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 8),
-            itemCount: 64,
-            itemBuilder: (_, idx) {
-              final row = idx ~/ 8;
-              final col = idx % 8;
-              final squareName = _squareName(row, col);
-              final isLight = (row + col) % 2 == 0;
-              final piece = _game.get(squareName);
-
-              // Highlighting
-              final isSelected = inputEnabled && squareName == _selectedSquare;
-              final isLegalDest =
-                  inputEnabled && _legalDestinations.contains(squareName);
-              final isLastMove =
-                  squareName == _lastMoveFrom || squareName == _lastMoveTo;
-
-              final displayRow = _boardFlipped ? 7 - row : row;
-              final displayCol = _boardFlipped ? 7 - col : col;
-
-              Color bgColor;
-              if (isSelected) {
-                bgColor = kPrimaryContainer.withOpacity(0.45);
-              } else if (isLastMove) {
-                bgColor = kPrimaryContainer.withOpacity(0.22);
-              } else {
-                bgColor = isLight ? boardTheme.lightSquare : boardTheme.darkSquare;
-              }
-
-              return GestureDetector(
-                onTap: inputEnabled ? () => _onSquareTap(row, col) : null,
-                child: Container(
-                  decoration: BoxDecoration(color: bgColor),
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      // Legal move dot
-                      if (isLegalDest && piece == null)
-                        Container(
-                          width: 12,
-                          height: 12,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: kPrimary.withOpacity(0.55),
-                          ),
-                        ),
-                      // Legal capture ring
-                      if (isLegalDest && piece != null)
-                        Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                                color: kPrimary, width: 3),
-                          ),
-                        ),
-                      // Piece
-                      if (piece != null)
-                        Padding(
-                          padding: const EdgeInsets.all(3.0),
-                          child: ChessPieceWidget.fromPiece(
-                            piece: piece,
-                          ),
-                        ),
-                      // Rank/file labels
-                      if (col == 0)
-                        Positioned(
-                          top: 2,
-                          left: 3,
-                          child: Text(
-                            '${8 - displayRow}',
-                            style: TextStyle(
-                              fontSize: 8,
-                              fontWeight: FontWeight.w800,
-                              color: isLight
-                                  ? boardTheme.darkSquare.withValues(alpha: 0.85)
-                                  : boardTheme.lightSquare.withValues(alpha: 0.85),
-                            ),
-                          ),
-                        ),
-                      if (row == 7)
-                        Positioned(
-                          bottom: 2,
-                          right: 3,
-                          child: Text(
-                            String.fromCharCode('a'.codeUnitAt(0) + displayCol),
-                            style: TextStyle(
-                              fontSize: 8,
-                              fontWeight: FontWeight.w800,
-                              color: isLight
-                                  ? boardTheme.darkSquare.withValues(alpha: 0.85)
-                                  : boardTheme.lightSquare.withValues(alpha: 0.85),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final boardSize = constraints.maxWidth.isFinite
+            ? constraints.maxWidth.clamp(0.0, 560.0).toDouble()
+            : 560.0;
+        return Center(
+          child: SizedBox.square(
+            dimension: boardSize,
+            child: Container(
+              decoration: BoxDecoration(
+                color: boardTheme.frameColor,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: kWoodBrassAccent.withOpacity(0.4),
+                  width: 2,
                 ),
-              );
-            },
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF4A2E1B).withOpacity(0.22),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              padding: const EdgeInsets.all(8),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: GridView.builder(
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 8),
+                  itemCount: 64,
+                  itemBuilder: (_, idx) {
+                    final row = idx ~/ 8;
+                    final col = idx % 8;
+                    final squareName = _squareName(row, col);
+                    final isLight = (row + col) % 2 == 0;
+                    final piece = _game.get(squareName);
+
+                    // Highlighting
+                    final isSelected =
+                        inputEnabled && squareName == _selectedSquare;
+                    final isLegalDest =
+                        inputEnabled && _legalDestinations.contains(squareName);
+                    final isLastMove = squareName == _lastMoveFrom ||
+                        squareName == _lastMoveTo;
+
+                    final displayRow = _boardFlipped ? 7 - row : row;
+                    final displayCol = _boardFlipped ? 7 - col : col;
+
+                    Color bgColor;
+                    if (isSelected) {
+                      bgColor = kPrimaryContainer.withOpacity(0.45);
+                    } else if (isLastMove) {
+                      bgColor = kPrimaryContainer.withOpacity(0.22);
+                    } else {
+                      bgColor = isLight
+                          ? boardTheme.lightSquare
+                          : boardTheme.darkSquare;
+                    }
+
+                    return GestureDetector(
+                      onTap: inputEnabled ? () => _onSquareTap(row, col) : null,
+                      child: Container(
+                        decoration: BoxDecoration(color: bgColor),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            // Legal move dot
+                            if (isLegalDest && piece == null)
+                              Container(
+                                width: 12,
+                                height: 12,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: kPrimary.withOpacity(0.55),
+                                ),
+                              ),
+                            // Legal capture ring
+                            if (isLegalDest && piece != null)
+                              Container(
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: kPrimary, width: 3),
+                                ),
+                              ),
+                            // Piece
+                            if (piece != null)
+                              Padding(
+                                padding: const EdgeInsets.all(3.0),
+                                child: ChessPieceWidget.fromPiece(
+                                  piece: piece,
+                                ),
+                              ),
+                            // Rank/file labels
+                            if (col == 0)
+                              Positioned(
+                                top: 2,
+                                left: 3,
+                                child: Text(
+                                  '${8 - displayRow}',
+                                  style: TextStyle(
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.w800,
+                                    color: isLight
+                                        ? boardTheme.darkSquare
+                                            .withValues(alpha: 0.85)
+                                        : boardTheme.lightSquare
+                                            .withValues(alpha: 0.85),
+                                  ),
+                                ),
+                              ),
+                            if (row == 7)
+                              Positioned(
+                                bottom: 2,
+                                right: 3,
+                                child: Text(
+                                  String.fromCharCode(
+                                      'a'.codeUnitAt(0) + displayCol),
+                                  style: TextStyle(
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.w800,
+                                    color: isLight
+                                        ? boardTheme.darkSquare
+                                            .withValues(alpha: 0.85)
+                                        : boardTheme.lightSquare
+                                            .withValues(alpha: 0.85),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -3166,7 +3381,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
             return SafeArea(
               child: SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -3183,7 +3399,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.close, size: 20, color: kOnSurfaceVariant),
+                          icon: const Icon(Icons.close,
+                              size: 20, color: kOnSurfaceVariant),
                           onPressed: () => Navigator.pop(ctx),
                         ),
                       ],
@@ -3194,7 +3411,9 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 10),
                         child: Material(
-                          color: isSelected ? kPrimary.withValues(alpha: 0.08) : kSurfaceContLow,
+                          color: isSelected
+                              ? kPrimary.withValues(alpha: 0.08)
+                              : kSurfaceContLow,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),
                             side: BorderSide(
@@ -3205,11 +3424,14 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                           child: InkWell(
                             borderRadius: BorderRadius.circular(14),
                             onTap: () {
-                              ref.read(boardThemeProvider.notifier).setTheme(theme);
+                              ref
+                                  .read(boardThemeProvider.notifier)
+                                  .setTheme(theme);
                               Navigator.pop(ctx);
                             },
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 12),
                               child: Row(
                                 children: [
                                   Container(
@@ -3217,7 +3439,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                                     height: 38,
                                     decoration: BoxDecoration(
                                       borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: theme.frameColor, width: 2),
+                                      border: Border.all(
+                                          color: theme.frameColor, width: 2),
                                     ),
                                     child: ClipRRect(
                                       borderRadius: BorderRadius.circular(6),
@@ -3226,16 +3449,28 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                                           Expanded(
                                             child: Column(
                                               children: [
-                                                Expanded(child: Container(color: theme.lightSquare)),
-                                                Expanded(child: Container(color: theme.darkSquare)),
+                                                Expanded(
+                                                    child: Container(
+                                                        color:
+                                                            theme.lightSquare)),
+                                                Expanded(
+                                                    child: Container(
+                                                        color:
+                                                            theme.darkSquare)),
                                               ],
                                             ),
                                           ),
                                           Expanded(
                                             child: Column(
                                               children: [
-                                                Expanded(child: Container(color: theme.darkSquare)),
-                                                Expanded(child: Container(color: theme.lightSquare)),
+                                                Expanded(
+                                                    child: Container(
+                                                        color:
+                                                            theme.darkSquare)),
+                                                Expanded(
+                                                    child: Container(
+                                                        color:
+                                                            theme.lightSquare)),
                                               ],
                                             ),
                                           ),
@@ -3246,7 +3481,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                                   const SizedBox(width: 14),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           theme.name,
@@ -3267,7 +3503,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                                     ),
                                   ),
                                   if (isSelected)
-                                    const Icon(Icons.check_circle_rounded, color: kPrimary, size: 22),
+                                    const Icon(Icons.check_circle_rounded,
+                                        color: kPrimary, size: 22),
                                 ],
                               ),
                             ),
@@ -3438,7 +3675,9 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
     } on ApiException catch (err) {
       setState(() => _error = err.message);
     } catch (err) {
-      setState(() => _error = 'Step failed. Check backend connection.');
+      if (!mounted) return;
+      setState(() => _error =
+          'Pi setup failed at ${widget.localApi.baseUrl}. Check the Pi agent and network connection.');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -4386,10 +4625,7 @@ class _GameControls extends StatelessWidget {
           onTap: onAnalyze),
       const SizedBox(width: 12),
       _ControlBtn(
-          icon: Icons.flag,
-          label: 'Resign',
-          color: kError,
-          onTap: onResign),
+          icon: Icons.flag, label: 'Resign', color: kError, onTap: onResign),
       const SizedBox(width: 12),
       _ControlBtn(
         icon: Icons.handshake,

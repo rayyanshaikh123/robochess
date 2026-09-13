@@ -6,7 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// [TokenStore] key (`access_token`, `refresh_token`, `user_id`,
 /// `selected_device_id`).
 class ServerConfigStore {
-  static const baseUrlKey = 'server_base_url';
+  static const baseUrlKey = 'server_base_url_v2';
 
   final FlutterSecureStorage _storage;
 

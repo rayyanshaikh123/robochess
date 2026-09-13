@@ -41,9 +41,7 @@ GoRouter _buildRouter(WidgetRef ref, {String? initialLocation}) {
     navigatorKey: _rootNavigatorKey,
     redirect: (context, state) {
       final sessionState = ref.read(sessionProvider);
-      final session = sessionState.valueOrNull;
       final location = state.matchedLocation;
-      final isAuthenticated = session != null;
       final isSplash = location == '/splash';
       final isPublic = location == '/login' ||
           location == '/register' ||
@@ -51,6 +49,11 @@ GoRouter _buildRouter(WidgetRef ref, {String? initialLocation}) {
           location == '/local';
       final isAuthScreen = location == '/login' || location == '/register';
 
+      if (!sessionState.hasValue) {
+        return isPublic || isSplash ? null : '/login';
+      }
+
+      final isAuthenticated = sessionState.valueOrNull != null;
       if (!isAuthenticated && !isPublic && !isSplash) {
         return '/login';
       }
@@ -65,7 +68,15 @@ GoRouter _buildRouter(WidgetRef ref, {String? initialLocation}) {
       GoRoute(path: '/login', builder: (c, s) => const LoginScreen()),
       GoRoute(path: '/register', builder: (c, s) => const RegisterScreen()),
       GoRoute(path: '/local', builder: (c, s) => const LocalBoardScreen()),
-      GoRoute(path: '/profile', builder: (c, s) => const ProfileSettings()),
+      GoRoute(
+        path: '/profile',
+        redirect: (context, state) {
+          final sessionState = ref.read(sessionProvider);
+          if (!sessionState.hasValue) return '/splash';
+          return sessionState.valueOrNull == null ? '/login' : null;
+        },
+        builder: (c, s) => const ProfileSettings(),
+      ),
       StatefulShellRoute.indexedStack(
         builder: (c, s, shell) => MainScaffold(navigationShell: shell),
         branches: [

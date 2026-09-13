@@ -23,11 +23,19 @@ class TokenStore {
     final accessToken = await _storage.read(key: _accessKey);
     final refreshToken = await _storage.read(key: _refreshKey);
     final userId = await _storage.read(key: _userIdKey);
-    if (accessToken == null || refreshToken == null || userId == null) {
+    if (accessToken == null ||
+        refreshToken == null ||
+        userId == null ||
+        accessToken.trim().isEmpty ||
+        refreshToken.trim().isEmpty ||
+        userId.trim().isEmpty) {
       return null;
     }
     return AuthSession(
-        userId: userId, accessToken: accessToken, refreshToken: refreshToken);
+      userId: userId,
+      accessToken: accessToken,
+      refreshToken: refreshToken,
+    );
   }
 
   Future<void> clear() async {

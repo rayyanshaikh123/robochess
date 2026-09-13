@@ -42,6 +42,27 @@ If you encounter the following errors on iOS device:
    - `ios/Runner/Info.plist` - Added UIApplicationSceneManifest configuration
    - `ios/Runner/SceneDelegate.swift` - Handles UIScene lifecycle callbacks
 
+### Backend network configuration
+The backend must listen on all interfaces so a phone on the same Wi-Fi or hotspot can reach it:
+
+```bash
+cd backend
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+Find the computer's LAN address and run Flutter with that address:
+
+```bash
+# macOS
+ipconfig getifaddr en0
+
+cd frontend
+flutter run -d <device_id> \
+  --dart-define=API_BASE_URL=http://<computer-lan-ip>:8000
+```
+
+The app derives WebSocket traffic from `API_BASE_URL`. If the network changes, open the login screen's server configuration control and enter the new URL, for example `http://172.20.10.3:8000`. Do not use `localhost` or `127.0.0.1` on a physical phone; those point to the phone itself.
+
 ### Bluetooth & Permissions
 Ensure your iOS device grants Bluetooth permissions when prompted. Update permissions in `Info.plist` if needed:
 - `NSBluetoothAlwaysUsageDescription` - Required for BLE connection to physical chess board

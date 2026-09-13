@@ -6,14 +6,14 @@ class AppConfig {
 
   static const apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    // Current Mac address on the RoboChess/iPhone local network. Override
-    // with --dart-define=API_BASE_URL=... when the network changes.
-    defaultValue: 'http://192.168.0.107:8000',
+    // Current RoboChess hotspot/LAN backend address. Override with
+    // --dart-define=API_BASE_URL=http://<host-ip>:8000 when the network changes.
+    defaultValue: 'http://172.20.10.3:8000',
   );
 
   static const wsBaseUrl = String.fromEnvironment(
     'WS_BASE_URL',
-    defaultValue: 'ws://192.168.0.107:8000/ws',
+    defaultValue: '',
   );
 
   static const apiTimeoutSeconds = int.fromEnvironment(

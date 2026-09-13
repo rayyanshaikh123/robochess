@@ -3,7 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:robochess_mobile/main.dart';
 
 void main() {
-  testWidgets('app opens splash screen by default with branding', (tester) async {
+  testWidgets('app opens splash screen by default with branding',
+      (tester) async {
     await tester.pumpWidget(const ProviderScope(child: RoboChessApp()));
     await tester.pump();
     expect(find.text('ROBOCHESS'), findsOneWidget);
@@ -18,4 +19,14 @@ void main() {
     expect(find.text('Welcome back'), findsOneWidget);
     expect(find.text('PLAY LOCALLY WITHOUT INTERNET'), findsOneWidget);
   });
+
+  for (final route in ['/home', '/play', '/connect', '/profile', '/learn']) {
+    testWidgets('blocks $route for logged-out users', (tester) async {
+      await tester.pumpWidget(ProviderScope(
+        child: RoboChessApp(initialLocation: route),
+      ));
+      await tester.pump(const Duration(seconds: 3));
+      expect(find.text('Welcome back'), findsOneWidget);
+    });
+  }
 }

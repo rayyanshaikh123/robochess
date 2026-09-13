@@ -67,8 +67,8 @@ class ChessBoardView extends ConsumerWidget {
           borderRadius: BorderRadius.circular(8),
           child: GridView.builder(
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate:
-                const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 8),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 8),
             itemCount: 64,
             itemBuilder: (_, idx) {
               final row = idx ~/ 8;
@@ -89,7 +89,8 @@ class ChessBoardView extends ConsumerWidget {
               } else if (isLastMove) {
                 bgColor = kPrimaryContainer.withOpacity(0.22);
               } else {
-                bgColor = isLight ? boardTheme.lightSquare : boardTheme.darkSquare;
+                bgColor =
+                    isLight ? boardTheme.lightSquare : boardTheme.darkSquare;
               }
 
               return GestureDetector(
@@ -116,8 +117,7 @@ class ChessBoardView extends ConsumerWidget {
                           height: 36,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            border: Border.all(
-                                color: kPrimary, width: 3),
+                            border: Border.all(color: kPrimary, width: 3),
                           ),
                         ),
                       if (piece != null)
@@ -137,8 +137,10 @@ class ChessBoardView extends ConsumerWidget {
                               fontSize: 8,
                               fontWeight: FontWeight.w800,
                               color: isLight
-                                  ? boardTheme.darkSquare.withValues(alpha: 0.85)
-                                  : boardTheme.lightSquare.withValues(alpha: 0.85),
+                                  ? boardTheme.darkSquare
+                                      .withValues(alpha: 0.85)
+                                  : boardTheme.lightSquare
+                                      .withValues(alpha: 0.85),
                             ),
                           ),
                         ),
@@ -152,8 +154,10 @@ class ChessBoardView extends ConsumerWidget {
                               fontSize: 8,
                               fontWeight: FontWeight.w800,
                               color: isLight
-                                  ? boardTheme.darkSquare.withValues(alpha: 0.85)
-                                  : boardTheme.lightSquare.withValues(alpha: 0.85),
+                                  ? boardTheme.darkSquare
+                                      .withValues(alpha: 0.85)
+                                  : boardTheme.lightSquare
+                                      .withValues(alpha: 0.85),
                             ),
                           ),
                         ),

@@ -12,7 +12,6 @@ import '../widgets/robo_app_bar.dart';
 import '../providers/board_theme_provider.dart';
 import '../theme/app_colors.dart';
 
-
 class ProfileSettings extends ConsumerStatefulWidget {
   const ProfileSettings({super.key});
 
@@ -57,7 +56,8 @@ class _ProfileSettingsState extends ConsumerState<ProfileSettings> {
             child: const Text('CANCEL'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
             child: const Text('SAVE'),
           ),
         ],
@@ -67,6 +67,7 @@ class _ProfileSettingsState extends ConsumerState<ProfileSettings> {
     if (!mounted || name == null || name.isEmpty || name == currentName) return;
     try {
       await ref.read(userRepositoryProvider).updateProfile(displayName: name);
+      if (!mounted) return;
       ref.invalidate(userProfileProvider);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -251,6 +252,7 @@ class _ProfileSettingsState extends ConsumerState<ProfileSettings> {
                         await ref
                             .read(deviceListProvider.notifier)
                             .unlink(device!.deviceId);
+                        if (!mounted) return;
                         if (selectedDeviceId == device!.deviceId) {
                           await ref
                               .read(selectedDeviceProvider.notifier)
@@ -284,7 +286,8 @@ class _ProfileSettingsState extends ConsumerState<ProfileSettings> {
                     color: kPrimary.withOpacity(0.12),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.explore_rounded, color: kPrimary, size: 20),
+                  child: const Icon(Icons.explore_rounded,
+                      color: kPrimary, size: 20),
                 ),
                 title: Text(
                   'Replay Onboarding Tour',
@@ -301,7 +304,8 @@ class _ProfileSettingsState extends ConsumerState<ProfileSettings> {
                     fontSize: 12,
                   ),
                 ),
-                trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: kOnSurfaceVariant),
+                trailing: const Icon(Icons.arrow_forward_ios_rounded,
+                    size: 14, color: kOnSurfaceVariant),
                 onTap: () => context.push('/onboarding'),
               ),
             ),
@@ -344,101 +348,123 @@ class _BoardThemeSelectorCard extends ConsumerWidget {
                   color: kPrimary.withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.palette_rounded, color: kPrimary, size: 20),
+                child: const Icon(Icons.palette_rounded,
+                    color: kPrimary, size: 20),
               ),
               const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Chessboard Theme',
-                    style: GoogleFonts.outfit(
-                      fontWeight: FontWeight.w700,
-                      color: kOnSurface,
-                      fontSize: 15,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Chessboard Theme',
+                      style: GoogleFonts.outfit(
+                        fontWeight: FontWeight.w700,
+                        color: kOnSurface,
+                        fontSize: 15,
+                      ),
                     ),
-                  ),
-                  Text(
-                    'Choose wooden, tournament green, or slate styles',
-                    style: GoogleFonts.inter(
-                      color: kOnSurfaceVariant,
-                      fontSize: 12,
+                    Text(
+                      'Choose wooden, tournament green, or slate styles',
+                      style: GoogleFonts.inter(
+                        color: kOnSurfaceVariant,
+                        fontSize: 12,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
           const SizedBox(height: 16),
           // 4 Theme Choice Chips / Cards
-          Row(
-            children: kBoardThemes.map((theme) {
-              final isSelected = theme.id == activeTheme.id;
-              return Expanded(
-                child: GestureDetector(
-                  onTap: () {
-                    ref.read(boardThemeProvider.notifier).setTheme(theme);
-                  },
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
-                    decoration: BoxDecoration(
-                      color: isSelected ? kPrimary.withValues(alpha: 0.08) : kSurfaceContLow,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isSelected ? kPrimary : kOutlineVariant,
-                        width: isSelected ? 2 : 1,
-                      ),
-                    ),
-                    child: Column(
-                      children: [
-                        // 2x2 Mini Board Preview
-                        Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: theme.frameColor, width: 2),
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  children: [
-                                    Expanded(child: Container(color: theme.lightSquare)),
-                                    Expanded(child: Container(color: theme.darkSquare)),
-                                  ],
-                                ),
-                              ),
-                              Expanded(
-                                child: Column(
-                                  children: [
-                                    Expanded(child: Container(color: theme.darkSquare)),
-                                    Expanded(child: Container(color: theme.lightSquare)),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
+          LayoutBuilder(
+            builder: (context, constraints) => Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: kBoardThemes.map((theme) {
+                final isSelected = theme.id == activeTheme.id;
+                return SizedBox(
+                  width: (constraints.maxWidth - 8) / 2,
+                  child: GestureDetector(
+                    onTap: () {
+                      ref.read(boardThemeProvider.notifier).setTheme(theme);
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 10, horizontal: 6),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? kPrimary.withValues(alpha: 0.08)
+                            : kSurfaceContLow,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isSelected ? kPrimary : kOutlineVariant,
+                          width: isSelected ? 2 : 1,
                         ),
-                        const SizedBox(height: 8),
-                        FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Text(
-                            theme.name.replaceAll('Tournament ', ''),
-                            style: GoogleFonts.outfit(
-                              fontSize: 11,
-                              fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-                              color: isSelected ? kPrimary : kOnSurface,
+                      ),
+                      child: Column(
+                        children: [
+                          // 2x2 Mini Board Preview
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(6),
+                              border:
+                                  Border.all(color: theme.frameColor, width: 2),
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    children: [
+                                      Expanded(
+                                          child: Container(
+                                              color: theme.lightSquare)),
+                                      Expanded(
+                                          child: Container(
+                                              color: theme.darkSquare)),
+                                    ],
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Column(
+                                    children: [
+                                      Expanded(
+                                          child: Container(
+                                              color: theme.darkSquare)),
+                                      Expanded(
+                                          child: Container(
+                                              color: theme.lightSquare)),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 8),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              theme.name.replaceAll('Tournament ', ''),
+                              style: GoogleFonts.outfit(
+                                fontSize: 11,
+                                fontWeight: isSelected
+                                    ? FontWeight.w800
+                                    : FontWeight.w600,
+                                color: isSelected ? kPrimary : kOnSurface,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              );
-            }).toList(),
+                );
+              }).toList(),
+            ),
           ),
         ],
       ),
