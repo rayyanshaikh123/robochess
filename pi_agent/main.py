@@ -1,4 +1,5 @@
 import time
+import threading
 from pathlib import Path
 
 from pi_agent.api_client import DeviceApiClient
@@ -82,6 +83,19 @@ def main() -> None:
         network_config["backend_available"] = True
         return {"status": "token_claimed", "device": result}
 
+    def claim_pending_token_background() -> None:
+        try:
+            result = claim_pending_token()
+            if result.get("status") == "token_claimed":
+                print("Backend device claim completed", flush=True)
+            else:
+                print(
+                    f"Backend claim pending: {result.get('error', result.get('status'))}",
+                    flush=True,
+                )
+        except Exception as exc:
+            print(f"Backend claim pending: {exc}", flush=True)
+
     def on_control(message: dict) -> dict:
         nonlocal device_id, device_secret
         data = message.get("data") or {}
@@ -95,26 +109,12 @@ def main() -> None:
                 device_id = str(message.get("device_id") or device_id)
                 store.set_credentials(device_id, device_secret)
             store.set_onboarding_token(token)
-            try:
-                result = claim_pending_token()
-                if result.get("status") == "error":
-                    network_state = network.status(
-                        INTERNET_CHECK_ENABLED,
-                        INTERNET_CHECK_URL,
-                        INTERNET_CHECK_TIMEOUT_SECONDS,
-                    )
-                    if not network_state.internet_available:
-                        return {"status": "token_saved"}
-                return result
-            except Exception as exc:
-                network_state = network.status(
-                    INTERNET_CHECK_ENABLED,
-                    INTERNET_CHECK_URL,
-                    INTERNET_CHECK_TIMEOUT_SECONDS,
-                )
-                if not network_state.internet_available:
-                    return {"status": "token_saved"}
-                return {"status": "error", "error": str(exc)}
+            threading.Thread(
+                target=claim_pending_token_background,
+                name="robochess-backend-claim",
+                daemon=True,
+            ).start()
+            return {"status": "token_saved"}
         if message.get("type") == "network.status":
             return {"status": "network_status", "network": network.status(
                 INTERNET_CHECK_ENABLED,

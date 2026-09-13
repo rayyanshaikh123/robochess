@@ -8,3 +8,4 @@
 - Values validation on the target Flutter app with targeted tests, analyzer checks, and a clean restart/rebuild when hot reload may have left a corrupted widget tree. Confidence: 0.9
 - Prefers Pi-to-backend configuration to use the backend machine’s LAN address rather than localhost, so the Pi can reach the backend and linked-board discovery can work. Confidence: 0.95
 - Prefers hardware/vision credentials to remain in the Pi agent’s environment using the exact `ROBOCHESS_*` variable names, never in Flutter or backend configuration; diagnostics should verify secret presence without printing secret values. Confidence: 0.98
+- When synchronizing the Raspberry Pi repository, prefers preserving Pi-local configuration and changes through a non-destructive stash/merge workflow, resolving tracked template conflicts without overwriting real environment files, and verifying a clean working tree afterward. Confidence: 0.92
