@@ -312,7 +312,7 @@ class GattServer:
 
             # BlueZ rejects unauthenticated writes before they reach
             # the Pi.
-            notifying=False,
+            notifying=True,
             flags=[
                 "write",
                 "write-without-response",
@@ -334,7 +334,7 @@ class GattServer:
             chr_id=3,
             uuid=WIFI_UUID,
             value=[],
-            notifying=False,
+            notifying=True,
             flags=[
                 "write",
                 "write-without-response",

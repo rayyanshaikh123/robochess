@@ -72,6 +72,12 @@ class RoboChessBleClient {
   Future<String> connectAndReadDeviceId(BluetoothDevice device) async {
     await device.connect(
         timeout: const Duration(seconds: 15), autoConnect: false);
+    // Request larger MTU for faster chunk transfers if supported.
+    try {
+      await device.requestMtu(517);
+    } catch (_) {
+      // Ignore if MTU request fails; fallback to default.
+    }
     // iOS owns the pairing UI; Android also bonds automatically on the first
     // authenticated write. Do not force a platform-specific bond dialog here.
     _device = device;
@@ -208,14 +214,27 @@ class RoboChessBleClient {
         'Reconnect to the RoboChess board and try again.',
       );
     }
+    // Prefer write with response if available, otherwise use write without response.
     final withoutResponse = !supportsWrite && supportsWriteWithoutResponse;
     final bytes = utf8.encode(jsonEncode(value));
     for (var offset = 0; offset < bytes.length; offset += maxBleChunkBytes) {
       final end = math.min(offset + maxBleChunkBytes, bytes.length);
-      await characteristic.write(
-        bytes.sublist(offset, end),
-        withoutResponse: withoutResponse,
-      );
+      try {
+        await characteristic.write(
+          bytes.sublist(offset, end),
+          withoutResponse: withoutResponse,
+        );
+      } catch (e) {
+        // If the write fails, attempt the opposite mode if possible.
+        if (supportsWrite && supportsWriteWithoutResponse) {
+          await characteristic.write(
+            bytes.sublist(offset, end),
+            withoutResponse: !withoutResponse,
+          );
+        } else {
+          rethrow;
+        }
+      }
       if (withoutResponse && end < bytes.length) {
         // Without-response writes are not flow-controlled by the platform.
         await Future<void>.delayed(const Duration(milliseconds: 15));

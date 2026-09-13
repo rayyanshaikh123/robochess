@@ -79,13 +79,18 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
       _selectedRemoteId = candidate.result.device.remoteId.str;
       if (_needsWifi != true) {
         setState(() => _message = 'Checking the board network...');
-        final networkResponse = _ble.messages
-            .firstWhere(
-              (message) =>
-                  message['type'] == 'control.result' &&
-                  (message['data'] as Map?)?['status'] == 'network_status',
-            )
-            .timeout(const Duration(seconds: 8));
+        final completer = Completer<Map<String, dynamic>>();
+        late final StreamSubscription<Map<String, dynamic>> subscription;
+        subscription = _ble.messages.listen((message) {
+          if (message['type'] == 'control.result' &&
+              (message['data'] as Map?)?['status'] == 'network_status') {
+            if (!completer.isCompleted) {
+              completer.complete(message);
+            }
+            subscription.cancel();
+          }
+        });
+
         await _ble.sendControl({
           'version': bleProtocolVersion,
           'request_id': DateTime.now().microsecondsSinceEpoch.toString(),
@@ -93,7 +98,15 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
           'device_id': deviceId,
           'data': const {},
         });
-        final response = await networkResponse;
+
+        final response = await completer.future.timeout(
+          const Duration(seconds: 15),
+          onTimeout: () {
+            subscription.cancel();
+            throw TimeoutException('Network status check timed out.');
+          },
+        );
+
         final network = Map<String, dynamic>.from(
           ((response['data'] as Map)['network'] as Map?) ?? const {},
         );
@@ -117,12 +130,28 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
       }
       if (_needsWifi == true) {
         setState(() => _message = 'Sending Wi-Fi credentials to the Pi...');
-        final wifiResponse = _ble.messages.firstWhere((message) {
-          if (message['type'] != 'wifi.result') return false;
-          return (message['data'] as Map?)?['status'] != null;
-        }).timeout(const Duration(seconds: 30));
+        final completer = Completer<Map<String, dynamic>>();
+        late final StreamSubscription<Map<String, dynamic>> subscription;
+        subscription = _ble.messages.listen((message) {
+          if (message['type'] == 'wifi.result' &&
+              (message['data'] as Map?)?['status'] != null) {
+            if (!completer.isCompleted) {
+              completer.complete(message);
+            }
+            subscription.cancel();
+          }
+        });
+
         await _ble.sendWifi(deviceId, _ssid.text.trim(), _password.text);
-        final wifi = await wifiResponse;
+
+        final wifi = await completer.future.timeout(
+          const Duration(seconds: 45),
+          onTimeout: () {
+            subscription.cancel();
+            throw TimeoutException('Wi-Fi setup timed out.');
+          },
+        );
+
         final wifiData =
             Map<String, dynamic>.from(wifi['data'] as Map? ?? const {});
         final wifiNetwork = wifiData['network'];
