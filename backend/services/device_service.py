@@ -186,9 +186,10 @@ async def create_onboarding_token(
     if current_user_id and str(current_user_id) != user_id:
         return None, "Device already linked"
 
-    # Rotate credentials for every unlinked device so a failed BLE transfer
-    # can be retried without exposing an existing secret.
-    if device_secret is None and device and not current_user_id:
+    # Rotate credentials on every owner-authorized onboarding retry. The
+    # plaintext secret cannot be recovered from its hash, so returning a fresh
+    # secret is required when an earlier BLE transfer timed out or was lost.
+    if device_secret is None and device:
         device_secret = secrets.token_urlsafe(32)
         await update_device_secret(db, device_id, hash_password(device_secret))
 

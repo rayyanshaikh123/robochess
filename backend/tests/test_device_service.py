@@ -34,6 +34,17 @@ class DeviceBootstrapTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error, "Device already linked")
         rotate.assert_not_awaited()
 
+    async def test_same_owner_retry_rotates_and_returns_a_fresh_secret(self):
+        device = {"device_id": "board-001", "user_id": "user-1"}
+        with patch("backend.services.device_service.get_by_device_id", AsyncMock(return_value=device)), \
+             patch("backend.services.device_service.update_device_secret", AsyncMock()) as rotate, \
+             patch("backend.services.device_service.save_onboarding_token", AsyncMock()):
+            data, error = await create_onboarding_token(None, "user-1", "board-001")
+
+        self.assertIsNone(error)
+        self.assertTrue(data["device_secret"])
+        rotate.assert_awaited_once()
+
     async def test_claim_accepts_naive_database_expiry_and_consumes_token(self):
         token = "onboarding-token"
         device = {

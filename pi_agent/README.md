@@ -132,8 +132,9 @@ added later behind the same Pi recognizer interface.
 
 The app must complete the Pi setup checklist before starting a physical game:
 Pi internet, camera, Roboflow readiness, calibration, starting-position validation,
-and gantry homing. Backend registration and session sync are optional and never
-block the local HTTP service or an already-running local game.
+and gantry homing. Backend registration, device storage, heartbeats, and session
+sync are optional. BLE connection, Wi-Fi provisioning, setup, and local gameplay
+work without a backend account or device secret.
 
 The Pi also starts a local HTTP service on port `8765`. It remains available
 without internet or MongoDB:

@@ -131,9 +131,6 @@ def main() -> None:
             result = network.wait_until_connected()
             if not result.connected:
                 raise NetworkManagerError(result.error or "Wi-Fi connection failed")
-            claim = claim_pending_token()
-            if claim.get("status") == "error":
-                raise NetworkManagerError(claim.get("error", "Cloud linking failed"))
             if api.device_token:
                 api.update_status("wifi_connected", wifi_status="connected")
             return {

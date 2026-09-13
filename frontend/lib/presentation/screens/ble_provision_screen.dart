@@ -8,7 +8,6 @@ import 'package:go_router/go_router.dart';
 import '../../core/ble/robochess_ble.dart';
 import '../providers/device_provider.dart';
 import '../providers/local_board_provider.dart';
-import '../providers/session_provider.dart';
 
 class BleProvisionScreen extends ConsumerStatefulWidget {
   const BleProvisionScreen({super.key});
@@ -139,34 +138,6 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
         await Future<void>.delayed(const Duration(seconds: 2));
       }
       setState(() => _message = 'Connecting to the Pi local setup...');
-      var cloudLinked = false;
-      try {
-        final credentials = await ref
-            .read(deviceRepositoryProvider)
-            .onboardingToken(deviceId: deviceId);
-        if (credentials.deviceSecret != null) {
-          await _ble.disconnect();
-          await _ble.connectAndReadDeviceId(candidate.result.device);
-          final claimResponse = _ble.messages.firstWhere((message) {
-            if (message['type'] != 'control.result') return false;
-            final status = (message['data'] as Map?)?['status'];
-            return status == 'token_claimed' ||
-                status == 'token_saved' ||
-                status == 'error';
-          }).timeout(const Duration(seconds: 15));
-          await _ble.sendOnboardingToken(
-            deviceId,
-            credentials.onboardingToken,
-            deviceSecret: credentials.deviceSecret,
-          );
-          final claim = await claimResponse;
-          final claimData =
-              Map<String, dynamic>.from(claim['data'] as Map? ?? const {});
-          cloudLinked = claimData['status'] != 'error';
-        }
-      } catch (_) {
-        cloudLinked = false;
-      }
       await ref.read(localBoardProvider.notifier).adoptBoard(
             remoteId: candidate.result.device.remoteId.str,
             deviceId: deviceId,
@@ -174,13 +145,14 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
       await ref.read(localBoardProvider.notifier).refreshSetup();
       await ref.read(deviceListProvider.notifier).load();
       if (mounted) {
-        setState(() => _message = cloudLinked
-            ? 'Board linked. Opening Pi setup...'
-            : 'Board connected locally. Backend link unavailable; opening Pi setup...');
+        setState(
+            () => _message = 'Board connected locally. Opening Pi setup...');
         context.go('/connect/setup/$deviceId');
       }
     } catch (error) {
-      if (mounted) setState(() => _message = 'Cloud linking failed: $error');
+      if (mounted) {
+        setState(() => _message = 'Local board setup failed: $error');
+      }
     } finally {
       if (mounted) setState(() => _working = false);
     }

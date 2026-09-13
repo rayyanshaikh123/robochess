@@ -13,10 +13,12 @@ through `/local/setup/status`. Normal play is refused until the Pi has internet 
 Roboflow, a usable camera, a calibrated board, a valid starting position, and a
 homed gantry.
 
-The app uses BLE only for discovery, device ID, Wi-Fi provisioning, onboarding,
-and recovery. Once the Pi reports a usable LAN IP, camera setup and gameplay use
-`http://<pi-ip>:8765`. Camera frames are sent directly from the Pi to Roboflow;
-the backend is not in the inference path.
+The app uses BLE for discovery, device ID, Wi-Fi provisioning, local setup,
+and recovery. A backend account, device secret, and device registration are not
+required for this local flow. Once the Pi reports a usable LAN IP, camera setup
+and gameplay use `http://<pi-ip>:8765`. Camera frames are sent directly from the
+Pi to Roboflow; the backend is not in the inference path. Backend heartbeat and
+session synchronization are optional enhancements.
 
 The BlueZ deployment must require encrypted, bonded pairing before exposing gameplay control. The Flutter app performs bonding, stores the board identity, subscribes to status notifications, and presents manual setup/recovery actions.
 
