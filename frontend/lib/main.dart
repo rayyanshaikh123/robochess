@@ -40,19 +40,22 @@ GoRouter _buildRouter(WidgetRef ref, {String? initialLocation}) {
     initialLocation: initialLocation ?? '/splash',
     navigatorKey: _rootNavigatorKey,
     redirect: (context, state) {
-      final session = ref.read(sessionProvider).valueOrNull;
-      final isSplash = state.matchedLocation == '/splash';
-      final isLogin = state.matchedLocation == '/login' ||
-          state.matchedLocation == '/register';
-      final isLocal = state.matchedLocation == '/local';
-      final isOnboarding = state.matchedLocation == '/onboarding';
+      final sessionState = ref.read(sessionProvider);
+      final session = sessionState.valueOrNull;
+      final location = state.matchedLocation;
+      final isAuthenticated = session != null;
+      final isSplash = location == '/splash';
+      final isPublic = location == '/login' ||
+          location == '/register' ||
+          location == '/onboarding' ||
+          location == '/local';
+      final isAuthScreen = location == '/login' || location == '/register';
 
-      if (session == null &&
-          !isLogin &&
-          !isLocal &&
-          !isOnboarding &&
-          !isSplash) {
-        return '/splash';
+      if (!isAuthenticated && !isPublic && !isSplash) {
+        return '/login';
+      }
+      if (isAuthenticated && (isAuthScreen || location == '/onboarding')) {
+        return '/home';
       }
       return null;
     },

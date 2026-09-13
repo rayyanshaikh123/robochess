@@ -1,4 +1,5 @@
 - Prefers an app-driven hardware onboarding workflow: link the board first, check the Pi’s internet connectivity, provide Wi‑Fi credentials through the app when needed, then complete board setup from the app before gameplay is enabled. Confidence: 0.95
 - Prefers the Raspberry Pi agent to contain the board-facing functionality in a lightweight, deployable runtime rather than depending on desktop Tk software. Confidence: 0.9
 - Expects implementation work to be done properly as an end-to-end flow across the app, Pi agent, and existing vision/server components, rather than as an isolated file change. Confidence: 0.85
+- Prefers authentication-gated navigation: users must be logged in to access the app dashboard and other main tabs/routes. Confidence: 0.98
 - Prefers concrete, command-level deployment and run instructions for the Raspberry Pi runtime, including setup, configuration, startup, and basic health checks. Confidence: 0.85
