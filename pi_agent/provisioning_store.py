@@ -2,12 +2,38 @@
 
 import json
 import os
+import tempfile
 from pathlib import Path
+
+
+def _resolve_path(preferred: str) -> Path:
+    candidates = [
+        Path(preferred),
+        Path(os.environ.get("XDG_STATE_HOME", "~/.local/state")).expanduser()
+        / "robochess"
+        / "provisioning.json",
+        Path(tempfile.gettempdir()) / "robochess-provisioning.json",
+    ]
+    for candidate in candidates:
+        try:
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            probe = candidate.parent / ".provisioning-write-test"
+            probe.touch()
+            probe.unlink()
+            if candidate != candidates[0]:
+                print(f"[warn] {candidates[0]} is not writable; using {candidate}")
+            return candidate
+        except OSError:
+            continue
+    return candidates[0]
 
 
 class ProvisioningStore:
     def __init__(self, path: str | None = None) -> None:
-        self.path = Path(path or os.getenv("ROBOCHESS_PROVISIONING_FILE", "/var/lib/robochess/provisioning.json"))
+        preferred = path or os.getenv(
+            "ROBOCHESS_PROVISIONING_FILE", "/var/lib/robochess/provisioning.json"
+        )
+        self.path = _resolve_path(preferred)
 
     def load(self) -> dict:
         try:

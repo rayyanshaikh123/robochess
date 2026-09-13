@@ -150,7 +150,9 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
           final claimResponse = _ble.messages.firstWhere((message) {
             if (message['type'] != 'control.result') return false;
             final status = (message['data'] as Map?)?['status'];
-            return status == 'token_claimed' || status == 'error';
+            return status == 'token_claimed' ||
+                status == 'token_saved' ||
+                status == 'error';
           }).timeout(const Duration(seconds: 15));
           await _ble.sendOnboardingToken(
             deviceId,
