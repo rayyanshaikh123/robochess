@@ -5,27 +5,8 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../domain/models/puzzle_model.dart';
 import '../providers/puzzle_provider.dart';
-
-const kPuzzleBackground = Color(0xFF151311);
-const kPuzzleSurfaceLow = Color(0xFF1D1B19);
-const kPuzzleSurfaceHigh = Color(0xFF2C2A27);
-const kPuzzleSurfaceHighest = Color(0xFF373431);
-const kPuzzlePrimary = Color(0xFF8ADB52);
-const kPuzzleSecondary = Color(0xFFA2E7FF);
-const kPuzzleOnPrimary = Color(0xFF173800);
-const kPuzzleOnSurface = Color(0xFFE7E2DD);
-const kPuzzleOnSurfaceVariant = Color(0xFFC0CAB4);
-const kPuzzleOutlineVariant = Color(0xFF414939);
-const kPuzzleError = Color(0xFFFFB4AB);
-
-const _pieceSymbols = {
-  'p': '♙',
-  'n': '♘',
-  'b': '♗',
-  'r': '♖',
-  'q': '♕',
-  'k': '♔',
-};
+import '../theme/app_colors.dart';
+import '../widgets/chess_piece_widget.dart';
 
 class PuzzleSolveScreen extends ConsumerStatefulWidget {
   final String puzzleId;
@@ -194,17 +175,17 @@ class _PuzzleSolveScreenState extends ConsumerState<PuzzleSolveScreen> {
     final puzzle = widget.puzzle;
     if (puzzle == null) {
       return Scaffold(
-        backgroundColor: kPuzzleBackground,
+        backgroundColor: kBackground,
         appBar: AppBar(
-          backgroundColor: kPuzzleBackground,
+          backgroundColor: kBackground,
           surfaceTintColor: Colors.transparent,
           title: Text('PUZZLE',
-              style: GoogleFonts.spaceGrotesk(
-                  fontWeight: FontWeight.w700, color: kPuzzlePrimary)),
+              style: GoogleFonts.cinzel(
+                  fontWeight: FontWeight.w700, color: kPrimary, fontSize: 16)),
         ),
         body: Center(
           child: Text('Puzzle data not available.',
-              style: GoogleFonts.inter(color: kPuzzleOnSurfaceVariant)),
+              style: GoogleFonts.inter(color: kOnSurfaceVariant)),
         ),
       );
     }
@@ -215,18 +196,18 @@ class _PuzzleSolveScreenState extends ConsumerState<PuzzleSolveScreen> {
         : 'Move ${_moveIndex + 1} / ${puzzle.length}';
 
     return Scaffold(
-      backgroundColor: kPuzzleBackground,
+      backgroundColor: kBackground,
       appBar: AppBar(
-        backgroundColor: kPuzzleBackground,
+        backgroundColor: kBackground,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         titleSpacing: 16,
         title: Text('PUZZLE VAULT',
-            style: GoogleFonts.spaceGrotesk(
+            style: GoogleFonts.cinzel(
                 fontWeight: FontWeight.w700,
-                color: kPuzzlePrimary,
+                color: kPrimary,
                 letterSpacing: 2,
-                fontSize: 14)),
+                fontSize: 16)),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
@@ -262,114 +243,114 @@ class _PuzzleSolveScreenState extends ConsumerState<PuzzleSolveScreen> {
       aspectRatio: 1,
       child: Container(
         decoration: BoxDecoration(
-          color: kPuzzleSurfaceHighest,
-          borderRadius: BorderRadius.circular(14),
+          color: kWoodFrame,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: kWoodBrassAccent.withOpacity(0.4),
+            width: 2,
+          ),
           boxShadow: [
             BoxShadow(
-                color: kPuzzlePrimary.withOpacity(0.05),
-                blurRadius: 40,
-                spreadRadius: 10)
+              color: const Color(0xFF4A2E1B).withOpacity(0.22),
+              blurRadius: 24,
+              offset: const Offset(0, 8),
+            ),
           ],
         ),
-        padding: const EdgeInsets.all(6),
-        child: GridView.builder(
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 8),
-          itemCount: 64,
-          itemBuilder: (_, idx) {
-            final row = idx ~/ 8;
-            final col = idx % 8;
-            final squareName = _squareName(row, col);
-            final isLight = (row + col) % 2 == 0;
-            final piece = _game.get(squareName);
+        padding: const EdgeInsets.all(8),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: GridView.builder(
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 8),
+            itemCount: 64,
+            itemBuilder: (_, idx) {
+              final row = idx ~/ 8;
+              final col = idx % 8;
+              final squareName = _squareName(row, col);
+              final isLight = (row + col) % 2 == 0;
+              final piece = _game.get(squareName);
 
-            final isSelected = squareName == _selectedSquare;
-            final isLegalDest = _legalDestinations.contains(squareName);
+              final isSelected = squareName == _selectedSquare;
+              final isLegalDest = _legalDestinations.contains(squareName);
 
-            Color bgColor;
-            if (isSelected) {
-              bgColor = kPuzzlePrimary.withOpacity(0.35);
-            } else {
-              bgColor = isLight ? kPuzzleSurfaceHigh : kPuzzleSurfaceLow;
-            }
+              Color bgColor;
+              if (isSelected) {
+                bgColor = kPrimaryContainer.withOpacity(0.45);
+              } else {
+                bgColor = isLight ? kWoodLightSquare : kWoodDarkSquare;
+              }
 
-            return GestureDetector(
-              onTap: () => _onSquareTap(row, col),
-              child: Container(
-                decoration: BoxDecoration(color: bgColor),
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    if (isLegalDest && piece == null)
-                      Container(
-                        width: 10,
-                        height: 10,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: kPuzzlePrimary.withOpacity(0.4),
+              return GestureDetector(
+                onTap: () => _onSquareTap(row, col),
+                child: Container(
+                  decoration: BoxDecoration(color: bgColor),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      if (isLegalDest && piece == null)
+                        Container(
+                          width: 12,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: kPrimary.withOpacity(0.55),
+                          ),
                         ),
-                      ),
-                    if (isLegalDest && piece != null)
-                      Container(
-                        width: 34,
-                        height: 34,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                              color: kPuzzlePrimary.withOpacity(0.6), width: 3),
+                      if (isLegalDest && piece != null)
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                                color: kPrimary, width: 3),
+                          ),
                         ),
-                      ),
-                    if (piece != null)
-                      Text(
-                        _pieceSymbols[piece.type.toString().toLowerCase()] ??
-                            '',
-                        style: TextStyle(
-                          fontSize: 24,
-                          color: piece.color == chess.Color.WHITE
-                              ? kPuzzlePrimary
-                              : kPuzzleSecondary,
-                          shadows: [
-                            Shadow(
-                              color: (piece.color == chess.Color.WHITE
-                                      ? kPuzzlePrimary
-                                      : kPuzzleSecondary)
-                                  .withOpacity(0.4),
-                              blurRadius: 8,
-                            ),
-                          ],
+                      if (piece != null)
+                        Padding(
+                          padding: const EdgeInsets.all(3.0),
+                          child: ChessPieceWidget.fromPiece(
+                            piece: piece,
+                          ),
                         ),
-                      ),
-                    if (col == 0)
-                      Positioned(
-                        top: 1,
-                        left: 2,
-                        child: Text('${8 - row}',
+                      if (col == 0)
+                        Positioned(
+                          top: 2,
+                          left: 3,
+                          child: Text(
+                            '${8 - row}',
                             style: TextStyle(
-                                fontSize: 7,
-                                fontWeight: FontWeight.w700,
-                                color: isLight
-                                    ? kPuzzleSurfaceLow
-                                    : kPuzzleSurfaceHigh)),
-                      ),
-                    if (row == 7)
-                      Positioned(
-                        bottom: 1,
-                        right: 2,
-                        child: Text(
+                              fontSize: 8,
+                              fontWeight: FontWeight.w800,
+                              color: isLight
+                                  ? kWoodDarkSquare.withOpacity(0.85)
+                                  : kWoodLightSquare.withOpacity(0.85),
+                            ),
+                          ),
+                        ),
+                      if (row == 7)
+                        Positioned(
+                          bottom: 2,
+                          right: 3,
+                          child: Text(
                             String.fromCharCode('a'.codeUnitAt(0) + col),
                             style: TextStyle(
-                                fontSize: 7,
-                                fontWeight: FontWeight.w700,
-                                color: isLight
-                                    ? kPuzzleSurfaceLow
-                                    : kPuzzleSurfaceHigh)),
-                      ),
-                  ],
+                              fontSize: 8,
+                              fontWeight: FontWeight.w800,
+                              color: isLight
+                                  ? kWoodDarkSquare.withOpacity(0.85)
+                                  : kWoodLightSquare.withOpacity(0.85),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -395,9 +376,9 @@ class _PuzzleHeader extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: kPuzzleSurfaceLow,
+        color: kSurfaceContLow,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: kPuzzleOutlineVariant.withOpacity(0.12)),
+        border: Border.all(color: kOutlineVariant.withOpacity(0.12)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -407,14 +388,14 @@ class _PuzzleHeader extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: kPuzzleSecondary.withOpacity(0.1),
+                  color: kSecondary.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(99),
                 ),
                 child: Text('RATING $rating',
                     style: GoogleFonts.inter(
                         fontSize: 9,
                         fontWeight: FontWeight.w700,
-                        color: kPuzzleSecondary,
+                        color: kSecondary,
                         letterSpacing: 1)),
               ),
               const Spacer(),
@@ -423,16 +404,16 @@ class _PuzzleHeader extends StatelessWidget {
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
                       color:
-                          completed ? kPuzzlePrimary : kPuzzleOnSurfaceVariant,
+                          completed ? kPrimary : kOnSurfaceVariant,
                       letterSpacing: 1)),
             ],
           ),
           const SizedBox(height: 10),
           Text(completed ? 'Puzzle complete' : 'Tactical sequence',
-              style: GoogleFonts.spaceGrotesk(
+              style: GoogleFonts.outfit(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
-                  color: kPuzzleOnSurface)),
+                  color: kOnSurface)),
           const SizedBox(height: 8),
           Wrap(
             spacing: 6,
@@ -464,13 +445,13 @@ class _PuzzleStatus extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    Color color = kPuzzleOnSurfaceVariant;
+    Color color = kOnSurfaceVariant;
     if (submitting) {
-      color = kPuzzleSecondary;
+      color = kSecondary;
     } else if (completed) {
-      color = kPuzzlePrimary;
+      color = kPrimary;
     } else if (message != null && message!.startsWith('Incorrect')) {
-      color = kPuzzleError;
+      color = kError;
     }
 
     final text = submitting
@@ -483,7 +464,7 @@ class _PuzzleStatus extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: kPuzzleSurfaceHighest,
+        color: kSurfaceContHighest,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(text,
@@ -511,12 +492,12 @@ class _PuzzleActions extends StatelessWidget {
           child: OutlinedButton(
             onPressed: disabled ? null : onReset,
             style: OutlinedButton.styleFrom(
-              foregroundColor: kPuzzlePrimary,
-              side: BorderSide(color: kPuzzlePrimary.withOpacity(0.6)),
+              foregroundColor: kPrimary,
+              side: BorderSide(color: kPrimary.withOpacity(0.6)),
               padding: const EdgeInsets.symmetric(vertical: 12),
             ),
             child: Text('RESET PUZZLE',
-                style: GoogleFonts.spaceGrotesk(
+                style: GoogleFonts.outfit(
                     fontWeight: FontWeight.w700,
                     letterSpacing: 2,
                     fontSize: 11)),
@@ -536,15 +517,15 @@ class _PuzzleTag extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: kPuzzleSurfaceLow,
+        color: kSurfaceContLow,
         borderRadius: BorderRadius.circular(99),
-        border: Border.all(color: kPuzzleOutlineVariant.withOpacity(0.2)),
+        border: Border.all(color: kOutlineVariant.withOpacity(0.2)),
       ),
       child: Text(label.toUpperCase(),
           style: GoogleFonts.inter(
               fontSize: 8,
               fontWeight: FontWeight.w700,
-              color: kPuzzleOnSurfaceVariant,
+              color: kOnSurfaceVariant,
               letterSpacing: 1)),
     );
   }

@@ -4,6 +4,8 @@ class GameStateModel {
   final int gameVersion;
   final String? lastMove;
 
+  String get fen => currentFen;
+
   GameStateModel({
     required this.gameId,
     required this.currentFen,

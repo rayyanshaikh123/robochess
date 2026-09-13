@@ -4,6 +4,8 @@ import '../../core/config/app_config.dart';
 import '../../core/ble/robochess_ble.dart';
 import '../../data/repositories/local_board_repository.dart';
 import '../../data/repositories/local_state_store.dart';
+import '../../data/repositories/pi_local_api.dart';
+import '../../domain/models/pi_setup.dart';
 import '../../domain/models/robochess_device.dart';
 import '../../domain/models/robochess_protocol.dart';
 
@@ -33,8 +35,10 @@ class LocalBoardState {
   final PiState? piState;
   final PiNetworkStatus? network;
   final String? localApiBaseUrl;
+  final PiSetupStatus? setup;
   final LocalConnectionState connection;
   final bool scanning;
+  final bool setupLoading;
   final String? error;
 
   const LocalBoardState({
@@ -43,8 +47,10 @@ class LocalBoardState {
     this.piState,
     this.network,
     this.localApiBaseUrl = AppConfig.piLocalApiBaseUrl,
+    this.setup,
     this.connection = LocalConnectionState.disconnected,
     this.scanning = false,
+    this.setupLoading = false,
     this.error,
   });
 
@@ -54,8 +60,10 @@ class LocalBoardState {
     PiState? piState,
     PiNetworkStatus? network,
     String? localApiBaseUrl,
+    PiSetupStatus? setup,
     LocalConnectionState? connection,
     bool? scanning,
+    bool? setupLoading,
     String? error,
     bool clearError = false,
   }) =>
@@ -65,8 +73,10 @@ class LocalBoardState {
         piState: piState ?? this.piState,
         network: network ?? this.network,
         localApiBaseUrl: localApiBaseUrl ?? this.localApiBaseUrl,
+        setup: setup ?? this.setup,
         connection: connection ?? this.connection,
         scanning: scanning ?? this.scanning,
+        setupLoading: setupLoading ?? this.setupLoading,
         error: clearError ? null : (error ?? this.error),
       );
 }
@@ -195,12 +205,151 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
     }
   }
 
-  Future<void> confirmSetup() => repository.startSession();
-  Future<void> proposeMove(String move) =>
-      repository.proposeMove(move, state.piState?.version ?? 0);
-  Future<void> reset() => repository.resetSession();
-  Future<void> undo() => repository.undoSession();
-  Future<void> resume() => repository.resumeSession();
+  PiLocalApi _localApi() => PiLocalApi(
+        baseUrl: state.localApiBaseUrl ?? AppConfig.piLocalApiBaseUrl,
+      );
+
+  Future<void> refreshSetup() async {
+    final api = _localApi();
+    try {
+      state = state.copyWith(setupLoading: true, clearError: true);
+      final setup = await api.setupStatus();
+      state = state.copyWith(
+        setup: setup,
+        connection: setup.ready
+            ? LocalConnectionState.ready
+            : LocalConnectionState.connected,
+        setupLoading: false,
+      );
+    } catch (error) {
+      state = state.copyWith(
+        setupLoading: false,
+        error: 'Pi setup status failed: $error',
+      );
+    } finally {
+      api.client.close();
+    }
+  }
+
+  Future<void> loadPiModel() => _runSetupAction((api) => api.loadModel());
+  Future<void> autoCalibrate() => _runSetupAction((api) => api.autoCalibrate());
+  Future<void> manualCalibrate(List<List<double>> corners) =>
+      _runSetupAction((api) => api.manualCalibrate(corners));
+  Future<void> validateStartingPosition() =>
+      _runSetupAction((api) => api.validateStart());
+  Future<void> homePiGantry() => _runSetupAction((api) => api.homeGantry());
+
+  Future<void> _runSetupAction(
+      Future<Map<String, dynamic>> Function(PiLocalApi api) action) async {
+    final api = _localApi();
+    try {
+      state = state.copyWith(setupLoading: true, clearError: true);
+      await action(api);
+      await refreshSetup();
+    } catch (error) {
+      state = state.copyWith(
+        setupLoading: false,
+        error: 'Pi setup action failed: $error',
+      );
+    } finally {
+      api.client.close();
+    }
+  }
+
+  Future<void> confirmSetup() async {
+    final api = _localApi();
+    try {
+      state = state.copyWith(setupLoading: true, clearError: true);
+      final result = await api.startGame();
+      final raw = result['state'];
+      if (raw is Map) {
+        final message = RoboChessMessage(
+          type: 'control.result',
+          requestId: '',
+          deviceId: state.selected?.deviceId ?? '',
+          data: {'state': Map<String, dynamic>.from(raw)},
+        );
+        final next = PiState.fromMessage(message);
+        state = state.copyWith(piState: next);
+      }
+      state = state.copyWith(
+        connection: LocalConnectionState.ready,
+        setupLoading: false,
+      );
+    } catch (error) {
+      state = state.copyWith(
+        setupLoading: false,
+        error: 'Pi game start failed: $error',
+      );
+    } finally {
+      api.client.close();
+    }
+  }
+
+  Future<void> _runGameAction(
+      Future<Map<String, dynamic>> Function(PiLocalApi api) action) async {
+    final api = _localApi();
+    try {
+      final result = await action(api);
+      final raw = result['state'];
+      if (raw is Map) {
+        final message = RoboChessMessage(
+          type: 'control.result',
+          requestId: '',
+          deviceId: state.selected?.deviceId ?? '',
+          data: {'state': Map<String, dynamic>.from(raw)},
+        );
+        final next = PiState.fromMessage(message);
+        state = state.copyWith(piState: next);
+        await store.saveState(next);
+      }
+    } catch (error) {
+      state = state.copyWith(error: 'Pi game action failed: $error');
+    } finally {
+      api.client.close();
+    }
+  }
+
+  Future<void> proposeMove(String move) => _runGameAction(
+        (api) => api.gameMove(move, state.piState?.version),
+      );
+  Future<void> reset() => _runGameAction((api) => api.resetGame());
+  Future<void> undo() => _runGameAction((api) => api.undoGame());
+  Future<void> resume() => _runGameAction((api) => api.resumeGame());
+  void applyNetworkStatus(Map<String, dynamic> data) {
+    final network = PiNetworkStatus.fromMap(data);
+    final reportedIp = network.ipAddress?.trim();
+    final usableIp = reportedIp == null ||
+            reportedIp.isEmpty ||
+            reportedIp == '127.0.0.1' ||
+            reportedIp == '0.0.0.0' ||
+            reportedIp == 'localhost'
+        ? null
+        : reportedIp;
+    state = state.copyWith(
+      network: network,
+      localApiBaseUrl:
+          usableIp == null ? state.localApiBaseUrl : 'http://$usableIp:8765',
+      clearError: true,
+    );
+  }
+
+  Future<void> adoptBoard(
+      {required String remoteId, required String deviceId}) async {
+    await store.saveDevice(deviceId);
+    state = state.copyWith(
+      selected: RoboChessDevice(
+        remoteId: remoteId,
+        displayName: 'RoboChess board',
+        deviceId: deviceId,
+        rssi: 0,
+        state: LocalConnectionState.connected,
+      ),
+      connection: LocalConnectionState.paired,
+      clearError: true,
+    );
+  }
+
   Future<void> provisionWifi(String ssid, String password) async {
     try {
       await repository.provisionWifi(ssid, password);

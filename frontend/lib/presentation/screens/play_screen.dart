@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:chess/chess.dart' as chess;
 import 'package:flutter/material.dart';
@@ -8,6 +9,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 
 import '../widgets/animated_profile_avatar.dart';
+import '../widgets/robo_app_bar.dart';
+import '../providers/board_theme_provider.dart';
 import '../providers/device_provider.dart';
 import '../providers/board_provider.dart';
 import '../providers/game_provider.dart';
@@ -24,27 +27,28 @@ import '../../domain/voice/move_parser.dart';
 import '../../data/repositories/pi_local_api.dart';
 import 'manual_calibration_screen.dart';
 import '../widgets/pi_live_camera_view.dart';
+import '../theme/app_colors.dart';
+import '../widgets/chess_piece_widget.dart';
 
-const kBackground = Color(0xFF151311);
-const kSurfaceContLow = Color(0xFF1D1B19);
-const kSurfaceContHigh = Color(0xFF2C2A27);
-const kSurfaceContHighest = Color(0xFF373431);
-const kPrimary = Color(0xFF8ADB52);
-const kOnPrimary = Color(0xFF173800);
-const kSecondary = Color(0xFFA2E7FF);
-const kOnSurface = Color(0xFFE7E2DD);
-const kOnSurfaceVariant = Color(0xFFC0CAB4);
-const kOutlineVariant = Color(0xFF414939);
-const kError = Color(0xFFFFB4AB);
+enum _PlayTabMode { setup, playing }
 
-const _pieceSymbols = {
-  'p': '♙',
-  'n': '♘',
-  'b': '♗',
-  'r': '♖',
-  'q': '♕',
-  'k': '♔',
-};
+enum _PlaySurface { board, app }
+
+enum _OpponentType { bot, friend, online }
+
+class _CapturedData {
+  final List<String> whiteLost;
+  final List<String> blackLost;
+  final int whiteAdvantage;
+  final int blackAdvantage;
+
+  const _CapturedData({
+    required this.whiteLost,
+    required this.blackLost,
+    required this.whiteAdvantage,
+    required this.blackAdvantage,
+  });
+}
 
 class PlayScreen extends ConsumerStatefulWidget {
   const PlayScreen({super.key});
@@ -53,6 +57,33 @@ class PlayScreen extends ConsumerStatefulWidget {
 }
 
 class _PlayScreenState extends ConsumerState<PlayScreen> {
+  // ── Tab mode: Setup vs Playing ──
+  _PlayTabMode _tabMode = _PlayTabMode.setup;
+
+  // ── Setup configuration ──
+  _PlaySurface _setupSurface = _PlaySurface.app;
+  _OpponentType _setupOpponent = _OpponentType.bot;
+  int _setupDifficulty = 5;
+  String _setupSide = 'white'; // 'white', 'random', 'black'
+  int _setupTimeControlMinutes = 10; // 10, 5, 3, 0 (unlimited)
+
+  // ── Setup board wizard state ──
+  bool _setupModelLoaded = false;
+  bool _setupCalibrated = false;
+  bool _setupValidated = false;
+  bool _setupBusy = false;
+  String? _setupError;
+  String? _setupValidationNote;
+  bool _setupShowCamera = false;
+
+  // ── Chess Clocks & Flip ──
+  Timer? _clockTimer;
+  Timer? _botMoveTimer;
+  Duration _whiteClock = const Duration(minutes: 10);
+  Duration _blackClock = const Duration(minutes: 10);
+  bool _clockRunning = false;
+  bool _boardFlipped = false;
+
   // ── Game state ──
   final chess.Chess _game = chess.Chess();
   String? _selectedSquare; // e.g. "e2"
@@ -136,6 +167,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       _linkedGameVersion = initialGame.gameVersion;
       if (initialGame.currentFen.isNotEmpty) {
         _applyGameState(initialGame);
+        _tabMode = _PlayTabMode.playing;
       }
       _connectGameSocket(initialGame.gameId);
     }
@@ -152,12 +184,16 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     final extra = GoRouterState.of(context).extra;
     if (extra is OpeningContext) {
       _loadOpeningContext(extra);
+      _tabMode = _PlayTabMode.playing;
     }
   }
 
   void _loadOpeningContext(OpeningContext ctx) {
     if (_openingContext?.name == ctx.name) return;
-    setState(() => _openingContext = ctx);
+    setState(() {
+      _openingContext = ctx;
+      _tabMode = _PlayTabMode.playing;
+    });
     _game.load_pgn(ctx.pgn);
     _moveHistory.clear();
     _selectedSquare = null;
@@ -169,6 +205,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   @override
   void dispose() {
+    _clockTimer?.cancel();
+    _botMoveTimer?.cancel();
     _autoDetectTimer?.cancel();
     _gameSub?.close();
     _statusSub?.cancel();
@@ -179,16 +217,28 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     super.dispose();
   }
 
+  // ── Resolve human color from the chosen side ──
+  chess.Color _humanColor() {
+    return _setupSide == 'black' ? chess.Color.BLACK : chess.Color.WHITE;
+  }
+
+  bool _isBotTurn() {
+    return _gameMode == 'human_vs_ai' && _game.turn != _humanColor();
+  }
+
   // ── Square name helpers (0-based row,col → algebraic) ──
   String _squareName(int row, int col) {
-    final file = String.fromCharCode('a'.codeUnitAt(0) + col);
-    final rank = '${8 - row}';
+    final displayRow = _boardFlipped ? 7 - row : row;
+    final displayCol = _boardFlipped ? 7 - col : col;
+    final file = String.fromCharCode('a'.codeUnitAt(0) + displayCol);
+    final rank = '${8 - displayRow}';
     return '$file$rank';
   }
 
   // ── Tap on a board square ──
   void _onSquareTap(int row, int col) {
     if (_gameUsesBoard) return;
+    if (_isBotTurn()) return;
     final square = _squareName(row, col);
     final piece = _game.get(square);
 
@@ -235,7 +285,49 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     if (applied) {
       setState(() {});
       _submitRemoteMove(uci);
+
+      if (_gameMode == 'human_vs_ai' && !_game.game_over && _isBotTurn()) {
+        if (_linkedGameId != null) {
+          _scheduleBotFallbackTimer();
+        } else {
+          _triggerLocalBotMove(delayMs: 600);
+        }
+      }
     }
+  }
+
+  void _triggerLocalBotMove({int delayMs = 600}) {
+    _botMoveTimer?.cancel();
+    _botMoveTimer = Timer(Duration(milliseconds: delayMs), () {
+      if (!mounted || _game.game_over) return;
+      if (_game.turn == _humanColor()) return;
+      final moves = _game.generate_moves();
+      if (moves.isEmpty) return;
+      chess.Move chosenMove = moves.first;
+      for (final m in moves) {
+        if (m.captured != null) {
+          chosenMove = m;
+          break;
+        }
+      }
+      final promo = chosenMove.promotion != null ? chosenMove.promotion.toString().toLowerCase() : '';
+      final uci = '${chosenMove.fromAlgebraic}${chosenMove.toAlgebraic}$promo';
+      final ok = _applyUciMove(uci);
+      if (ok) {
+        setState(() {});
+        // CRITICAL: Never call _submitRemoteMove — local-only bot response
+      }
+    });
+  }
+
+  void _scheduleBotFallbackTimer() {
+    _botMoveTimer?.cancel();
+    _botMoveTimer = Timer(const Duration(seconds: 5), () {
+      if (!mounted || _game.game_over) return;
+      if (_game.turn == _humanColor()) return;
+      // Backend hasn't responded with game.move — trigger local bot as fallback
+      _triggerLocalBotMove(delayMs: 0);
+    });
   }
 
   Future<void> _submitRemoteMove(String uci) async {
@@ -282,11 +374,15 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     });
     _autoDetectTimer?.cancel();
     try {
+      if (_setupSide == 'random') {
+        _setupSide = Random().nextBool() ? 'white' : 'black';
+      }
       await ref.read(gameControllerProvider.notifier).createGame(
             mode: result.mode,
             difficulty: result.difficulty,
             players:
                 result.useBoard && device != null ? [device.deviceId] : null,
+            playerSide: _setupSide,
           );
       if (result.useBoard) {
         try {
@@ -630,6 +726,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   // ── Undo last move ──
   Future<void> _undoMove() async {
+    _botMoveTimer?.cancel();
     if (_game.history.isEmpty && _linkedGameId == null) return;
 
     // Optimistically undo local state, then let server dictate final state
@@ -707,6 +804,34 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     _lastMoveFrom = from;
     _lastMoveTo = to;
     _updateStatusMessage();
+
+    if (!_clockRunning && _setupTimeControlMinutes > 0) {
+      _startClock();
+    }
+
+    if (_game.game_over) {
+      _clockTimer?.cancel();
+      _clockRunning = false;
+      String title = 'Game Finished';
+      String subtitle = _statusMessage;
+      if (_game.in_checkmate) {
+        final winner = _game.turn == chess.Color.WHITE ? 'Black' : 'White';
+        title = '$winner Won!';
+        subtitle = 'Victory by checkmate';
+      } else if (_game.in_stalemate) {
+        title = 'Stalemate';
+        subtitle = 'Draw by stalemate';
+      } else if (_game.in_draw) {
+        title = 'Draw';
+        subtitle = 'Game ended in a draw';
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _showGameOverDialog(title: title, subtitle: subtitle);
+        }
+      });
+    }
+
     return true;
   }
 
@@ -765,6 +890,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     final type = message['type'];
     final data = message['data'];
     if (type == 'game.move' && data is Map<String, dynamic>) {
+      _botMoveTimer?.cancel();
       final uci = data['uci']?.toString();
       final version = int.tryParse(data['game_version']?.toString() ?? '');
       final fen = data['fen']?.toString();
@@ -953,108 +1079,1752 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     final selectedId = ref.watch(selectedDeviceProvider);
     final activeDevice = _resolveActiveDevice(devices, selectedId);
 
+    if (_tabMode == _PlayTabMode.setup) {
+      return _buildSetupScreen(context, activeDevice);
+    }
+    return _buildChessComGameScreen(context, activeDevice);
+  }
+
+  // ── Clock & Timing Helpers ────────────────────────────────────────────────
+  void _startClock() {
+    _clockTimer?.cancel();
+    if (_setupTimeControlMinutes == 0) return; // Unlimited / casual
+
+    _clockRunning = true;
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || _game.game_over) {
+        timer.cancel();
+        _clockRunning = false;
+        return;
+      }
+      setState(() {
+        if (_game.turn == chess.Color.WHITE) {
+          if (_whiteClock.inSeconds > 0) {
+            _whiteClock -= const Duration(seconds: 1);
+          } else {
+            timer.cancel();
+            _clockRunning = false;
+            _handleTimeOut(chess.Color.WHITE);
+          }
+        } else {
+          if (_blackClock.inSeconds > 0) {
+            _blackClock -= const Duration(seconds: 1);
+          } else {
+            timer.cancel();
+            _clockRunning = false;
+            _handleTimeOut(chess.Color.BLACK);
+          }
+        }
+      });
+    });
+  }
+
+  void _handleTimeOut(chess.Color timedOutColor) {
+    final winner = timedOutColor == chess.Color.WHITE ? 'Black' : 'White';
+    _statusMessage = '$winner won on time!';
+    _showGameOverDialog(
+      title: '$winner Won on Time!',
+      subtitle: '${timedOutColor == chess.Color.WHITE ? "White" : "Black"} ran out of time.',
+    );
+  }
+
+  String _formatClock(Duration d) {
+    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  // ── Board Setup Wizard Actions ────────────────────────────────────────────
+  Future<void> _runSetupStep(Future<void> Function() action) async {
+    setState(() {
+      _setupBusy = true;
+      _setupError = null;
+    });
+    try {
+      await action();
+    } on ApiException catch (err) {
+      setState(() => _setupError = err.message);
+    } catch (_) {
+      setState(() => _setupError = 'Step failed. Check board connection.');
+    } finally {
+      if (mounted) setState(() => _setupBusy = false);
+    }
+  }
+
+  Future<void> _setupLoadModel() async {
+    await _runSetupStep(() async {
+      await PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl).loadModel();
+      setState(() => _setupModelLoaded = true);
+    });
+  }
+
+  Future<void> _setupAutoCalibrate() async {
+    await _runSetupStep(() async {
+      await PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl).autoCalibrate();
+      setState(() {
+        _setupCalibrated = true;
+        _setupValidated = false;
+      });
+    });
+  }
+
+  Future<void> _setupManualCalibrate() async {
+    final ok = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ManualCalibrationScreen(
+          localApi: PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl),
+        ),
+      ),
+    );
+    if (ok == true && mounted) {
+      setState(() {
+        _setupCalibrated = true;
+        _setupValidated = false;
+      });
+    }
+  }
+
+  Future<void> _setupValidateBoard() async {
+    if (_setupBusy) return;
+    await _runSetupStep(() async {
+      final data = await PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl).validateStart();
+      final valid = data['valid'] == true;
+      final detected = data['pieces_detected'] as int? ?? 0;
+      final summary = data['summary'] as Map<String, dynamic>? ?? {};
+      final missing = summary['missing'] as int? ?? 0;
+      final extra = summary['extra'] as int? ?? 0;
+      final wrongColor = summary['wrong_color'] as int? ?? 0;
+
+      if (!mounted) return;
+
+      setState(() {
+        _setupValidated = valid;
+        if (valid) {
+          _setupValidationNote = 'Position valid ✓  ($detected/32 pieces detected)';
+        } else {
+          final parts = <String>[];
+          if (missing > 0) parts.add('$missing missing');
+          if (extra > 0) parts.add('$extra extra');
+          if (wrongColor > 0) parts.add('$wrongColor wrong color');
+          _setupValidationNote =
+              'Detected $detected/32 pieces. Issues: ${parts.join(', ')}.\n'
+              'Tip: ${wrongColor > 0 ? "Re-calibrate — board orientation may be flipped." : "Ensure all pieces are placed and lighting is good."}';
+        }
+      });
+    });
+  }
+
+  Future<void> _setupForceValidate() async {
+    await _runSetupStep(() async {
+      await PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl).forceValidate();
+      setState(() {
+        _setupValidated = true;
+        _setupValidationNote = 'Force-validated: Using standard starting position.';
+      });
+    });
+  }
+
+  Future<void> _startMatchFromSetup(DeviceModel? device) async {
+    final mode = _setupOpponent == _OpponentType.bot
+        ? 'human_vs_ai'
+        : (_setupOpponent == _OpponentType.friend ? 'human_vs_human' : 'online');
+    final useBoard = _setupSurface == _PlaySurface.board;
+
+    setState(() {
+      _syncing = true;
+      _syncError = null;
+      _gameMode = mode;
+      _gameUsesBoard = useBoard;
+      _inGameValidated = useBoard;
+      _inGameValidationNote = null;
+      _selectedSquare = null;
+      _legalDestinations = [];
+      _snapshotNote = null;
+      _moveHistory.clear();
+      _game.reset();
+
+      final clockDur = _setupTimeControlMinutes > 0
+          ? Duration(minutes: _setupTimeControlMinutes)
+          : Duration.zero;
+      _whiteClock = clockDur;
+      _blackClock = clockDur;
+
+      if (_setupSide == 'black') {
+        _boardFlipped = true;
+      } else {
+        _boardFlipped = false;
+      }
+    });
+
+    _autoDetectTimer?.cancel();
+
+    try {
+      if (_setupSide == 'random') {
+        _setupSide = Random().nextBool() ? 'white' : 'black';
+      }
+      await ref.read(gameControllerProvider.notifier).createGame(
+            mode: mode,
+            difficulty: _setupDifficulty,
+            players: useBoard && device != null ? [device.deviceId] : null,
+            playerSide: _setupSide,
+          );
+
+      if (useBoard) {
+        try {
+          await PiLocalApi(baseUrl: AppConfig.piLocalApiBaseUrl).startGame();
+        } catch (_) {
+          if (mounted) {
+            setState(() => _syncError = 'Pi game session could not be started.');
+          }
+        }
+        _fetchLiveFrame();
+        _startAutoDetect();
+      } else {
+        _clearSnapshot();
+        _autoDetectTimer?.cancel();
+      }
+
+      _startClock();
+
+      if (mounted) {
+        setState(() {
+          _tabMode = _PlayTabMode.playing;
+        });
+
+        // If playing Black vs Bot, trigger Bot's opening move
+        if (_setupSide == 'black' && _gameMode == 'human_vs_ai') {
+          if (_linkedGameId != null) {
+            _scheduleBotFallbackTimer();
+          } else {
+            _triggerLocalBotMove(delayMs: 600);
+          }
+        }
+      }
+    } catch (_) {
+      if (mounted) {
+        // Fallback to local offline play so matches never stall
+        _startClock();
+        setState(() {
+          _tabMode = _PlayTabMode.playing;
+          _gameUsesBoard = false;
+          _syncError = 'Playing in local digital match.';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _syncing = false);
+      }
+    }
+  }
+
+  Future<void> _confirmExitToSetup() async {
+    if (_game.history.isEmpty || _game.game_over) {
+      setState(() => _tabMode = _PlayTabMode.setup);
+      return;
+    }
+    final exit = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: kSurfaceContLow,
+        title: Text('Leave Match?', style: GoogleFonts.outfit(fontWeight: FontWeight.w700)),
+        content: const Text(
+          'Your match progress is preserved. You can resume this match at any time from Match Setup.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('STAY IN GAME'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kPrimary,
+              foregroundColor: kOnPrimary,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('MATCH SETUP'),
+          ),
+        ],
+      ),
+    );
+    if (exit == true && mounted) {
+      _botMoveTimer?.cancel();
+      setState(() => _tabMode = _PlayTabMode.setup);
+    }
+  }
+
+  void _showGameOverDialog({required String title, required String subtitle}) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: kSurfaceContLow,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Column(
+          children: [
+            const Icon(Icons.emoji_events_rounded, color: Colors.amber, size: 48),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              style: GoogleFonts.outfit(
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                color: kOnSurface,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          subtitle,
+          textAlign: TextAlign.center,
+          style: GoogleFonts.inter(fontSize: 14, color: kOnSurfaceVariant),
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          OutlinedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              setState(() => _tabMode = _PlayTabMode.setup);
+            },
+            child: const Text('NEW MATCH'),
+          ),
+          if (_linkedGameId != null)
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                context.push('/analysis?game_id=$_linkedGameId');
+              },
+              child: const Text('ANALYZE'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ── Captured Pieces Data ──────────────────────────────────────────────────
+  _CapturedData _calculateCaptured(chess.Chess game) {
+    final Map<String, int> whiteRemaining = {'p': 0, 'n': 0, 'b': 0, 'r': 0, 'q': 0};
+    final Map<String, int> blackRemaining = {'p': 0, 'n': 0, 'b': 0, 'r': 0, 'q': 0};
+
+    for (var file = 0; file < 8; file++) {
+      final f = String.fromCharCode('a'.codeUnitAt(0) + file);
+      for (var rank = 1; rank <= 8; rank++) {
+        final p = game.get('$f$rank');
+        if (p == null) continue;
+        final typeStr = p.type.toString().toLowerCase();
+        if (typeStr == 'k') continue;
+        if (p.color == chess.Color.WHITE) {
+          whiteRemaining[typeStr] = (whiteRemaining[typeStr] ?? 0) + 1;
+        } else {
+          blackRemaining[typeStr] = (blackRemaining[typeStr] ?? 0) + 1;
+        }
+      }
+    }
+
+    const starting = {'q': 1, 'r': 2, 'b': 2, 'n': 2, 'p': 8};
+    const values = {'q': 9, 'r': 5, 'b': 3, 'n': 3, 'p': 1};
+
+    final List<String> whiteLost = [];
+    final List<String> blackLost = [];
+
+    var whiteMaterial = 0;
+    var blackMaterial = 0;
+
+    for (final entry in starting.entries) {
+      final type = entry.key;
+      final startCount = entry.value;
+      final wCount = whiteRemaining[type] ?? 0;
+      final bCount = blackRemaining[type] ?? 0;
+      whiteMaterial += wCount * (values[type] ?? 0);
+      blackMaterial += bCount * (values[type] ?? 0);
+
+      for (var i = 0; i < (startCount - wCount); i++) {
+        whiteLost.add(type);
+      }
+      for (var i = 0; i < (startCount - bCount); i++) {
+        blackLost.add(type);
+      }
+    }
+
+    final diff = whiteMaterial - blackMaterial;
+    return _CapturedData(
+      whiteLost: whiteLost,
+      blackLost: blackLost,
+      whiteAdvantage: diff > 0 ? diff : 0,
+      blackAdvantage: diff < 0 ? -diff : 0,
+    );
+  }
+
+  String _pieceGlyph(String type, bool isWhite) {
+    switch (type.toLowerCase()) {
+      case 'p':
+        return isWhite ? '♙' : '♟';
+      case 'n':
+        return isWhite ? '♘' : '♞';
+      case 'b':
+        return isWhite ? '♗' : '♝';
+      case 'r':
+        return isWhite ? '♖' : '♜';
+      case 'q':
+        return isWhite ? '♕' : '♛';
+      default:
+        return '';
+    }
+  }
+
+  // ── VIEW 1: Game Initialization & Setup Screen ────────────────────────────
+  Widget _buildSetupScreen(BuildContext context, DeviceModel? activeDevice) {
+    final hasActiveGame = _game.history.isNotEmpty || _linkedGameId != null;
+
     return Scaffold(
       backgroundColor: kBackground,
-      appBar: AppBar(
-        backgroundColor: kBackground,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        titleSpacing: 20,
-        title: Row(children: [
-          const Icon(Icons.settings_remote, color: kPrimary),
-          const SizedBox(width: 10),
-          Text('ROBOCHESS',
-              style: GoogleFonts.spaceGrotesk(
-                  color: kPrimary,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 16,
-                  letterSpacing: 2)),
-        ]),
+      appBar: RoboAppBar(
+        sectionBadge: 'MATCH SETUP',
         actions: [
+          IconButton(
+            icon: const Icon(Icons.palette_outlined, color: kOnSurface, size: 20),
+            tooltip: 'Chessboard Theme',
+            onPressed: () => _showBoardThemeSheet(context),
+          ),
           const AnimatedProfileAvatar(size: 34),
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
-        child: Column(children: [
-          _BoardSyncCard(
-            device: activeDevice,
-            linkedGameId: _linkedGameId,
-            syncing: _syncing,
-            error: _syncError,
-            onStart: () => _startGameFlow(activeDevice),
-            onLink: () => context.go('/connect'),
-          ),
-          const SizedBox(height: 16),
-          _PlayerRow(game: _game),
-          const SizedBox(height: 16),
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 90),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Resume Banner if match already in progress
+            if (hasActiveGame) ...[
+              Material(
+                color: kPrimary.withValues(alpha: 0.1),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(color: kPrimary.withValues(alpha: 0.35), width: 1.5),
+                ),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => setState(() => _tabMode = _PlayTabMode.playing),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: kPrimary,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 28),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'ACTIVE MATCH IN PROGRESS',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                  color: kPrimary,
+                                  letterSpacing: 1.2,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${_moveHistory.length} moves played • $_statusMessage',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  color: kOnSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: kPrimary),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+            ],
 
-          // ── Status message ──
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            margin: const EdgeInsets.only(bottom: 12),
-            decoration: BoxDecoration(
-              color: kSurfaceContHighest,
-              borderRadius: BorderRadius.circular(10),
+            Text(
+              'NEW CHESS MATCH',
+              style: GoogleFonts.outfit(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: kOnSurface,
+                letterSpacing: 1,
+              ),
             ),
-            child: Text(_statusMessage,
+            Text(
+              'Configure your opponent, clock, and board hardware',
+              style: GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant),
+            ),
+            const SizedBox(height: 18),
+
+            // Section 1: Game Mode
+            _buildSectionHeader('GAME MODE', Icons.sports_esports_outlined),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildSelectCard(
+                    title: 'vs Computer',
+                    subtitle: 'Play AI Bot',
+                    icon: Icons.smart_toy_outlined,
+                    isSelected: _setupOpponent == _OpponentType.bot,
+                    onTap: () => setState(() => _setupOpponent = _OpponentType.bot),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildSelectCard(
+                    title: 'Pass & Play',
+                    subtitle: '2 Players',
+                    icon: Icons.people_outline,
+                    isSelected: _setupOpponent == _OpponentType.friend,
+                    onTap: () => setState(() => _setupOpponent = _OpponentType.friend),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildSelectCard(
+                    title: 'Online',
+                    subtitle: 'Multiplayer',
+                    icon: Icons.public,
+                    isSelected: _setupOpponent == _OpponentType.online,
+                    onTap: () => setState(() => _setupOpponent = _OpponentType.online),
+                  ),
+                ),
+              ],
+            ),
+
+            // If vs Computer: Bot Difficulty
+            if (_setupOpponent == _OpponentType.bot) ...[
+              const SizedBox(height: 18),
+              _buildSectionHeader('BOT DIFFICULTY (ELO)', Icons.psychology_outlined),
+              const SizedBox(height: 10),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Row(
+                  children: [
+                    _buildDifficultyChip(level: 1, label: 'Novice', elo: '800'),
+                    const SizedBox(width: 8),
+                    _buildDifficultyChip(level: 3, label: 'Casual', elo: '1200'),
+                    const SizedBox(width: 8),
+                    _buildDifficultyChip(level: 5, label: 'Intermediate', elo: '1500'),
+                    const SizedBox(width: 8),
+                    _buildDifficultyChip(level: 8, label: 'Advanced', elo: '1800'),
+                    const SizedBox(width: 8),
+                    _buildDifficultyChip(level: 10, label: 'Grandmaster', elo: '2200'),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 18),
+            // Section 2: Side Selection
+            _buildSectionHeader('PLAY AS', Icons.pie_chart_outline),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildSelectCard(
+                    title: 'White',
+                    subtitle: 'First Move',
+                    icon: Icons.radio_button_checked,
+                    iconColor: Colors.white,
+                    isSelected: _setupSide == 'white',
+                    onTap: () => setState(() => _setupSide = 'white'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildSelectCard(
+                    title: 'Random',
+                    subtitle: '50 / 50',
+                    icon: Icons.shuffle_rounded,
+                    isSelected: _setupSide == 'random',
+                    onTap: () => setState(() => _setupSide = 'random'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildSelectCard(
+                    title: 'Black',
+                    subtitle: 'Second Move',
+                    icon: Icons.radio_button_checked,
+                    iconColor: Colors.black87,
+                    isSelected: _setupSide == 'black',
+                    onTap: () => setState(() => _setupSide = 'black'),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 18),
+            // Section 3: Time Control
+            _buildSectionHeader('TIME CONTROL', Icons.timer_outlined),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildTimeControlChip(10, '10 min', 'Rapid'),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildTimeControlChip(5, '5 min', 'Blitz'),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildTimeControlChip(3, '3 min', 'Blitz'),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildTimeControlChip(0, '∞', 'Casual'),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 18),
+            // Section 4: Playing Surface
+            _buildSectionHeader('PLAYING SURFACE', Icons.sports_kabaddi_outlined),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildSelectCard(
+                    title: 'Phone Screen',
+                    subtitle: 'Digital App Play',
+                    icon: Icons.smartphone_rounded,
+                    isSelected: _setupSurface == _PlaySurface.app,
+                    onTap: () => setState(() => _setupSurface = _PlaySurface.app),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildSelectCard(
+                    title: 'RoboChess Board',
+                    subtitle: 'Physical Robotic Board',
+                    icon: Icons.grid_on_rounded,
+                    isSelected: _setupSurface == _PlaySurface.board,
+                    onTap: () => setState(() => _setupSurface = _PlaySurface.board),
+                  ),
+                ),
+              ],
+            ),
+
+            // If Physical Board: Step-by-Step Setup Checklist
+            if (_setupSurface == _PlaySurface.board) ...[
+              const SizedBox(height: 20),
+              _buildBoardSetupWizard(context, activeDevice),
+            ],
+
+            const SizedBox(height: 24),
+            // Main Start Game CTA
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton(
+                onPressed: _syncing ? null : () => _startMatchFromSetup(activeDevice),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kPrimary,
+                  foregroundColor: kOnPrimary,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  elevation: 4,
+                  shadowColor: kPrimary.withValues(alpha: 0.4),
+                ),
+                child: _syncing
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                      )
+                    : Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            _setupSurface == _PlaySurface.board
+                                ? Icons.precision_manufacturing_rounded
+                                : Icons.play_arrow_rounded,
+                            size: 24,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _setupSurface == _PlaySurface.board
+                                ? 'START MATCH ON BOARD'
+                                : 'START CHESS MATCH',
+                            style: GoogleFonts.outfit(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.5,
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Setup Helpers & Cards ─────────────────────────────────────────────────
+  Widget _buildSectionHeader(String title, IconData icon) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: kPrimary),
+        const SizedBox(width: 8),
+        Text(
+          title,
+          style: GoogleFonts.outfit(
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            color: kOnSurfaceVariant,
+            letterSpacing: 1.2,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSelectCard({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    Color? iconColor,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: isSelected ? kPrimary.withValues(alpha: 0.1) : kSurfaceContLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color: isSelected ? kPrimary : kOutlineVariant.withValues(alpha: 0.15),
+          width: isSelected ? 2 : 1,
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: iconColor ?? (isSelected ? kPrimary : kOnSurfaceVariant), size: 24),
+              const SizedBox(height: 6),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.outfit(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: isSelected ? kPrimary : kOnSurface,
+                ),
+              ),
+              Text(
+                subtitle,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color:
-                        _statusMessage.contains('Check') ? kError : kPrimary)),
+                  fontSize: 9,
+                  color: kOnSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDifficultyChip({required int level, required String label, required String elo}) {
+    final isSelected = _setupDifficulty == level;
+    return Material(
+      color: isSelected ? kPrimary : kSurfaceContLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isSelected ? kPrimary : kOutlineVariant.withValues(alpha: 0.2),
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => setState(() => _setupDifficulty = level),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Column(
+            children: [
+              Text(
+                label,
+                style: GoogleFonts.outfit(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: isSelected ? Colors.white : kOnSurface,
+                ),
+              ),
+              Text(
+                'L$level • $elo',
+                style: GoogleFonts.inter(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: isSelected ? Colors.white70 : kOnSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimeControlChip(int minutes, String label, String sub) {
+    final isSelected = _setupTimeControlMinutes == minutes;
+    return Material(
+      color: isSelected ? kPrimary : kSurfaceContLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isSelected ? kPrimary : kOutlineVariant.withValues(alpha: 0.2),
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => setState(() => _setupTimeControlMinutes = minutes),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          child: Column(
+            children: [
+              Text(
+                label,
+                style: GoogleFonts.outfit(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: isSelected ? Colors.white : kOnSurface,
+                ),
+              ),
+              Text(
+                sub,
+                style: GoogleFonts.inter(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
+                  color: isSelected ? Colors.white70 : kOnSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBoardSetupWizard(BuildContext context, DeviceModel? activeDevice) {
+    final isLinked = activeDevice != null;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: kSurfaceContLow,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kPrimary.withValues(alpha: 0.3), width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: kPrimary.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.checklist_rounded, color: kPrimary, size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'PHYSICAL BOARD SETUP CHECKLIST',
+                      style: GoogleFonts.outfit(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: kOnSurface,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    Text(
+                      'Complete hardware readiness before launching match',
+                      style: GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // Step 1: Connect Board
+          _buildWizardStepItem(
+            stepNumber: '1',
+            title: 'Link RoboChess Board',
+            subtitle: isLinked
+                ? 'Connected: ${activeDevice.deviceId}'
+                : 'No board linked. Connect via Wi-Fi/Bluetooth.',
+            isComplete: isLinked,
+            busy: false,
+            actionLabel: isLinked ? 'CHANGE' : 'LINK BOARD',
+            onAction: () => context.push('/connect'),
+          ),
+          const SizedBox(height: 10),
+
+          // Step 2: Vision Model
+          _buildWizardStepItem(
+            stepNumber: '2',
+            title: 'Neural Vision Model',
+            subtitle: _setupModelLoaded
+                ? 'YOLO Piece Model Loaded ✓'
+                : 'Loads neural network for piece detection',
+            isComplete: _setupModelLoaded,
+            busy: _setupBusy && !_setupModelLoaded,
+            actionLabel: _setupModelLoaded ? 'READY' : 'LOAD MODEL',
+            onAction: _setupModelLoaded ? null : _setupLoadModel,
+          ),
+          const SizedBox(height: 10),
+
+          // Step 3: Grid Calibration
+          _buildWizardStepItem(
+            stepNumber: '3',
+            title: 'Camera Grid Calibration',
+            subtitle: _setupCalibrated
+                ? '64-Square Coordinate Mapping Saved ✓'
+                : 'Aligns camera perspective to physical squares',
+            isComplete: _setupCalibrated,
+            busy: _setupBusy && !_setupCalibrated,
+            actionLabel: _setupCalibrated ? 'RE-CAL' : 'CALIBRATE',
+            onAction: _setupAutoCalibrate,
+            secondaryLabel: 'MANUAL',
+            onSecondaryAction: _setupManualCalibrate,
+          ),
+          const SizedBox(height: 10),
+
+          // Step 4: Piece Setup & Placement Verification
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _setupValidated
+                  ? kPrimary.withValues(alpha: 0.08)
+                  : kSurfaceContHighest.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _setupValidated
+                    ? kPrimary.withValues(alpha: 0.4)
+                    : kOutlineVariant.withValues(alpha: 0.2),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: _setupValidated ? kPrimary : kSurfaceContHighest,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: _setupValidated
+                            ? const Icon(Icons.check, size: 14, color: Colors.white)
+                            : Text('4', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w800, color: kOnSurfaceVariant)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Starting Position Verification',
+                            style: GoogleFonts.outfit(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: kOnSurface,
+                            ),
+                          ),
+                          Text(
+                            'Place all 32 pieces in standard starting squares (ranks 1-2 & 7-8).',
+                            style: GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () => setState(() => _setupShowCamera = !_setupShowCamera),
+                      icon: Icon(_setupShowCamera ? Icons.videocam_off_outlined : Icons.videocam_outlined, size: 16),
+                      label: Text(_setupShowCamera ? 'HIDE CAM' : 'PREVIEW CAM', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700)),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        minimumSize: Size.zero,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: _setupBusy ? null : _setupValidateBoard,
+                        icon: _setupBusy
+                            ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                            : const Icon(Icons.center_focus_strong_rounded, size: 16),
+                        label: Text('VERIFY PIECES', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700)),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: kPrimary,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          minimumSize: Size.zero,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_setupShowCamera) ...[
+                  const SizedBox(height: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: SizedBox(
+                      height: 160,
+                      width: double.infinity,
+                      child: PiLiveCameraView(
+                        baseUrl: AppConfig.piLocalApiBaseUrl,
+                      ),
+                    ),
+                  ),
+                ],
+                if (_setupValidationNote != null) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: _setupValidated
+                          ? kPrimary.withValues(alpha: 0.12)
+                          : kError.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _setupValidated
+                            ? kPrimary.withValues(alpha: 0.3)
+                            : kError.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _setupValidationNote!,
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: _setupValidated ? kPrimary : kError,
+                          ),
+                        ),
+                        if (!_setupValidated) ...[
+                          const SizedBox(height: 6),
+                          GestureDetector(
+                            onTap: _setupForceValidate,
+                            child: Text(
+                              'Force-confirm standard initial position →',
+                              style: GoogleFonts.inter(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: kSecondary,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
 
-          if (_openingContext != null) ...[
-            _OpeningHintBanner(name: _openingContext!.name),
-            const SizedBox(height: 12),
+          if (_setupError != null) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: kError.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                _setupError!,
+                style: GoogleFonts.inter(fontSize: 11, color: kError, fontWeight: FontWeight.w600),
+              ),
+            ),
           ],
+        ],
+      ),
+    );
+  }
 
-          if (_gameUsesBoard && _linkedGameId != null) ...[
-            const SizedBox(height: 12),
-            _buildLiveBoardPreview(),
-            const SizedBox(height: 12),
-            _buildBoardValidationActions(),
+  Widget _buildWizardStepItem({
+    required String stepNumber,
+    required String title,
+    required String subtitle,
+    required bool isComplete,
+    required bool busy,
+    required String actionLabel,
+    required VoidCallback? onAction,
+    String? secondaryLabel,
+    VoidCallback? onSecondaryAction,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isComplete
+            ? kPrimary.withValues(alpha: 0.08)
+            : kSurfaceContHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isComplete
+              ? kPrimary.withValues(alpha: 0.35)
+              : kOutlineVariant.withValues(alpha: 0.15),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: isComplete ? kPrimary : kSurfaceContHighest,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: isComplete
+                  ? const Icon(Icons.check, size: 14, color: Colors.white)
+                  : Text(
+                      stepNumber,
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: kOnSurfaceVariant,
+                      ),
+                    ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.outfit(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: kOnSurface,
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: GoogleFonts.inter(fontSize: 11, color: kOnSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          if (secondaryLabel != null && onSecondaryAction != null && !isComplete) ...[
+            OutlinedButton(
+              onPressed: busy ? null : onSecondaryAction,
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                minimumSize: Size.zero,
+              ),
+              child: Text(secondaryLabel, style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w700)),
+            ),
+            const SizedBox(width: 6),
           ],
-
-          // ── Board ──
-          _buildChessBoard(context),
-
-          const SizedBox(height: 20),
-          _MoveHistoryCard(history: _moveHistory),
-          const SizedBox(height: 12),
-          _AIInsightCard(game: _game),
-          const SizedBox(height: 16),
-          _GameControls(
-            onUndo: _undoMove,
-            onAnalyze: _linkedGameId != null
-                ? () => context.push('/analysis?game_id=$_linkedGameId')
-                : null,
-            onResign: _game.game_over || _linkedGameId == null
-                ? null
-                : _resignGame,
-            gameMode: _gameMode,
+          FilledButton(
+            onPressed: busy ? null : onAction,
+            style: FilledButton.styleFrom(
+              backgroundColor: isComplete ? kPrimary.withValues(alpha: 0.2) : kPrimary,
+              foregroundColor: isComplete ? kPrimary : kOnPrimary,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              minimumSize: Size.zero,
+            ),
+            child: busy
+                ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : Text(actionLabel, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w800)),
           ),
-          const SizedBox(height: 12),
-          _VoiceCommandButton(
-            expanded: _voiceExpanded,
-            micActive: _micActive,
-            voiceStatus: _voiceStatus,
-            lastParsedMove: _lastParsedMove,
-            micDevices: _micDevices,
-            selectedMicId: _selectedMicId,
-            micDevicesLoading: _micDevicesLoading,
-            micDropdownOpen: _micDropdownOpen,
-            onToggle: () => setState(() => _voiceExpanded = !_voiceExpanded),
-            onMicToggle: _onMicToggle,
-            onRefreshMics: _loadMicDevices,
-            onMicSelected: _selectMicDevice,
-            onMicDropdownToggle: () =>
-                setState(() => _micDropdownOpen = !_micDropdownOpen),
+        ],
+      ),
+    );
+  }
+
+  // ── VIEW 2: Chess.com Style Active Game Arena ─────────────────────────────
+  Widget _buildChessComGameScreen(BuildContext context, DeviceModel? activeDevice) {
+    final captured = _calculateCaptured(_game);
+    final isWhiteTurn = _game.turn == chess.Color.WHITE;
+    final profileAsync = ref.watch(userProfileProvider);
+    final userDisplayName = profileAsync.valueOrNull?.displayName ?? 'Player';
+
+    // Top bar is ALWAYS the opponent/bot; bottom bar is ALWAYS the human user
+    final topIsUser = false;
+    final topIsWhite = _boardFlipped;
+    final topIsTurn = topIsWhite ? isWhiteTurn : !isWhiteTurn;
+    final topClock = topIsWhite ? _whiteClock : _blackClock;
+    final topName = topIsUser
+        ? userDisplayName
+        : (_gameMode == 'human_vs_ai' ? 'RoboBot (Level $_setupDifficulty)' : 'Opponent');
+    final topRating = topIsUser ? '1200' : '${700 + _setupDifficulty * 150}';
+    final topCaptured = topIsWhite ? captured.blackLost : captured.whiteLost;
+    final topAdvantage = topIsWhite ? captured.whiteAdvantage : captured.blackAdvantage;
+
+    // Bottom player is White if not flipped, Black if flipped
+    final bottomIsUser = true;
+    final bottomIsWhite = !_boardFlipped;
+    final bottomIsTurn = bottomIsWhite ? isWhiteTurn : !isWhiteTurn;
+    final bottomClock = bottomIsWhite ? _whiteClock : _blackClock;
+    final bottomName = bottomIsUser
+        ? userDisplayName
+        : (_gameMode == 'human_vs_ai' ? 'RoboBot (Level $_setupDifficulty)' : 'Opponent');
+    final bottomRating = bottomIsUser ? '1200' : '${700 + _setupDifficulty * 150}';
+    final bottomCaptured = bottomIsWhite ? captured.blackLost : captured.whiteLost;
+    final bottomAdvantage = bottomIsWhite ? captured.whiteAdvantage : captured.blackAdvantage;
+
+    return Scaffold(
+      backgroundColor: kBackground,
+      appBar: RoboAppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, color: kOnSurfaceVariant),
+          tooltip: 'Match Setup',
+          onPressed: _confirmExitToSetup,
+        ),
+        sectionBadge: _gameMode == 'human_vs_ai'
+            ? 'VS BOT (LVL $_setupDifficulty)'
+            : (_gameMode == 'human_vs_human' ? 'PASS & PLAY' : 'ONLINE MATCH'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.palette_outlined, color: kOnSurface, size: 20),
+            tooltip: 'Chessboard Theme',
+            onPressed: () => _showBoardThemeSheet(context),
           ),
-        ]),
+          IconButton(
+            icon: const Icon(Icons.sync_alt_rounded, color: kOnSurface, size: 20),
+            tooltip: 'Flip Board',
+            onPressed: () => setState(() => _boardFlipped = !_boardFlipped),
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined, color: kOnSurface, size: 20),
+            tooltip: 'Match Settings',
+            onPressed: _confirmExitToSetup,
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(14, 6, 14, 80),
+          child: Column(
+            children: [
+              // Check or Sync Warning Banner
+              if (_statusMessage.contains('Check') || _syncError != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  margin: const EdgeInsets.only(bottom: 8),
+                  decoration: BoxDecoration(
+                    color: _syncError != null
+                        ? kError.withValues(alpha: 0.12)
+                        : kError.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    _syncError ?? _statusMessage,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: kError,
+                    ),
+                  ),
+                ),
+
+              // ── Opponent Player Bar (Chess.com layout) ──
+              _buildChessComPlayerBar(
+                context: context,
+                name: topName,
+                rating: topRating,
+                isTurn: topIsTurn,
+                clock: topClock,
+                isBot: !topIsUser && _gameMode == 'human_vs_ai',
+                capturedPieces: topCaptured,
+                materialAdvantage: topAdvantage,
+                isUser: topIsUser,
+                isWhitePieceColor: !topIsWhite,
+              ),
+
+              const SizedBox(height: 8),
+
+              // ── The Chessboard ──
+              Stack(
+                children: [
+                  _buildChessBoard(context),
+                  if (_gameUsesBoard)
+                    Positioned(
+                      top: 12,
+                      right: 12,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black87,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: kPrimary, width: 1),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(width: 6, height: 6, decoration: const BoxDecoration(color: Colors.greenAccent, shape: BoxShape.circle)),
+                            const SizedBox(width: 6),
+                            Text('BOARD SYNCED', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: 1)),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+
+              // ── User Player Bar (Chess.com layout) ──
+              _buildChessComPlayerBar(
+                context: context,
+                name: bottomName,
+                rating: bottomRating,
+                isTurn: bottomIsTurn,
+                clock: bottomClock,
+                isBot: !bottomIsUser && _gameMode == 'human_vs_ai',
+                capturedPieces: bottomCaptured,
+                materialAdvantage: bottomAdvantage,
+                isUser: bottomIsUser,
+                isWhitePieceColor: !bottomIsWhite,
+              ),
+
+              const SizedBox(height: 10),
+
+              // ── SAN Move History Ribbon (Chess.com layout) ──
+              _buildChessComMoveRibbon(),
+
+              const SizedBox(height: 10),
+
+              // ── Chess.com Action Toolbar ──
+              _buildChessComToolbar(),
+
+              // ── Live Camera or Board Validation if board used ──
+              if (_gameUsesBoard && _linkedGameId != null) ...[
+                const SizedBox(height: 12),
+                _buildLiveBoardPreview(),
+                const SizedBox(height: 10),
+                _buildBoardValidationActions(),
+              ],
+
+              // ── Voice Command Panel ──
+              const SizedBox(height: 10),
+              _VoiceCommandButton(
+                expanded: _voiceExpanded,
+                micActive: _micActive,
+                voiceStatus: _voiceStatus,
+                lastParsedMove: _lastParsedMove,
+                micDevices: _micDevices,
+                selectedMicId: _selectedMicId,
+                micDevicesLoading: _micDevicesLoading,
+                micDropdownOpen: _micDropdownOpen,
+                onToggle: () => setState(() => _voiceExpanded = !_voiceExpanded),
+                onMicToggle: _onMicToggle,
+                onRefreshMics: _loadMicDevices,
+                onMicSelected: _selectMicDevice,
+                onMicDropdownToggle: () =>
+                    setState(() => _micDropdownOpen = !_micDropdownOpen),
+              ),
+
+              if (_openingContext != null) ...[
+                const SizedBox(height: 12),
+                _OpeningHintBanner(name: _openingContext!.name),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Chess.com In-Game Widgets ─────────────────────────────────────────────
+  Widget _buildChessComPlayerBar({
+    required BuildContext context,
+    required String name,
+    required String rating,
+    required bool isTurn,
+    required Duration clock,
+    required bool isBot,
+    required List<String> capturedPieces,
+    required int materialAdvantage,
+    required bool isUser,
+    required bool isWhitePieceColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: isTurn ? kPrimary.withValues(alpha: 0.07) : kSurfaceContLow,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isTurn ? kPrimary.withValues(alpha: 0.6) : kOutlineVariant.withValues(alpha: 0.15),
+          width: isTurn ? 1.5 : 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          if (isUser)
+            const AnimatedProfileAvatar(size: 38)
+          else if (isBot)
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: kSecondary.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: kSecondary.withValues(alpha: 0.3)),
+              ),
+              child: const Icon(Icons.smart_toy_rounded, color: kSecondary, size: 20),
+            )
+          else
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: kPrimary.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: kPrimary.withValues(alpha: 0.3)),
+              ),
+              child: const Icon(Icons.person, color: kPrimary, size: 20),
+            ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.outfit(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: kOnSurface,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: kSurfaceContHighest,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        rating,
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: kOnSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Row(
+                  children: [
+                    if (capturedPieces.isNotEmpty)
+                      Text(
+                        capturedPieces.map((p) => _pieceGlyph(p, isWhitePieceColor)).join(' '),
+                        style: const TextStyle(fontSize: 13, height: 1.1),
+                      )
+                    else
+                      Text(
+                        isTurn ? 'TO MOVE' : 'WAITING',
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: isTurn ? kPrimary : kOnSurfaceVariant,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                    if (materialAdvantage > 0) ...[
+                      const SizedBox(width: 4),
+                      Text(
+                        '+$materialAdvantage',
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: kPrimary,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: isTurn ? kPrimary.withValues(alpha: 0.18) : kSurfaceContHighest.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isTurn ? kPrimary : kOutlineVariant.withValues(alpha: 0.2),
+                width: isTurn ? 1.5 : 1,
+              ),
+              boxShadow: isTurn
+                  ? [
+                      BoxShadow(
+                        color: kPrimary.withValues(alpha: 0.2),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Text(
+              _setupTimeControlMinutes == 0 ? '∞' : _formatClock(clock),
+              style: GoogleFonts.outfit(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.5,
+                color: isTurn ? kPrimary : kOnSurface,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChessComMoveRibbon() {
+    if (_moveHistory.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: kSurfaceContLow,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Center(
+          child: Text(
+            'Make your first move to begin',
+            style: GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant, fontStyle: FontStyle.italic),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: kSurfaceContLow,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: kOutlineVariant.withValues(alpha: 0.15)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: _moveHistory.length,
+              itemBuilder: (ctx, idx) {
+                final move = _moveHistory[idx];
+                final isLast = idx == _moveHistory.length - 1;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Row(
+                    children: [
+                      Text(
+                        '${move[0]}.',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: kOnSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(width: 3),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: isLast && move[2] == null
+                              ? kPrimary.withValues(alpha: 0.15)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          move[1] ?? '',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: isLast && move[2] == null ? kPrimary : kOnSurface,
+                          ),
+                        ),
+                      ),
+                      if (move[2] != null) ...[
+                        const SizedBox(width: 3),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: isLast ? kPrimary.withValues(alpha: 0.15) : Colors.transparent,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            move[2]!,
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: isLast ? kPrimary : kOnSurface,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          const VerticalDivider(width: 12, indent: 6, endIndent: 6),
+          IconButton(
+            icon: const Icon(Icons.undo_rounded, size: 18),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            tooltip: 'Undo move',
+            onPressed: _undoMove,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChessComToolbar() {
+    final canOfferDraw = _gameMode == 'human_vs_human';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: kSurfaceContLow,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: kOutlineVariant.withValues(alpha: 0.15)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _buildToolbarItem(
+            icon: Icons.flag_outlined,
+            label: 'Resign',
+            color: kError,
+            onTap: _game.game_over || _linkedGameId == null ? null : _resignGame,
+          ),
+          if (canOfferDraw)
+            _buildToolbarItem(
+              icon: Icons.handshake_outlined,
+              label: 'Draw',
+              color: kOnSurfaceVariant,
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Draw offer sent')),
+                );
+              },
+            ),
+          _buildToolbarItem(
+            icon: Icons.undo_rounded,
+            label: 'Undo',
+            color: kOnSurface,
+            onTap: _undoMove,
+          ),
+          _buildToolbarItem(
+            icon: _micActive ? Icons.mic : Icons.mic_none,
+            label: 'Voice',
+            color: _micActive ? kPrimary : kOnSurfaceVariant,
+            onTap: () => setState(() => _voiceExpanded = !_voiceExpanded),
+          ),
+          if (_gameUsesBoard)
+            _buildToolbarItem(
+              icon: Icons.videocam_outlined,
+              label: 'Board Cam',
+              color: _liveFrame != null ? kSecondary : kOnSurfaceVariant,
+              onTap: () {
+                if (_liveFrame == null) {
+                  _fetchLiveFrame();
+                } else {
+                  _clearSnapshot();
+                }
+              },
+            ),
+          _buildToolbarItem(
+            icon: Icons.add_circle_outline_rounded,
+            label: 'New Match',
+            color: kPrimary,
+            onTap: _confirmExitToSetup,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToolbarItem({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: onTap == null ? color.withValues(alpha: 0.3) : color, size: 20),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+                color: onTap == null ? color.withValues(alpha: 0.3) : color,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1205,7 +2975,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                   onPressed: _inGameValidating ? null : _validateBoardInGame,
                   icon: const Icon(Icons.verified, size: 14),
                   label: Text('VALIDATE',
-                      style: GoogleFonts.spaceGrotesk(
+                      style: GoogleFonts.outfit(
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 1)),
@@ -1222,7 +2992,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                   onPressed: _inGameValidating ? null : _forceValidateInGame,
                   icon: const Icon(Icons.flash_on, size: 14),
                   label: Text('FORCE VALIDATE',
-                      style: GoogleFonts.spaceGrotesk(
+                      style: GoogleFonts.outfit(
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 1)),
@@ -1248,131 +3018,270 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   // ── Interactive board builder ──
   Widget _buildChessBoard(BuildContext context) {
-    final inputEnabled = !_gameUsesBoard;
+    final isHumanTurn = _gameMode != 'human_vs_ai' || _game.turn == _humanColor();
+    final inputEnabled = !_gameUsesBoard && !_game.game_over && isHumanTurn;
+    final boardTheme = ref.watch(boardThemeProvider);
     return AspectRatio(
       aspectRatio: 1,
       child: Container(
         decoration: BoxDecoration(
-          color: kSurfaceContHighest,
-          borderRadius: BorderRadius.circular(14),
+          color: boardTheme.frameColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: kWoodBrassAccent.withOpacity(0.4),
+            width: 2,
+          ),
           boxShadow: [
             BoxShadow(
-                color: kPrimary.withOpacity(0.05),
-                blurRadius: 40,
-                spreadRadius: 10)
+              color: const Color(0xFF4A2E1B).withOpacity(0.22),
+              blurRadius: 24,
+              offset: const Offset(0, 8),
+            ),
           ],
         ),
-        padding: const EdgeInsets.all(6),
-        child: GridView.builder(
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 8),
-          itemCount: 64,
-          itemBuilder: (_, idx) {
-            final row = idx ~/ 8;
-            final col = idx % 8;
-            final squareName = _squareName(row, col);
-            final isLight = (row + col) % 2 == 0;
-            final piece = _game.get(squareName);
+        padding: const EdgeInsets.all(8),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: GridView.builder(
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 8),
+            itemCount: 64,
+            itemBuilder: (_, idx) {
+              final row = idx ~/ 8;
+              final col = idx % 8;
+              final squareName = _squareName(row, col);
+              final isLight = (row + col) % 2 == 0;
+              final piece = _game.get(squareName);
 
-            // Highlighting
-            final isSelected = inputEnabled && squareName == _selectedSquare;
-            final isLegalDest =
-                inputEnabled && _legalDestinations.contains(squareName);
-            final isLastMove =
-                squareName == _lastMoveFrom || squareName == _lastMoveTo;
+              // Highlighting
+              final isSelected = inputEnabled && squareName == _selectedSquare;
+              final isLegalDest =
+                  inputEnabled && _legalDestinations.contains(squareName);
+              final isLastMove =
+                  squareName == _lastMoveFrom || squareName == _lastMoveTo;
 
-            Color bgColor;
-            if (isSelected) {
-              bgColor = kPrimary.withOpacity(0.35);
-            } else if (isLastMove) {
-              bgColor = kPrimary.withOpacity(0.15);
-            } else {
-              bgColor = isLight ? kSurfaceContHigh : kSurfaceContLow;
-            }
+              final displayRow = _boardFlipped ? 7 - row : row;
+              final displayCol = _boardFlipped ? 7 - col : col;
 
-            return GestureDetector(
-              onTap: inputEnabled ? () => _onSquareTap(row, col) : null,
-              child: Container(
-                decoration: BoxDecoration(color: bgColor),
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    // Legal move dot
-                    if (isLegalDest && piece == null)
-                      Container(
-                        width: 10,
-                        height: 10,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: kPrimary.withOpacity(0.4),
+              Color bgColor;
+              if (isSelected) {
+                bgColor = kPrimaryContainer.withOpacity(0.45);
+              } else if (isLastMove) {
+                bgColor = kPrimaryContainer.withOpacity(0.22);
+              } else {
+                bgColor = isLight ? boardTheme.lightSquare : boardTheme.darkSquare;
+              }
+
+              return GestureDetector(
+                onTap: inputEnabled ? () => _onSquareTap(row, col) : null,
+                child: Container(
+                  decoration: BoxDecoration(color: bgColor),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Legal move dot
+                      if (isLegalDest && piece == null)
+                        Container(
+                          width: 12,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: kPrimary.withOpacity(0.55),
+                          ),
                         ),
-                      ),
-                    // Legal capture ring
-                    if (isLegalDest && piece != null)
-                      Container(
-                        width: 34,
-                        height: 34,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                              color: kPrimary.withOpacity(0.6), width: 3),
+                      // Legal capture ring
+                      if (isLegalDest && piece != null)
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                                color: kPrimary, width: 3),
+                          ),
                         ),
-                      ),
-                    // Piece
-                    if (piece != null)
-                      Text(
-                        _pieceSymbols[piece.type.toString().toLowerCase()] ??
-                            '',
-                        style: TextStyle(
-                          fontSize: 24,
-                          color: piece.color == chess.Color.WHITE
-                              ? kPrimary
-                              : kSecondary,
-                          shadows: [
-                            Shadow(
-                              color: (piece.color == chess.Color.WHITE
-                                      ? kPrimary
-                                      : kSecondary)
-                                  .withOpacity(0.4),
-                              blurRadius: 8,
+                      // Piece
+                      if (piece != null)
+                        Padding(
+                          padding: const EdgeInsets.all(3.0),
+                          child: ChessPieceWidget.fromPiece(
+                            piece: piece,
+                          ),
+                        ),
+                      // Rank/file labels
+                      if (col == 0)
+                        Positioned(
+                          top: 2,
+                          left: 3,
+                          child: Text(
+                            '${8 - displayRow}',
+                            style: TextStyle(
+                              fontSize: 8,
+                              fontWeight: FontWeight.w800,
+                              color: isLight
+                                  ? boardTheme.darkSquare.withValues(alpha: 0.85)
+                                  : boardTheme.lightSquare.withValues(alpha: 0.85),
                             ),
-                          ],
+                          ),
                         ),
-                      ),
-                    // Rank/file labels
-                    if (col == 0)
-                      Positioned(
-                        top: 1,
-                        left: 2,
-                        child: Text('${8 - row}',
+                      if (row == 7)
+                        Positioned(
+                          bottom: 2,
+                          right: 3,
+                          child: Text(
+                            String.fromCharCode('a'.codeUnitAt(0) + displayCol),
                             style: TextStyle(
-                                fontSize: 7,
-                                fontWeight: FontWeight.w700,
-                                color: isLight
-                                    ? kSurfaceContLow
-                                    : kSurfaceContHigh)),
-                      ),
-                    if (row == 7)
-                      Positioned(
-                        bottom: 1,
-                        right: 2,
-                        child: Text(
-                            String.fromCharCode('a'.codeUnitAt(0) + col),
-                            style: TextStyle(
-                                fontSize: 7,
-                                fontWeight: FontWeight.w700,
-                                color: isLight
-                                    ? kSurfaceContLow
-                                    : kSurfaceContHigh)),
-                      ),
+                              fontSize: 8,
+                              fontWeight: FontWeight.w800,
+                              color: isLight
+                                  ? boardTheme.darkSquare.withValues(alpha: 0.85)
+                                  : boardTheme.lightSquare.withValues(alpha: 0.85),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showBoardThemeSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: kSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return Consumer(
+          builder: (context, ref, _) {
+            final activeTheme = ref.watch(boardThemeProvider);
+            return SafeArea(
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Chessboard Theme',
+                          style: GoogleFonts.outfit(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: kOnSurface,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 20, color: kOnSurfaceVariant),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    ...kBoardThemes.map((theme) {
+                      final isSelected = theme.id == activeTheme.id;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Material(
+                          color: isSelected ? kPrimary.withValues(alpha: 0.08) : kSurfaceContLow,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            side: BorderSide(
+                              color: isSelected ? kPrimary : kOutlineVariant,
+                              width: isSelected ? 2 : 1,
+                            ),
+                          ),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(14),
+                            onTap: () {
+                              ref.read(boardThemeProvider.notifier).setTheme(theme);
+                              Navigator.pop(ctx);
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 38,
+                                    height: 38,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: theme.frameColor, width: 2),
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(6),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Column(
+                                              children: [
+                                                Expanded(child: Container(color: theme.lightSquare)),
+                                                Expanded(child: Container(color: theme.darkSquare)),
+                                              ],
+                                            ),
+                                          ),
+                                          Expanded(
+                                            child: Column(
+                                              children: [
+                                                Expanded(child: Container(color: theme.darkSquare)),
+                                                Expanded(child: Container(color: theme.lightSquare)),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          theme.name,
+                                          style: GoogleFonts.outfit(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 15,
+                                            color: kOnSurface,
+                                          ),
+                                        ),
+                                        Text(
+                                          theme.description,
+                                          style: GoogleFonts.inter(
+                                            fontSize: 12,
+                                            color: kOnSurfaceVariant,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (isSelected)
+                                    const Icon(Icons.check_circle_rounded, color: kPrimary, size: 22),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
                   ],
                 ),
               ),
             );
           },
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -1421,7 +3330,7 @@ class _BoardSyncCard extends StatelessWidget {
               const Icon(Icons.router, color: kSecondary, size: 18),
               const SizedBox(width: 8),
               Text('ACTIVE BOARD',
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.cinzel(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
                       color: kOnSurface)),
@@ -1467,7 +3376,7 @@ class _BoardSyncCard extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
               child: Text(syncing ? 'SYNCING...' : 'NEW GAME',
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.outfit(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 2)),
@@ -1478,10 +3387,6 @@ class _BoardSyncCard extends StatelessWidget {
     );
   }
 }
-
-enum _PlaySurface { board, app }
-
-enum _OpponentType { bot, friend }
 
 class _PreGameResult {
   final String mode;
@@ -1662,7 +3567,7 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Prepare Game',
-                style: GoogleFonts.spaceGrotesk(
+                style: GoogleFonts.outfit(
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
                     color: kOnSurface)),
@@ -1819,7 +3724,7 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
                           onPressed: _busy ? null : _debugCalibration,
                           icon: const Icon(Icons.bug_report, size: 14),
                           label: Text('DIAGNOSTICS',
-                              style: GoogleFonts.spaceGrotesk(
+                              style: GoogleFonts.outfit(
                                   fontSize: 10,
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: 1)),
@@ -1837,7 +3742,7 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
                           onPressed: _busy ? null : _forceValidate,
                           icon: const Icon(Icons.flash_on, size: 14),
                           label: Text('FORCE PROCEED',
-                              style: GoogleFonts.spaceGrotesk(
+                              style: GoogleFonts.outfit(
                                   fontSize: 10,
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: 1)),
@@ -1872,7 +3777,7 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
                       borderRadius: BorderRadius.circular(12)),
                 ),
                 child: Text(startLabel,
-                    style: GoogleFonts.spaceGrotesk(
+                    style: GoogleFonts.outfit(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 2)),
@@ -2017,13 +3922,18 @@ class _PlayerRow extends ConsumerWidget {
               decoration: BoxDecoration(
                   color: kSecondary.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(10)),
-              child: const Icon(Icons.smart_toy, color: kSecondary, size: 20)),
+              child: const Icon(Icons.psychology, color: kSecondary, size: 20)),
           const SizedBox(width: 10),
-          Text('AI LEVEL 8',
-              style: GoogleFonts.spaceGrotesk(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: kOnSurface)),
+          Flexible(
+            child: Text('AI LEVEL 8',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.outfit(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: kOnSurface)),
+          ),
+          const SizedBox(width: 8),
           const Spacer(),
           Text(isWhiteTurn ? 'WAITING' : 'TO MOVE',
               style: GoogleFonts.inter(
@@ -2047,12 +3957,17 @@ class _PlayerRow extends ConsumerWidget {
                   fontWeight: FontWeight.w700,
                   color: isWhiteTurn ? kPrimary : kOnSurfaceVariant,
                   letterSpacing: 2)),
+          const SizedBox(width: 8),
           const Spacer(),
-          Text(displayName,
-              style: GoogleFonts.spaceGrotesk(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: kOnSurface)),
+          Flexible(
+            child: Text(displayName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.outfit(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: kOnSurface)),
+          ),
           const SizedBox(width: 10),
           Container(
               padding: const EdgeInsets.all(8),
@@ -2212,7 +4127,7 @@ class _AIInsightCard extends StatelessWidget {
           ]),
           const SizedBox(height: 6),
           Text(insight.headline,
-              style: GoogleFonts.spaceGrotesk(
+              style: GoogleFonts.outfit(
                   fontSize: 15,
                   fontWeight: FontWeight.w700,
                   color: kOnSurface)),
@@ -2433,7 +4348,7 @@ class _OpeningHintBanner extends StatelessWidget {
                       letterSpacing: 2)),
               const SizedBox(height: 3),
               Text(name,
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.outfit(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
                       color: kOnSurface)),
@@ -2959,7 +4874,7 @@ class _VoiceCommandButton extends StatelessWidget {
                   ),
                   child: Text(
                     lastParsedMove!,
-                    style: GoogleFonts.spaceGrotesk(
+                    style: GoogleFonts.outfit(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
                       color:

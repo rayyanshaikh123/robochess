@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'presentation/theme/app_theme.dart';
+import 'presentation/screens/splash_screen.dart';
+import 'presentation/screens/onboarding_screen.dart';
 import 'presentation/screens/login_screen.dart';
 import 'presentation/screens/main_scaffold.dart';
 import 'presentation/screens/home_dashboard.dart';
@@ -20,6 +22,7 @@ import 'presentation/screens/register_screen.dart';
 import 'presentation/screens/board_link_screen.dart';
 import 'presentation/screens/ble_provision_screen.dart';
 import 'presentation/screens/board_details_screen.dart';
+import 'presentation/screens/board_setup_screen.dart';
 import 'presentation/screens/local_board_screen.dart';
 import 'presentation/screens/lesson_track_screen.dart';
 import 'presentation/providers/session_provider.dart';
@@ -32,19 +35,30 @@ void main() {
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 
-GoRouter _buildRouter(WidgetRef ref) {
+GoRouter _buildRouter(WidgetRef ref, {String? initialLocation}) {
   return GoRouter(
-    initialLocation: '/login',
+    initialLocation: initialLocation ?? '/splash',
     navigatorKey: _rootNavigatorKey,
     redirect: (context, state) {
       final session = ref.read(sessionProvider).valueOrNull;
-      final isLogin = state.matchedLocation == '/login' || state.matchedLocation == '/register';
+      final isSplash = state.matchedLocation == '/splash';
+      final isLogin = state.matchedLocation == '/login' ||
+          state.matchedLocation == '/register';
       final isLocal = state.matchedLocation == '/local';
+      final isOnboarding = state.matchedLocation == '/onboarding';
 
-      if (session == null && !isLogin && !isLocal) return '/login';
+      if (session == null &&
+          !isLogin &&
+          !isLocal &&
+          !isOnboarding &&
+          !isSplash) {
+        return '/splash';
+      }
       return null;
     },
     routes: [
+      GoRoute(path: '/splash', builder: (c, s) => const SplashScreen()),
+      GoRoute(path: '/onboarding', builder: (c, s) => const OnboardingScreen()),
       GoRoute(path: '/login', builder: (c, s) => const LoginScreen()),
       GoRoute(path: '/register', builder: (c, s) => const RegisterScreen()),
       GoRoute(path: '/local', builder: (c, s) => const LocalBoardScreen()),
@@ -52,33 +66,57 @@ GoRouter _buildRouter(WidgetRef ref) {
       StatefulShellRoute.indexedStack(
         builder: (c, s, shell) => MainScaffold(navigationShell: shell),
         branches: [
-          StatefulShellBranch(routes: [GoRoute(path: '/home', builder: (c, s) => const HomeDashboard())]),
-          StatefulShellBranch(routes: [GoRoute(path: '/play', builder: (c, s) => const PlayScreen())]),
+          StatefulShellBranch(routes: [
+            GoRoute(path: '/home', builder: (c, s) => const HomeDashboard())
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(path: '/play', builder: (c, s) => const PlayScreen())
+          ]),
           StatefulShellBranch(routes: [
             GoRoute(path: '/friends', builder: (c, s) => const FriendsScreen()),
-            GoRoute(path: '/friends/games', builder: (c, s) => const MultiplayerGamesScreen()),
+            GoRoute(
+                path: '/friends/games',
+                builder: (c, s) => const MultiplayerGamesScreen()),
             GoRoute(
               path: '/friends/game/:gameId',
-              builder: (c, s) =>
-                  MultiplayerGameScreen(gameId: s.pathParameters['gameId'] ?? ''),
+              builder: (c, s) => MultiplayerGameScreen(
+                  gameId: s.pathParameters['gameId'] ?? ''),
             ),
           ]),
           StatefulShellBranch(routes: [
-            GoRoute(path: '/analysis', builder: (c, s) => AnalysisScreen(gameId: s.uri.queryParameters['game_id']))
+            GoRoute(
+                path: '/analysis',
+                builder: (c, s) =>
+                    AnalysisScreen(gameId: s.uri.queryParameters['game_id']))
           ]),
           StatefulShellBranch(routes: [
             GoRoute(path: '/learn', builder: (c, s) => const LearnSection()),
-            GoRoute(path: '/learn/openings', builder: (c, s) => const OpeningsScreen()),
+            GoRoute(
+                path: '/learn/openings',
+                builder: (c, s) => const OpeningsScreen()),
             GoRoute(
               path: '/learn/endgames',
               builder: (c, s) => const LessonTrackScreen(
                 title: 'Endgame Strategy',
-                description: 'Convert small advantages into clean, repeatable wins.',
+                description:
+                    'Convert small advantages into clean, repeatable wins.',
                 accent: Color(0xFFA2E7FF),
                 lessons: [
-                  LessonItem(title: 'Opposition', summary: 'Use king opposition to force the defending king away from the promotion square.', objective: 'win the key king position'),
-                  LessonItem(title: 'Rook Behind the Pawn', summary: 'Place the rook behind passed pawns and use checks from the side.', objective: 'support a passed pawn'),
-                  LessonItem(title: 'Basic Mating Nets', summary: 'Coordinate king and queen or rook without stalemating the opponent.', objective: 'finish accurately'),
+                  LessonItem(
+                      title: 'Opposition',
+                      summary:
+                          'Use king opposition to force the defending king away from the promotion square.',
+                      objective: 'win the key king position'),
+                  LessonItem(
+                      title: 'Rook Behind the Pawn',
+                      summary:
+                          'Place the rook behind passed pawns and use checks from the side.',
+                      objective: 'support a passed pawn'),
+                  LessonItem(
+                      title: 'Basic Mating Nets',
+                      summary:
+                          'Coordinate king and queen or rook without stalemating the opponent.',
+                      objective: 'finish accurately'),
                 ],
               ),
             ),
@@ -86,12 +124,25 @@ GoRouter _buildRouter(WidgetRef ref) {
               path: '/learn/tactics',
               builder: (c, s) => const LessonTrackScreen(
                 title: 'Tactical Drills',
-                description: 'Train the calculation patterns that decide practical games.',
+                description:
+                    'Train the calculation patterns that decide practical games.',
                 accent: Color(0xFF97D77E),
                 lessons: [
-                  LessonItem(title: 'Checks, Captures, Threats', summary: 'Scan forcing moves first and reduce the position to concrete candidates.', objective: 'find the forcing move'),
-                  LessonItem(title: 'Pins and Skewers', summary: 'Exploit overloaded defenders and pieces aligned with a valuable target.', objective: 'win material cleanly'),
-                  LessonItem(title: 'Discovered Attacks', summary: 'Move one piece to reveal a second attack and create a double threat.', objective: 'spot the hidden line'),
+                  LessonItem(
+                      title: 'Checks, Captures, Threats',
+                      summary:
+                          'Scan forcing moves first and reduce the position to concrete candidates.',
+                      objective: 'find the forcing move'),
+                  LessonItem(
+                      title: 'Pins and Skewers',
+                      summary:
+                          'Exploit overloaded defenders and pieces aligned with a valuable target.',
+                      objective: 'win material cleanly'),
+                  LessonItem(
+                      title: 'Discovered Attacks',
+                      summary:
+                          'Move one piece to reveal a second attack and create a double threat.',
+                      objective: 'spot the hidden line'),
                 ],
               ),
             ),
@@ -105,9 +156,20 @@ GoRouter _buildRouter(WidgetRef ref) {
           ]),
           StatefulShellBranch(routes: [
             GoRoute(path: '/connect', builder: (c, s) => const CrossConnect()),
-            GoRoute(path: '/connect/link', builder: (c, s) => const BoardLinkScreen()),
-            GoRoute(path: '/connect/ble', builder: (c, s) => const BleProvisionScreen()),
-            GoRoute(path: '/connect/board/:deviceId', builder: (c, s) => BoardDetailsScreen(deviceId: s.pathParameters['deviceId'] ?? '')),
+            GoRoute(
+                path: '/connect/link',
+                builder: (c, s) => const BoardLinkScreen()),
+            GoRoute(
+                path: '/connect/ble',
+                builder: (c, s) => const BleProvisionScreen()),
+            GoRoute(
+                path: '/connect/setup/:deviceId',
+                builder: (c, s) => BoardSetupScreen(
+                    deviceId: s.pathParameters['deviceId'] ?? '')),
+            GoRoute(
+                path: '/connect/board/:deviceId',
+                builder: (c, s) => BoardDetailsScreen(
+                    deviceId: s.pathParameters['deviceId'] ?? '')),
           ]),
         ],
       ),
@@ -116,14 +178,16 @@ GoRouter _buildRouter(WidgetRef ref) {
 }
 
 class RoboChessApp extends ConsumerStatefulWidget {
-  const RoboChessApp({super.key});
+  final String? initialLocation;
+  const RoboChessApp({super.key, this.initialLocation});
 
   @override
   ConsumerState<RoboChessApp> createState() => _RoboChessAppState();
 }
 
 class _RoboChessAppState extends ConsumerState<RoboChessApp> {
-  late final GoRouter _router = _buildRouter(ref);
+  late final GoRouter _router =
+      _buildRouter(ref, initialLocation: widget.initialLocation);
   late final ProviderSubscription<AsyncValue<AuthSession?>> _sessionSub;
 
   @override
@@ -145,7 +209,7 @@ class _RoboChessAppState extends ConsumerState<RoboChessApp> {
   Widget build(BuildContext context) {
     return MaterialApp.router(
       title: 'RoboChess Mobile',
-      theme: AppTheme.darkTheme,
+      theme: AppTheme.lightTheme,
       routerConfig: _router,
       debugShowCheckedModeBanner: false,
     );

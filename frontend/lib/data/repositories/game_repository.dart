@@ -11,11 +11,13 @@ class GameRepository {
     String mode = 'human_vs_ai',
     int difficulty = 5,
     List<String>? players,
+    String? playerSide,
   }) {
     return _remote.createGame(
       mode: mode,
       difficulty: difficulty,
       players: players,
+      playerSide: playerSide,
     );
   }
 

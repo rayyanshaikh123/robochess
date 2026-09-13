@@ -8,20 +8,10 @@ import '../providers/session_provider.dart';
 import '../providers/device_provider.dart';
 import '../providers/user_provider.dart';
 import '../widgets/animated_profile_avatar.dart';
+import '../widgets/robo_app_bar.dart';
+import '../providers/board_theme_provider.dart';
+import '../theme/app_colors.dart';
 
-// ── Colour tokens ────────────────────────────────────────────────────────────
-const kBackground = Color(0xFF151311);
-const kSurfaceContLow = Color(0xFF1D1B19);
-const kSurfaceContHigh = Color(0xFF2C2A27);
-const kSurfaceContHighest = Color(0xFF373431);
-const kPrimary = Color(0xFF8ADB52);
-const kPrimaryContainer = Color(0xFF68B631);
-const kOnPrimary = Color(0xFF173800);
-const kSecondary = Color(0xFFA2E7FF);
-const kOnSurface = Color(0xFFE7E2DD);
-const kOnSurfaceVariant = Color(0xFFC0CAB4);
-const kOutlineVariant = Color(0xFF414939);
-const kError = Color(0xFFFFB4AB);
 
 class ProfileSettings extends ConsumerStatefulWidget {
   const ProfileSettings({super.key});
@@ -141,32 +131,22 @@ class _ProfileSettingsState extends ConsumerState<ProfileSettings> {
 
     return Scaffold(
       backgroundColor: kBackground,
-      appBar: AppBar(
-        backgroundColor: kBackground,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        titleSpacing: 20,
-        title: Row(
-          children: [
-            const Icon(Icons.settings_remote, color: kPrimary),
-            const SizedBox(width: 10),
-            Text('ROBOCHESS',
-                style: GoogleFonts.spaceGrotesk(
-                    color: kPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                    letterSpacing: 2)),
-          ],
-        ),
+      appBar: RoboAppBar(
+        sectionBadge: 'PROFILE',
+        showBackButton: true,
+        fallbackRoute: '/home',
         actions: [
           TextButton(
             onPressed: _signingOut ? null : _logout,
-            child: Text(_signingOut ? 'SIGNING OUT...' : 'SIGN OUT',
-                style: GoogleFonts.inter(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: kPrimary,
-                    letterSpacing: 1.5)),
+            child: Text(
+              _signingOut ? 'SIGNING OUT...' : 'SIGN OUT',
+              style: GoogleFonts.outfit(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: kError,
+                letterSpacing: 1,
+              ),
+            ),
           ),
           const AnimatedProfileAvatar(size: 36),
         ],
@@ -219,8 +199,8 @@ class _ProfileSettingsState extends ConsumerState<ProfileSettings> {
                       borderRadius: BorderRadius.circular(12)),
                 ),
                 child: Text(_signingOut ? 'SIGNING OUT...' : 'SIGN OUT',
-                    style: GoogleFonts.spaceGrotesk(
-                        fontSize: 12,
+                    style: GoogleFonts.outfit(
+                        fontSize: 13,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 2)),
               ),
@@ -281,8 +261,186 @@ class _ProfileSettingsState extends ConsumerState<ProfileSettings> {
                       }
                     },
             ),
+            const SizedBox(height: 28),
+
+            // ── App Experience ──────────────────────────────────────────
+            _SectionHeader(label: 'App Experience', accentColor: kPrimary),
+            const SizedBox(height: 14),
+
+            // Chessboard Theme Selector
+            const _BoardThemeSelectorCard(),
+            const SizedBox(height: 14),
+            Material(
+              color: kSurfaceContLowest,
+              clipBehavior: Clip.antiAlias,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: const BorderSide(color: kOutlineVariant),
+              ),
+              child: ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: kPrimary.withOpacity(0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.explore_rounded, color: kPrimary, size: 20),
+                ),
+                title: Text(
+                  'Replay Onboarding Tour',
+                  style: GoogleFonts.outfit(
+                    fontWeight: FontWeight.w700,
+                    color: kOnSurface,
+                    fontSize: 15,
+                  ),
+                ),
+                subtitle: Text(
+                  'Explore robotic board features and tactics tour',
+                  style: GoogleFonts.inter(
+                    color: kOnSurfaceVariant,
+                    fontSize: 12,
+                  ),
+                ),
+                trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: kOnSurfaceVariant),
+                onTap: () => context.push('/onboarding'),
+              ),
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _BoardThemeSelectorCard extends ConsumerWidget {
+  const _BoardThemeSelectorCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final activeTheme = ref.watch(boardThemeProvider);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: kSurfaceContLowest,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kOutlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: kPrimary.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.palette_rounded, color: kPrimary, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Chessboard Theme',
+                    style: GoogleFonts.outfit(
+                      fontWeight: FontWeight.w700,
+                      color: kOnSurface,
+                      fontSize: 15,
+                    ),
+                  ),
+                  Text(
+                    'Choose wooden, tournament green, or slate styles',
+                    style: GoogleFonts.inter(
+                      color: kOnSurfaceVariant,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // 4 Theme Choice Chips / Cards
+          Row(
+            children: kBoardThemes.map((theme) {
+              final isSelected = theme.id == activeTheme.id;
+              return Expanded(
+                child: GestureDetector(
+                  onTap: () {
+                    ref.read(boardThemeProvider.notifier).setTheme(theme);
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+                    decoration: BoxDecoration(
+                      color: isSelected ? kPrimary.withValues(alpha: 0.08) : kSurfaceContLow,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isSelected ? kPrimary : kOutlineVariant,
+                        width: isSelected ? 2 : 1,
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        // 2x2 Mini Board Preview
+                        Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: theme.frameColor, width: 2),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  children: [
+                                    Expanded(child: Container(color: theme.lightSquare)),
+                                    Expanded(child: Container(color: theme.darkSquare)),
+                                  ],
+                                ),
+                              ),
+                              Expanded(
+                                child: Column(
+                                  children: [
+                                    Expanded(child: Container(color: theme.darkSquare)),
+                                    Expanded(child: Container(color: theme.lightSquare)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            theme.name.replaceAll('Tournament ', ''),
+                            style: GoogleFonts.outfit(
+                              fontSize: 11,
+                              fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                              color: isSelected ? kPrimary : kOnSurface,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
       ),
     );
   }
@@ -314,28 +472,36 @@ class _PlayerHero extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Avatar with gradient border
+          // Name-based logo avatar
           Stack(
+            clipBehavior: Clip.none,
             children: [
               Container(
-                width: 80,
-                height: 80,
+                width: 76,
+                height: 76,
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [kPrimary, kPrimaryContainer],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+                  color: kPrimary,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: kOutlineVariant.withValues(alpha: 0.6),
+                    width: 1.5,
                   ),
-                  borderRadius: BorderRadius.circular(18),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x14000000),
+                      blurRadius: 8,
+                      offset: Offset(0, 3),
+                    ),
+                  ],
                 ),
-                padding: const EdgeInsets.all(2),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: kSurfaceContHighest,
-                    borderRadius: BorderRadius.circular(16),
-                    image: const DecorationImage(
-                      image: AssetImage('assets/images/profile_avatar.png'),
-                      fit: BoxFit.cover,
+                child: Center(
+                  child: Text(
+                    AnimatedProfileAvatar.getInitials(displayName),
+                    style: GoogleFonts.outfit(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                      letterSpacing: 1.0,
                     ),
                   ),
                 ),
@@ -354,7 +520,7 @@ class _PlayerHero extends StatelessWidget {
                       style: GoogleFonts.inter(
                           fontSize: 8,
                           fontWeight: FontWeight.w700,
-                          color: const Color(0xFF003642),
+                          color: kOnPrimary,
                           letterSpacing: 1)),
                 ),
               ),
@@ -366,7 +532,7 @@ class _PlayerHero extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(displayName,
-                    style: GoogleFonts.spaceGrotesk(
+                    style: GoogleFonts.outfit(
                         fontSize: 22,
                         fontWeight: FontWeight.w700,
                         color: kOnSurface)),
@@ -392,7 +558,7 @@ class _PlayerHero extends StatelessWidget {
                               color: kPrimary, size: 14),
                           const SizedBox(width: 4),
                           Text(ratingText,
-                              style: GoogleFonts.spaceGrotesk(
+                              style: GoogleFonts.outfit(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
                                   color: kPrimary)),
@@ -425,7 +591,7 @@ class _PlayerHero extends StatelessWidget {
                 border: Border.all(color: kPrimary.withOpacity(0.2)),
               ),
               child: Text('EDIT',
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.outfit(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                       color: kPrimary,
@@ -481,7 +647,7 @@ class _StatsGrid extends StatelessWidget {
                 textBaseline: TextBaseline.alphabetic,
                 children: [
                   Text(gamesText,
-                      style: GoogleFonts.spaceGrotesk(
+                      style: GoogleFonts.outfit(
                           fontSize: 36,
                           fontWeight: FontWeight.w700,
                           color: kOnSurface)),
@@ -518,13 +684,13 @@ class _StatsGrid extends StatelessWidget {
                         children: [
                           TextSpan(
                               text: winRateText,
-                              style: GoogleFonts.spaceGrotesk(
+                              style: GoogleFonts.outfit(
                                   fontSize: 32,
                                   fontWeight: FontWeight.w700,
                                   color: kOnSurface)),
                           TextSpan(
                               text: '%',
-                              style: GoogleFonts.spaceGrotesk(
+                              style: GoogleFonts.outfit(
                                   fontSize: 20,
                                   fontWeight: FontWeight.w700,
                                   color: kOnSurface)),
@@ -570,13 +736,13 @@ class _StatsGrid extends StatelessWidget {
                         children: [
                           TextSpan(
                               text: accuracyText,
-                              style: GoogleFonts.spaceGrotesk(
+                              style: GoogleFonts.outfit(
                                   fontSize: 32,
                                   fontWeight: FontWeight.w700,
                                   color: kSecondary)),
                           TextSpan(
                               text: '%',
-                              style: GoogleFonts.spaceGrotesk(
+                              style: GoogleFonts.outfit(
                                   fontSize: 20,
                                   fontWeight: FontWeight.w700,
                                   color: kSecondary)),
@@ -632,7 +798,7 @@ class _SectionHeader extends StatelessWidget {
         Container(width: 16, height: 1, color: accentColor),
         const SizedBox(width: 8),
         Text(label.toUpperCase(),
-            style: GoogleFonts.spaceGrotesk(
+            style: GoogleFonts.outfit(
                 fontSize: 10,
                 fontWeight: FontWeight.w700,
                 color: kOnSurfaceVariant,
@@ -826,7 +992,7 @@ class _DeviceCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(loading ? 'Loading device...' : 'RoboBoard v2',
-                      style: GoogleFonts.spaceGrotesk(
+                      style: GoogleFonts.outfit(
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
                           color: kOnSurface)),
@@ -927,7 +1093,7 @@ class _DeviceCard extends StatelessWidget {
               ),
               icon: const Icon(Icons.sync, color: kOnSurface, size: 16),
               label: Text('REFRESH STATUS',
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.outfit(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                       color: kOnSurface,
@@ -947,7 +1113,7 @@ class _DeviceCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10)),
               ),
               child: Text(unlinking ? 'DISCONNECTING...' : 'DISCONNECT DEVICE',
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.outfit(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                       color: kError,

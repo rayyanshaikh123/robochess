@@ -7,13 +7,13 @@ import '../../domain/models/user_stats.dart';
 import 'session_provider.dart';
 
 final userRepositoryProvider = Provider<UserRepository>((ref) {
-  return UserRepository(UserRemoteDataSource(ref.read(apiClientProvider)));
+  return UserRepository(UserRemoteDataSource(ref.watch(apiClientProvider)));
 });
 
 final userProfileProvider = FutureProvider<UserProfile>((ref) async {
-  return ref.read(userRepositoryProvider).me();
+  return ref.watch(userRepositoryProvider).me();
 });
 
 final userStatsProvider = FutureProvider<UserStats>((ref) async {
-  return ref.read(userRepositoryProvider).stats();
+  return ref.watch(userRepositoryProvider).stats();
 });

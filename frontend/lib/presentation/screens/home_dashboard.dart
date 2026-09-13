@@ -5,40 +5,10 @@ import 'package:go_router/go_router.dart';
 import '../../domain/models/game_state.dart';
 import '../providers/game_provider.dart';
 import '../providers/user_provider.dart';
-
-// ── Colour tokens ──────────────────────────────────────
-const kBackground = Color(0xFF151311);
-const kSurface = Color(0xFF151311);
-const kSurfaceContainer = Color(0xFF211F1D);
-const kSurfaceContLow = Color(0xFF1D1B19);
-const kSurfaceContHigh = Color(0xFF2C2A27);
-const kSurfaceContHighest = Color(0xFF373431);
-const kPrimary = Color(0xFF8ADB52);
-const kPrimaryContainer = Color(0xFF68B631);
-const kOnPrimary = Color(0xFF173800);
-const kSecondary = Color(0xFFA2E7FF);
-const kOnSurface = Color(0xFFE7E2DD);
-const kOnSurfaceVariant = Color(0xFFC0CAB4);
-const kOutlineVariant = Color(0xFF414939);
-const kError = Color(0xFFFFB4AB);
-
-// ── Pieces ─────────────────────────────────────────────
-const _whitePieces = {
-  'K': '♔',
-  'Q': '♕',
-  'R': '♖',
-  'B': '♗',
-  'N': '♘',
-  'P': '♙',
-};
-const _blackPieces = {
-  'K': '♔',
-  'Q': '♕',
-  'R': '♖',
-  'B': '♗',
-  'N': '♘',
-  'P': '♙',
-};
+import '../theme/app_colors.dart';
+import '../widgets/chess_piece_widget.dart';
+import '../widgets/animated_profile_avatar.dart';
+import '../widgets/robo_app_bar.dart';
 
 // ── Initial Board ──────────────────────────────────────
 const _initialBoard = [
@@ -66,36 +36,32 @@ class HomeDashboard extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: kBackground,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            children: [
-              const SizedBox(height: 10),
-              Text(
-                "ROBOCHESS",
-                style: GoogleFonts.spaceGrotesk(
-                  color: kPrimary,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 18,
-                  letterSpacing: 2,
-                ),
-              ),
-              const SizedBox(height: 20),
-              _GreetingCard(
-                  displayName: displayName, loading: profileAsync.isLoading),
-              const SizedBox(height: 14),
-              _StatsCard(
-                loading: statsAsync.isLoading,
-                gamesPlayed: stats?.gamesPlayed,
-                wins: stats?.wins,
-                losses: stats?.losses,
-                draws: stats?.draws,
-              ),
-              const SizedBox(height: 20),
-              _LiveBoardCard(game: game),
-            ],
-          ),
+      appBar: const RoboAppBar(
+        sectionBadge: 'HOME',
+        actions: [
+          AnimatedProfileAvatar(size: 34),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _GreetingCard(
+                displayName: displayName, loading: profileAsync.isLoading),
+            const SizedBox(height: 14),
+
+            _StatsCard(
+              loading: statsAsync.isLoading,
+              gamesPlayed: stats?.gamesPlayed,
+              wins: stats?.wins,
+              losses: stats?.losses,
+              draws: stats?.draws,
+            ),
+            const SizedBox(height: 20),
+
+            _LiveBoardCard(game: game),
+          ],
         ),
       ),
     );
@@ -112,35 +78,62 @@ class _GreetingCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       decoration: BoxDecoration(
-        color: kSurfaceContLow,
-        borderRadius: BorderRadius.circular(14),
-        border: const Border(left: BorderSide(color: kPrimary, width: 4)),
+        color: kSurfaceContLowest,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kOutlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: loading
           ? Container(
               width: 160,
               height: 14,
               decoration: BoxDecoration(
-                color: kSurfaceContHighest,
+                color: kSurfaceContLow,
                 borderRadius: BorderRadius.circular(99),
               ),
             )
           : Row(
               children: [
-                const Icon(Icons.waving_hand, color: kPrimary, size: 18),
-                const SizedBox(width: 10),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: kSurfaceContLow,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.waving_hand_rounded, color: kPrimary, size: 18),
+                ),
+                const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    'Welcome back, $displayName',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.spaceGrotesk(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: kOnSurface,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Welcome back,',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: kOnSurfaceVariant,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Text(
+                        displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.outfit(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: kOnSurface,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -167,169 +160,254 @@ class _StatsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     String text(int? value) => loading || value == null ? '—' : '$value';
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: kSurfaceContLow,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _stat('GAMES', text(gamesPlayed), kOnSurface),
-          _stat('WINS', text(wins), kPrimary),
-          _stat('LOSSES', text(losses), kError),
-          _stat('DRAWS', text(draws), kSecondary),
-        ],
-      ),
+    return Row(
+      children: [
+        Expanded(child: _stat('GAMES', text(gamesPlayed), kOnSurface)),
+        const SizedBox(width: 6),
+        Expanded(child: _stat('WINS', text(wins), kPrimary)),
+        const SizedBox(width: 6),
+        Expanded(child: _stat('LOSSES', text(losses), kError)),
+        const SizedBox(width: 6),
+        Expanded(child: _stat('DRAWS', text(draws), kSecondary)),
+      ],
     );
   }
 
   Widget _stat(String label, String value, Color color) {
-    return Column(
-      children: [
-        Text(value,
-            style: GoogleFonts.spaceGrotesk(
-                fontSize: 20, fontWeight: FontWeight.w700, color: color)),
-        const SizedBox(height: 2),
-        Text(label,
-            style: GoogleFonts.inter(
-                fontSize: 9,
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+      decoration: BoxDecoration(
+        color: kSurfaceContLowest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: kOutlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              style: GoogleFonts.outfit(
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: color,
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 9.5,
                 fontWeight: FontWeight.w700,
                 color: kOnSurfaceVariant,
-                letterSpacing: 1)),
-      ],
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-// ── Live Board ──────────────────────────────────────────
+// ── Live Board Card ─────────────────────────────────────
 class _LiveBoardCard extends StatelessWidget {
   final GameStateModel? game;
-
-  const _LiveBoardCard({this.game});
+  const _LiveBoardCard({required this.game});
 
   List<List<String?>> _boardFromFen() {
-    if (game == null || game!.currentFen.isEmpty) {
-      return _boardFromInitial();
-    }
-    final placement = game!.currentFen.split(' ').first;
-    final rows = placement.split('/');
+    final fen = game?.currentFen;
+    if (fen == null || fen.isEmpty) return _boardFromInitial();
+    final parts = fen.split(' ');
+    if (parts.isEmpty) return _boardFromInitial();
+
+    final rows = parts[0].split('/');
     if (rows.length != 8) return _boardFromInitial();
-    final board = rows.map((row) {
-      final cells = <String?>[];
-      for (final char in row.split('')) {
-        final empty = int.tryParse(char);
-        if (empty != null) {
-          cells.addAll(List<String?>.filled(empty, null));
+
+    final board = <List<String?>>[];
+    for (final r in rows) {
+      final row = <String?>[];
+      for (var i = 0; i < r.length; i++) {
+        final c = r[i];
+        final n = int.tryParse(c);
+        if (n != null) {
+          row.addAll(List.filled(n, null));
         } else {
-          cells.add(char);
+          row.add(c);
         }
       }
-      return cells.length == 8 ? cells : <String?>[];
-    }).toList();
+      board.add(row);
+    }
     return board.every((row) => row.length == 8) ? board : _boardFromInitial();
   }
 
   List<List<String?>> _boardFromInitial() =>
       _initialBoard.map((row) => row.map((piece) => piece).toList()).toList();
 
-  String _pieceSymbol(String? piece) {
-    if (piece == null) return '';
-    final isWhite = piece == piece.toUpperCase();
-    final key = piece.toUpperCase();
-    return isWhite ? (_whitePieces[key] ?? '') : (_blackPieces[key] ?? '');
-  }
-
-  Color _pieceColor(String? piece) {
-    if (piece == null) return Colors.transparent;
-    return piece == piece.toUpperCase() ? kPrimary : kSecondary;
-  }
-
   @override
   Widget build(BuildContext context) {
     final board = _boardFromFen();
     return Container(
       decoration: BoxDecoration(
-        color: kSurfaceContLow,
-        borderRadius: BorderRadius.circular(16),
+        color: kSurfaceContLowest,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: kOutlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       child: Column(
         children: [
-          Text(
-            game == null ? 'Ready for a Game' : 'Live Game Position',
-            style: GoogleFonts.spaceGrotesk(
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-              color: kOnSurface,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                game == null ? 'Tournament Board' : 'Live Game Position',
+                style: GoogleFonts.outfit(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: kOnSurface,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: kPrimary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  game == null ? 'READY' : 'ACTIVE',
+                  style: GoogleFonts.inter(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: kPrimary,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
 
+          // Inlaid Tournament Wooden Chessboard
           AspectRatio(
             aspectRatio: 1,
             child: Container(
               decoration: BoxDecoration(
-                color: kSurfaceContHighest.withOpacity(0.6),
-                borderRadius: BorderRadius.circular(10),
+                color: kWoodFrame,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: kWoodBrassAccent.withOpacity(0.4), width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF4A2E1B).withOpacity(0.18),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
               ),
               padding: const EdgeInsets.all(6),
-              child: GridView.builder(
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: 64,
-                gridDelegate:
-                    const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 8,
-                ),
-                itemBuilder: (context, index) {
-                  final row = index ~/ 8;
-                  final col = index % 8;
-                  final isLight = (row + col) % 2 == 0;
-                  final piece = board[row][col];
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: GridView.builder(
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: 64,
+                  gridDelegate:
+                      const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 8,
+                  ),
+                  itemBuilder: (context, index) {
+                    final row = index ~/ 8;
+                    final col = index % 8;
+                    final isLight = (row + col) % 2 == 0;
+                    final piece = board[row][col];
 
-                  return Container(
-                    color: isLight
-                        ? kPrimary.withOpacity(0.15)
-                        : kSurfaceContHighest,
-                    child: Center(
-                      child: piece != null
-                          ? Text(
-                              _pieceSymbol(piece),
-                              style: TextStyle(
-                                fontSize: 26,
-                                color: _pieceColor(piece),
-                              ),
-                            )
-                          : null,
-                    ),
-                  );
-                },
+                    return Container(
+                      color: isLight ? kWoodLightSquare : kWoodDarkSquare,
+                      child: Center(
+                        child: piece != null
+                            ? Padding(
+                                padding: const EdgeInsets.all(2.0),
+                                child: ChessPieceWidget(pieceSymbol: piece),
+                              )
+                            : null,
+                      ),
+                    );
+                  },
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
           if (game == null)
-            FilledButton.icon(
-              onPressed: () => context.go('/play'),
-              icon: const Icon(Icons.play_arrow),
-              label: const Text('START A GAME'),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => context.go('/play'),
+                icon: const Icon(Icons.play_arrow_rounded, size: 20),
+                label: Text(
+                  'START A GAME',
+                  style: GoogleFonts.outfit(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: kPrimary,
+                  foregroundColor: kOnPrimary,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
             )
           else
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                FilledButton.icon(
-                  onPressed: () => context.go('/play'),
-                  icon: const Icon(Icons.play_circle),
-                  label: const Text('RESUME GAME'),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => context.go('/play'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: kPrimary,
+                      side: const BorderSide(color: kPrimary),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: Text(
+                      'RESUME GAME',
+                      style: GoogleFonts.outfit(fontWeight: FontWeight.w700),
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 10),
-                Text(
-                  'Move ${game!.gameVersion}${game!.lastMove == null ? '' : ' • ${game!.lastMove}'}',
-                  style:
-                      GoogleFonts.inter(fontSize: 12, color: kOnSurfaceVariant),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => context.go('/analysis'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: kPrimary,
+                      foregroundColor: kOnPrimary,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: Text(
+                      'ANALYZE',
+                      style: GoogleFonts.outfit(fontWeight: FontWeight.w700),
+                    ),
+                  ),
                 ),
               ],
             ),

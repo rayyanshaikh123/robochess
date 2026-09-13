@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect } from "react";
-import ShaderCanvas from "./components/ShaderCanvas";
 
 /**
- * Client-only wrapper that renders the hero WebGL shader background and
- * hooks up the IntersectionObserver for `.fade-in-up` scroll animations.
+ * Client-only wrapper that sets up scroll-triggered fade-in animations
+ * for elements with the `.fade-in-up` class.
  */
 export default function LandingClient() {
   useEffect(() => {
@@ -27,7 +26,5 @@ export default function LandingClient() {
     return () => observer.disconnect();
   }, []);
 
-  return (
-    <ShaderCanvas className="absolute inset-0 w-full h-full -z-10 opacity-50" />
-  );
+  return null;
 }

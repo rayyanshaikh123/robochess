@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
+import { Outfit, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-space-grotesk",
+const outfit = Outfit({
+  variable: "--font-outfit",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  weight: ["400", "500", "600", "700", "800"],
+});
+
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
 });
 
 const jetbrainsMono = JetBrains_Mono({
@@ -15,24 +21,40 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ROBOCHESS — The Connected Chess Platform",
+  title: "RoboChess — The Connected Chess Platform",
   description:
-    "Play against humans and AI, detect moves with computer vision, analyze with Stockfish, and sync to a physical smart board. The connected chess platform.",
+    "Play against AI bots and human opponents, detect moves on a physical board with computer vision, analyze with Stockfish 17, and sync to a robotic smart board. Download the mobile app and join the connected chess platform.",
+  keywords: [
+    "chess",
+    "robochss",
+    "flutter",
+    "fastapi",
+    "stockfish",
+    "computer vision",
+    "raspberry pi",
+    "smart board",
+    "ai opponent",
+  ],
+  icons: {
+    icon: "/app_logo.png",
+    apple: "/app_logo.png",
+  },
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html
-      lang="en"
-      className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} dark`}
-    >
+    <html lang="en" className={`${outfit.variable} ${inter.variable} ${jetbrainsMono.variable}`}>
       <head>
         <link
           href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
           rel="stylesheet"
         />
       </head>
-      <body className="min-h-screen flex flex-col overflow-x-hidden">
+      <body className="min-h-screen flex flex-col overflow-x-hidden bg-[var(--color-background)] text-[var(--color-on-surface)]">
         {children}
       </body>
     </html>

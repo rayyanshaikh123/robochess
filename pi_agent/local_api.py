@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from pi_agent.calibration import CalibrationError, calibrate_from_rooks
 from pi_agent.network_manager import NetworkManager
+from pi_agent.setup_state import SetupReadiness
 
 
 class CalibrationRequest(BaseModel):
@@ -92,6 +93,10 @@ class LocalApiHost:
         self.calibration_path = self.state_path / "camera_calibration.json"
         self._camera = None
         self._camera_lock = threading.Lock()
+        self.readiness = SetupReadiness(
+            vision_mode=str(config.get("vision_mode", "cloud")),
+            vision_require_internet=bool(config.get("vision_require_internet", True)),
+        )
         self.app = FastAPI(title="RoboChess Local Board API")
         self._routes()
 
@@ -101,6 +106,26 @@ class LocalApiHost:
             self.config["internet_check_url"],
             self.config["internet_check_timeout"],
         ).to_dict()
+
+    def _gantry(self) -> dict[str, Any]:
+        try:
+            return self.game.uno.status()
+        except Exception as exc:
+            return {"homed": False, "error": str(exc)}
+
+    def _setup_status(self) -> dict[str, Any]:
+        network = self._network()
+        detector = self.detector.status() if self.detector else {
+            "model_available": False,
+            "last_error": "Camera detector is not configured",
+            "camera": {"opened": False, "capture_devices": []},
+        }
+        return self.readiness.evaluate(
+            network,
+            detector,
+            self.calibration_path.exists(),
+            self._gantry(),
+        )
 
     def _save_calibration(self, data: dict) -> None:
         """Persist calibration, reporting a write failure as a clean 500.
@@ -193,13 +218,21 @@ class LocalApiHost:
         @self.app.get("/local/status")
         def status():
             network = self._network()
+            vision = self.detector.status() if self.detector else {"model_available": False}
             return {"status": "ok", "data": {
                 "local_service_available": True,
                 "network": {**network, "backend_available": self.config.get("backend_available", False)},
                 "calibrated": self.calibration_path.exists(),
-                "vision": self.detector.status() if self.detector else {"model_available": False},
+                "vision": vision,
+                "gantry": self._gantry(),
+                "setup": self._setup_status(),
                 "game": self.game.session.snapshot() if self.game.session else None,
             }}
+
+        @self.app.get("/local/setup/status")
+        def setup_status():
+            setup = self._setup_status()
+            return {"status": "ready" if setup["ready"] else "blocked", "data": setup}
 
         @self.app.get("/local/model/status")
         def model_status():
@@ -385,6 +418,7 @@ class LocalApiHost:
                     if value and expected.get(sq) and value.split("_", 1)[0] != expected[sq].split("_", 1)[0]
                 )
                 valid = missing <= 16 and extra <= 6 and wrong_color == 0
+                self.readiness.mark_starting_position(valid)
                 return {"status": "ok", "data": {
                     "valid": valid,
                     "pieces_detected": sum(1 for value in state.values() if value),
@@ -394,12 +428,19 @@ class LocalApiHost:
                         "wrong_color": wrong_color,
                     },
                     "vision": self.detector.status(),
+                    "setup": self._setup_status(),
                 }}
             except Exception as exc:
                 raise HTTPException(503, f"Pi board validation failed: {exc}") from exc
 
         @self.app.post("/local/game/start")
         def start_game():
+            setup = self._setup_status()
+            if not setup["ready"]:
+                raise HTTPException(409, detail={
+                    "message": "Board setup is incomplete",
+                    "setup": setup,
+                })
             return {"status": "ok", "data": self.game.handle({"type": "session.start", "data": {}})}
 
         @self.app.post("/local/game/reset")
@@ -417,6 +458,15 @@ class LocalApiHost:
         def undo_game():
             return {"status": "ok", "data": self.game.handle({"type": "session.undo", "data": {}})}
 
+        @self.app.get("/local/move/auto-detect-ready")
+        def auto_detect_ready():
+            setup = self._setup_status()
+            return {"status": "ok", "data": {
+                "ready": setup["ready"],
+                "missing": setup["missing"],
+                "vision": self.detector.status() if self.detector else {},
+            }}
+
         @self.app.post("/local/move/detect-if-clear")
         def detect_move_if_clear():
             return self._detect_result()
@@ -431,7 +481,8 @@ class LocalApiHost:
 
         @self.post_gantry("/local/gantry/home")
         def gantry_home():
-            return {"status": "ok", "data": self.game.handle({"type": "gantry.home", "data": {}})}
+            result = self.game.handle({"type": "gantry.home", "data": {}})
+            return {"status": "ok", "data": {**result, "setup": self._setup_status()}}
 
         @self.app.get("/local/gantry/status")
         def gantry_status():

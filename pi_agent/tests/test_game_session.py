@@ -84,6 +84,13 @@ class BleProtocolTests(unittest.TestCase):
         payload = b"".join(value[3] for value in sorted(decoded, key=lambda value: value[1]))
         self.assertEqual(payload, __import__("json").dumps(message, separators=(",", ":")).encode())
 
+    def test_control_rejects_a_different_device_id(self):
+        gatt = GattServer("board-001")
+        replies = gatt.handle_control(json.dumps(envelope("state.request", "board-002")).encode())
+        response = decode_message(replies[0])
+        self.assertEqual(response["data"]["status"], "error")
+        self.assertEqual(response["data"]["error"], "Device ID mismatch")
+
     def test_wifi_response_routes_to_f010_and_updates_status(self):
         gatt = GattServer("board-001", on_wifi=lambda _: {"status": "wifi_connected", "ssid": "RoboNet"})
         replies = gatt.handle_wifi(json.dumps(envelope("wifi.provision", "board-001", ssid="RoboNet", password="secret")).encode())

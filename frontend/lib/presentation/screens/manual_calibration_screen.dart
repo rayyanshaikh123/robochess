@@ -3,21 +3,14 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../providers/board_provider.dart';
 import '../../domain/models/calibration_frame.dart';
 import '../../data/repositories/pi_local_api.dart';
+import '../theme/app_colors.dart';
 
-const kBackground = Color(0xFF151311);
-const kSurfaceContLow = Color(0xFF1D1B19);
-const kSurfaceContHighest = Color(0xFF373431);
-const kPrimary = Color(0xFF8ADB52);
-const kSecondary = Color(0xFFA2E7FF);
-const kOnPrimary = Color(0xFF173800);
-const kOnSurface = Color(0xFFE7E2DD);
-const kOnSurfaceVariant = Color(0xFFC0CAB4);
-const kError = Color(0xFFFFB4AB);
 
 Rect _imageDisplayRect(Size displaySize, int imgW, int imgH) {
   final scaleX = displaySize.width / imgW;
@@ -189,11 +182,21 @@ class _ManualCalibrationScreenState
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: kOnSurface),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/profile');
+            }
+          },
+        ),
         title: Text(
             widget.localApi == null
                 ? 'Manual Calibration'
                 : 'Pi Board Calibration',
-            style: GoogleFonts.spaceGrotesk(
+            style: GoogleFonts.cinzel(
                 fontSize: 16, fontWeight: FontWeight.w700, color: kOnSurface)),
         actions: [
           TextButton(
@@ -263,9 +266,9 @@ class _ManualCalibrationScreenState
                                     child: _CornerDot(
                                       label: _labels[index],
                                       color: index == 0
-                                          ? const Color(0xFF8ADB52)
+                                          ? kPrimary
                                           : index == 1
-                                              ? const Color(0xFFA2E7FF)
+                                              ? kSecondary
                                               : index == 2
                                                   ? const Color(0xFFFFD080)
                                                   : const Color(0xFFFF8AB4),
@@ -367,7 +370,7 @@ class _ManualCalibrationScreenState
                               : () => setState(() => _imagePoints.clear()),
                           icon: const Icon(Icons.refresh_rounded, size: 16),
                           label: Text('RESET',
-                              style: GoogleFonts.spaceGrotesk(
+                              style: GoogleFonts.cinzel(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: 1)),
@@ -385,7 +388,7 @@ class _ManualCalibrationScreenState
                           icon: const Icon(Icons.check_circle_outline_rounded,
                               size: 16),
                           label: Text('SAVE',
-                              style: GoogleFonts.spaceGrotesk(
+                              style: GoogleFonts.cinzel(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: 1)),
@@ -517,13 +520,13 @@ class _BoardOutlinePainter extends CustomPainter {
     canvas.drawPath(
       path,
       Paint()
-        ..color = const Color(0xFF8ADB52).withOpacity(0.18)
+        ..color = kPrimary.withOpacity(0.18)
         ..style = PaintingStyle.fill,
     );
     canvas.drawPath(
       path,
       Paint()
-        ..color = const Color(0xFF8ADB52).withOpacity(0.85)
+        ..color = kPrimary.withOpacity(0.85)
         ..strokeWidth = 2.0
         ..style = PaintingStyle.stroke,
     );

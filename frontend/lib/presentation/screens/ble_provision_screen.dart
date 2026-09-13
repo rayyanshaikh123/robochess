@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/ble/robochess_ble.dart';
 import '../providers/device_provider.dart';
+import '../providers/local_board_provider.dart';
 import '../providers/session_provider.dart';
 
 class BleProvisionScreen extends ConsumerStatefulWidget {
@@ -97,7 +98,10 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
         final network = Map<String, dynamic>.from(
           ((response['data'] as Map)['network'] as Map?) ?? const {},
         );
-        if (network['wifi_connected'] != true && mounted) {
+        ref.read(localBoardProvider.notifier).applyNetworkStatus(network);
+        if ((network['wifi_connected'] != true ||
+                network['internet_available'] != true) &&
+            mounted) {
           setState(() {
             _needsWifi = true;
             _message =
@@ -112,33 +116,8 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
             () => _message = 'Enter the Wi-Fi network and password first.');
         return;
       }
-      setState(() =>
-          _message = 'Registering board and requesting secure credentials...');
-      final credentials = await ref
-          .read(deviceRepositoryProvider)
-          .onboardingToken(deviceId: deviceId);
-      if (credentials.deviceSecret == null) {
-        throw StateError(
-          'The backend did not return a device secret. Reset the board provisioning '
-          'credentials and try again.',
-        );
-      }
-      // Reconnect once more because the cloud request can outlive an iOS
-      // BLE connection interval.
-      await _ble.disconnect();
-      await _ble.connectAndReadDeviceId(candidate.result.device);
-      final claimResponse = _ble.messages.firstWhere((message) {
-        if (message['type'] != 'control.result') return false;
-        final status = (message['data'] as Map?)?['status'];
-        return status == 'token_claimed' || status == 'error';
-      }).timeout(const Duration(seconds: 15));
-      await _ble.sendOnboardingToken(
-        deviceId,
-        credentials.onboardingToken,
-        deviceSecret: credentials.deviceSecret,
-      );
       if (_needsWifi == true) {
-        setState(() => _message = 'Sending Wi-Fi credentials...');
+        setState(() => _message = 'Sending Wi-Fi credentials to the Pi...');
         final wifiResponse = _ble.messages.firstWhere((message) {
           if (message['type'] != 'wifi.result') return false;
           return (message['data'] as Map?)?['status'] != null;
@@ -147,22 +126,56 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
         final wifi = await wifiResponse;
         final wifiData =
             Map<String, dynamic>.from(wifi['data'] as Map? ?? const {});
+        final wifiNetwork = wifiData['network'];
+        if (wifiNetwork is Map) {
+          ref.read(localBoardProvider.notifier).applyNetworkStatus(
+                Map<String, dynamic>.from(wifiNetwork),
+              );
+        }
         if (wifiData['status'] == 'error') {
           throw StateError(
               wifiData['error']?.toString() ?? 'Wi-Fi setup failed.');
         }
+        await Future<void>.delayed(const Duration(seconds: 2));
       }
-      final claim = await claimResponse;
-      final claimData =
-          Map<String, dynamic>.from(claim['data'] as Map? ?? const {});
-      if (claimData['status'] == 'error') {
-        throw StateError(claimData['error']?.toString() ??
-            'The board could not be linked to the cloud.');
+      setState(() => _message = 'Connecting to the Pi local setup...');
+      var cloudLinked = false;
+      try {
+        final credentials = await ref
+            .read(deviceRepositoryProvider)
+            .onboardingToken(deviceId: deviceId);
+        if (credentials.deviceSecret != null) {
+          await _ble.disconnect();
+          await _ble.connectAndReadDeviceId(candidate.result.device);
+          final claimResponse = _ble.messages.firstWhere((message) {
+            if (message['type'] != 'control.result') return false;
+            final status = (message['data'] as Map?)?['status'];
+            return status == 'token_claimed' || status == 'error';
+          }).timeout(const Duration(seconds: 15));
+          await _ble.sendOnboardingToken(
+            deviceId,
+            credentials.onboardingToken,
+            deviceSecret: credentials.deviceSecret,
+          );
+          final claim = await claimResponse;
+          final claimData =
+              Map<String, dynamic>.from(claim['data'] as Map? ?? const {});
+          cloudLinked = claimData['status'] != 'error';
+        }
+      } catch (_) {
+        cloudLinked = false;
       }
-      setState(() => _message = 'Board linked. Refreshing linked boards...');
+      await ref.read(localBoardProvider.notifier).adoptBoard(
+            remoteId: candidate.result.device.remoteId.str,
+            deviceId: deviceId,
+          );
+      await ref.read(localBoardProvider.notifier).refreshSetup();
       await ref.read(deviceListProvider.notifier).load();
       if (mounted) {
-        context.go('/connect');
+        setState(() => _message = cloudLinked
+            ? 'Board linked. Opening Pi setup...'
+            : 'Board connected locally. Backend link unavailable; opening Pi setup...');
+        context.go('/connect/setup/$deviceId');
       }
     } catch (error) {
       if (mounted) setState(() => _message = 'Cloud linking failed: $error');

@@ -2,19 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../providers/device_provider.dart';
 import '../../domain/models/device_model.dart';
+import '../theme/app_colors.dart';
 
-const kBackground = Color(0xFF151311);
-const kSurfaceContLow = Color(0xFF1D1B19);
-const kSurfaceContHighest = Color(0xFF373431);
-const kPrimary = Color(0xFF8ADB52);
-const kSecondary = Color(0xFFA2E7FF);
-const kOnSurface = Color(0xFFE7E2DD);
-const kOnSurfaceVariant = Color(0xFFC0CAB4);
-const kOutlineVariant = Color(0xFF414939);
 
 class BoardDetailsScreen extends ConsumerStatefulWidget {
   final String deviceId;
@@ -81,9 +75,19 @@ class _BoardDetailsScreenState extends ConsumerState<BoardDetailsScreen> {
         backgroundColor: kBackground,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: kOnSurface),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/profile');
+            }
+          },
+        ),
         title: Text('Board Details',
-            style: GoogleFonts.spaceGrotesk(
-                fontSize: 16, fontWeight: FontWeight.w700, color: kOnSurface)),
+            style: GoogleFonts.cinzel(
+                fontSize: 18, fontWeight: FontWeight.w700, color: kOnSurface)),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
@@ -146,7 +150,7 @@ class _DeviceHeader extends StatelessWidget {
                         letterSpacing: 2)),
                 const SizedBox(height: 6),
                 Text(device?.deviceId ?? 'Unknown',
-                    style: GoogleFonts.spaceGrotesk(
+                    style: GoogleFonts.outfit(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
                         color: kOnSurface)),
@@ -198,7 +202,7 @@ class _StatusPanel extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(status.toUpperCase(),
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.outfit(
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
                       color: kOnSurface)),
@@ -244,10 +248,11 @@ class _LatencyPanel extends StatelessWidget {
               const Icon(Icons.network_check, color: kPrimary, size: 20),
               const SizedBox(width: 8),
               Text('LATENCY HISTORY',
-                  style: GoogleFonts.spaceGrotesk(
-                      fontSize: 16,
+                  style: GoogleFonts.cinzel(
+                      fontSize: 15,
                       fontWeight: FontWeight.w700,
-                      color: kOnSurface)),
+                      color: kOnSurface,
+                      letterSpacing: 1.1)),
             ],
           ),
           const SizedBox(height: 12),

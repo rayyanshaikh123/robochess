@@ -59,16 +59,19 @@ void main() {
 
   float f = fbm(st + r);
 
-  color = mix(vec3(0.074, 0.074, 0.074),
-              vec3(0.12, 0.12, 0.12),
+  // Deep tournament forest-obsidian base
+  color = mix(vec3(0.03, 0.06, 0.05),
+              vec3(0.06, 0.11, 0.08),
               clamp((f * f) * 4.0, 0.0, 1.0));
 
+  // Primary dark pine #1B4332 flow
   color = mix(color,
-              vec3(0.4, 0.5, 0.0),
+              vec3(0.106, 0.263, 0.196),
               clamp(length(q), 0.0, 1.0));
 
+  // Rich emerald / jade highlight
   color = mix(color,
-              vec3(0.8, 1.0, 0.0),
+              vec3(0.176, 0.416, 0.310),
               clamp(length(r.x), 0.0, 1.0));
 
   gl_FragColor = vec4((f * f * f + 0.6 * f * f + 0.5 * f) * color, 1.0);

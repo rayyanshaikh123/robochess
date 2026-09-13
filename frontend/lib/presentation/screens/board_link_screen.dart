@@ -6,15 +6,8 @@ import 'package:go_router/go_router.dart';
 
 import '../providers/device_provider.dart';
 import '../providers/session_provider.dart';
+import '../theme/app_colors.dart';
 
-const kBackground = Color(0xFF151311);
-const kSurfaceContLow = Color(0xFF1D1B19);
-const kSurfaceContHighest = Color(0xFF373431);
-const kPrimary = Color(0xFF8ADB52);
-const kOnPrimary = Color(0xFF173800);
-const kOnSurface = Color(0xFFE7E2DD);
-const kOnSurfaceVariant = Color(0xFFC0CAB4);
-const kError = Color(0xFFFFB4AB);
 
 class BoardLinkScreen extends ConsumerStatefulWidget {
   const BoardLinkScreen({super.key});
@@ -46,7 +39,13 @@ class _BoardLinkScreenState extends ConsumerState<BoardLinkScreen> {
           .read(deviceRepositoryProvider)
           .link(pairingCode: _codeCtrl.text.trim());
       await ref.read(deviceListProvider.notifier).load();
-      if (mounted) context.pop();
+      if (mounted) {
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          context.go('/profile');
+        }
+      }
     } catch (err) {
       setState(() => _error = 'Pairing failed. Check the code and try again.');
     } finally {
@@ -73,7 +72,7 @@ class _BoardLinkScreenState extends ConsumerState<BoardLinkScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Scan Result',
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.cinzel(
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
                       color: kOnSurface)),
@@ -102,7 +101,7 @@ class _BoardLinkScreenState extends ConsumerState<BoardLinkScreen> {
                         borderRadius: BorderRadius.circular(12)),
                   ),
                   child: Text('USE CODE',
-                      style: GoogleFonts.spaceGrotesk(
+                      style: GoogleFonts.cinzel(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 2)),
@@ -137,11 +136,17 @@ class _BoardLinkScreenState extends ConsumerState<BoardLinkScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: kPrimary),
-          onPressed: () => context.pop(),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/profile');
+            }
+          },
         ),
         title: Text('Link Board',
-            style: GoogleFonts.spaceGrotesk(
-                fontSize: 16, fontWeight: FontWeight.w700, color: kOnSurface)),
+            style: GoogleFonts.cinzel(
+                fontSize: 18, fontWeight: FontWeight.w700, color: kOnSurface)),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
@@ -149,8 +154,8 @@ class _BoardLinkScreenState extends ConsumerState<BoardLinkScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Enter pairing code',
-                style: GoogleFonts.spaceGrotesk(
-                    fontSize: 24,
+                style: GoogleFonts.cinzel(
+                    fontSize: 22,
                     fontWeight: FontWeight.w700,
                     color: kOnSurface)),
             const SizedBox(height: 8),
@@ -246,8 +251,8 @@ class _BoardLinkScreenState extends ConsumerState<BoardLinkScreen> {
                               borderRadius: BorderRadius.circular(12)),
                         ),
                         child: Text(_submitting ? 'LINKING...' : 'LINK BOARD',
-                            style: GoogleFonts.spaceGrotesk(
-                                fontSize: 12,
+                            style: GoogleFonts.cinzel(
+                                fontSize: 13,
                                 fontWeight: FontWeight.w700,
                                 letterSpacing: 2)),
                       ),

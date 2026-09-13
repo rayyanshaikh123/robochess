@@ -107,6 +107,7 @@ class _FakeGameController extends StateNotifier<AsyncValue<GameStateModel?>>
     String mode = 'human_vs_ai',
     int difficulty = 5,
     List<String>? players,
+    String? playerSide,
   }) async {}
 
   @override

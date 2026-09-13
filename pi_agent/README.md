@@ -98,7 +98,10 @@ board.
 | `ROBOCHESS_UNO_BAUDRATE` | Arduino serial speed | `115200` |
 | `ROBOCHESS_API_BASE` | Optional backend API | `http://localhost:8000` |
 | `ROBOCHESS_DEVICE_ID` / `ROBOCHESS_DEVICE_SECRET` | Device credentials | required for full agent |
-| `ROBOCHESS_MODEL_PATH` | Local YOLO `.pt` weights; empty means calibration-only | empty |
+| `ROBOCHESS_VISION_MODE` | Pi vision provider; currently `cloud` for direct Roboflow calls | `cloud` |
+| `ROBOCHESS_VISION_REQUIRE_INTERNET` | Require Pi internet before setup is ready | `1` |
+| `ROBOCHESS_ROBOFLOW_MODEL_URL` / `ROBOCHESS_ROBOFLOW_API_KEY` | Roboflow model endpoint and secret stored on the Pi | empty |
+| `ROBOCHESS_MODEL_PATH` | Reserved local model path for a future NCNN/local provider | empty |
 | `ROBOCHESS_AUTO_DETECT_ENABLED` | Run automatic move detection in the agent loop | `1` |
 
 Always install Python packages inside `.venv`. Do not use `sudo pip` or
@@ -122,9 +125,15 @@ separate `/etc/robochess/pi-agent.env` file instead.
 
 The agent starts BLE/board control even when the backend is down. It reconnects
 and uploads the Pi-authoritative session snapshot when the network returns.
-When `ROBOCHESS_MODEL_PATH` is empty, camera preview/calibration still work but
-automatic move detection reports `model unavailable`. Set it to a local `.pt`
-file after installing `requirements-vision.txt`.
+The current detector sends JPEG frames directly from the Pi to Roboflow. The
+backend never receives camera frames and never performs move inference. Keep the
+Roboflow URL and API key only in the Pi environment. A local/NCNN provider can be
+added later behind the same Pi recognizer interface.
+
+The app must complete the Pi setup checklist before starting a physical game:
+Pi internet, camera, Roboflow readiness, calibration, starting-position validation,
+and gantry homing. Backend registration and session sync are optional and never
+block the local HTTP service or an already-running local game.
 
 The Pi also starts a local HTTP service on port `8765`. It remains available
 without internet or MongoDB:
@@ -132,9 +141,15 @@ without internet or MongoDB:
 ```text
 GET  http://<pi-ip>:8765/local/health
 GET  http://<pi-ip>:8765/local/network/status
+GET  http://<pi-ip>:8765/local/setup/status
 GET  http://<pi-ip>:8765/local/camera/frame
 GET  http://<pi-ip>:8765/local/camera/stream
+POST http://<pi-ip>:8765/local/model/load
+POST http://<pi-ip>:8765/local/calibration/auto
 POST http://<pi-ip>:8765/local/calibration/manual
+POST http://<pi-ip>:8765/local/calibration/validate-start
+POST http://<pi-ip>:8765/local/gantry/home
+POST http://<pi-ip>:8765/local/game/start
 POST http://<pi-ip>:8765/local/move/detect
 POST http://<pi-ip>:8765/local/move/analyze-and-reply
 ```

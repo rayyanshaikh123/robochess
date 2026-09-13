@@ -9,15 +9,9 @@ import 'package:go_router/go_router.dart';
 import '../../core/config/server_config_provider.dart';
 import '../../core/errors/api_exception.dart';
 import '../providers/session_provider.dart';
+import '../theme/app_colors.dart';
+import '../widgets/app_logo.dart';
 
-const kBackground = Color(0xFF151311);
-const kSurfaceContLow = Color(0xFF1D1B19);
-const kSurfaceContHighest = Color(0xFF373431);
-const kPrimary = Color(0xFF8ADB52);
-const kOnPrimary = Color(0xFF173800);
-const kOnSurface = Color(0xFFE7E2DD);
-const kOnSurfaceVariant = Color(0xFFC0CAB4);
-const kError = Color(0xFFFFB4AB);
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -76,10 +70,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.only(bottom: 20),
+                  child: AppLogo(size: 72, showBorder: false, showShadow: false),
+                ),
+              ),
               Text('Welcome back',
-                  style: GoogleFonts.spaceGrotesk(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
+                  style: GoogleFonts.outfit(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
                       color: kOnSurface)),
               const SizedBox(height: 8),
               Text('Sign in to sync your boards and games.',
@@ -87,10 +87,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       fontSize: 13, color: kOnSurfaceVariant)),
               const SizedBox(height: 24),
               Container(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(22),
                 decoration: BoxDecoration(
-                  color: kSurfaceContLow,
-                  borderRadius: BorderRadius.circular(16),
+                  color: kSurfaceContLowest,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: kOutlineVariant),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
                 child: Form(
                   key: _formKey,
@@ -150,8 +158,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 borderRadius: BorderRadius.circular(12)),
                           ),
                           child: Text(_submitting ? 'SIGNING IN...' : 'SIGN IN',
-                              style: GoogleFonts.spaceGrotesk(
-                                  fontSize: 12,
+                              style: GoogleFonts.outfit(
+                                  fontSize: 13,
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: 2)),
                         ),
@@ -177,7 +185,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         child: TextButton.icon(
                           onPressed: () => context.go('/local'),
                           icon: const Icon(Icons.bluetooth, size: 16),
-                          label: const Text('PLAY LOCALLY WITHOUT INTERNET'),
+                          label: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text('PLAY LOCALLY WITHOUT INTERNET'),
+                          ),
                         ),
                       ),
                       const _ServerConfigButton(),
@@ -195,12 +206,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   InputDecoration _inputDecoration(String hint) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: GoogleFonts.inter(color: kOnSurfaceVariant),
+      hintStyle: GoogleFonts.inter(color: kOnSurfaceVariant.withOpacity(0.7)),
       filled: true,
-      fillColor: kSurfaceContHighest,
+      fillColor: kSurfaceContLow,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide.none,
+        borderSide: const BorderSide(color: kOutlineVariant),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: kOutlineVariant),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: kPrimary, width: 1.5),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
     );
@@ -235,62 +254,95 @@ class _ServerConfigButton extends ConsumerWidget {
 
   Future<void> _showConfigDialog(
       BuildContext context, WidgetRef ref, String currentUrl) async {
-    final controller = TextEditingController(text: currentUrl);
-    String? error;
     await showDialog<String>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => AlertDialog(
-          backgroundColor: kSurfaceContLow,
-          title: const Text('Configure server'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: controller,
-                style: GoogleFonts.inter(color: kOnSurface),
-                decoration: InputDecoration(
-                  hintText: 'http://192.168.1.42:8000',
-                  hintStyle:
-                      GoogleFonts.inter(color: kOnSurfaceVariant, fontSize: 13),
-                  filled: true,
-                  fillColor: kSurfaceContHighest,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
-              if (error != null) ...[
-                const SizedBox(height: 8),
-                Text(error!,
-                    style: GoogleFonts.inter(fontSize: 12, color: kError)),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () async {
-                final value = controller.text.trim();
-                try {
-                  await ref.read(serverConfigProvider.notifier).update(value);
-                  if (dialogContext.mounted) {
-                    Navigator.of(dialogContext).pop(value);
-                  }
-                } on ArgumentError catch (e) {
-                  setDialogState(() => error = e.message);
-                }
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        ),
+      builder: (dialogContext) => _ServerConfigDialog(
+        currentUrl: currentUrl,
+        onSave: (value) async {
+          await ref.read(serverConfigProvider.notifier).update(value);
+        },
       ),
     );
-    controller.dispose();
+  }
+}
+
+class _ServerConfigDialog extends StatefulWidget {
+  final String currentUrl;
+  final Future<void> Function(String) onSave;
+
+  const _ServerConfigDialog({
+    required this.currentUrl,
+    required this.onSave,
+  });
+
+  @override
+  State<_ServerConfigDialog> createState() => _ServerConfigDialogState();
+}
+
+class _ServerConfigDialogState extends State<_ServerConfigDialog> {
+  late final TextEditingController _controller;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.currentUrl);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: kSurfaceContLow,
+      title: const Text('Configure server'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _controller,
+            style: GoogleFonts.inter(color: kOnSurface),
+            decoration: InputDecoration(
+              hintText: 'http://192.168.1.42:8000',
+              hintStyle: GoogleFonts.inter(color: kOnSurfaceVariant, fontSize: 13),
+              filled: true,
+              fillColor: kSurfaceContHighest,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!, style: GoogleFonts.inter(fontSize: 12, color: kError)),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () async {
+            final value = _controller.text.trim();
+            try {
+              await widget.onSave(value);
+              if (mounted) {
+                Navigator.of(context).pop(value);
+              }
+            } on ArgumentError catch (e) {
+              setState(() => _error = e.message);
+            }
+          },
+          child: const Text('Save'),
+        ),
+      ],
+    );
   }
 }

@@ -5,5 +5,5 @@ import '../../data/repositories/board_repository.dart';
 import 'session_provider.dart';
 
 final boardRepositoryProvider = Provider<BoardRepository>((ref) {
-  return BoardRepository(BoardRemoteDataSource(ref.read(apiClientProvider)));
+  return BoardRepository(BoardRemoteDataSource(ref.watch(apiClientProvider)));
 });

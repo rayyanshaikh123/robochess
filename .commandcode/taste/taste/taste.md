@@ -8,6 +8,11 @@
 - Prefers minimal dependencies, especially on constrained hardware like the Raspberry Pi, and questions why heavy/unneeded libraries are present. Confidence: 0.7
 - Tests on physical devices (Android phone and iPhone) plus a Raspberry Pi over a phone hotspot, and expects the app to work on both Android and iOS, not just emulators/simulators. Confidence: 0.65
 - Values accurate project documentation (README, protocol docs) kept in sync with the actual implementation. Confidence: 0.6
+- Wants design rationale and decisions documented in a design.md file as a deliverable alongside implementation work (color systems, typography, layout, key design decisions). Confidence: 0.75
 - Prefers a test-driven workflow: write failing tests that characterize each bug before implementing the fix, then verify the suite passes — tests-first, fixes-after. Confidence: 0.65
 - Prefers automated end-to-end device provisioning/recovery flows over manual secret entry or editing device environment variables, including transferring credentials over the existing authenticated BLE connection and persisting them on the device. Confidence: 0.8
 - Prefers sequential, one-at-a-time execution over dispatching work in parallel (e.g., after a rate limit on batching), checking the current state first before continuing. Confidence: 0.5
+- Prefers web pages to match the app's theme and color palette — reads the app's theme source files and ports exact theme tokens (colors, fonts, spacing) to the web design for cross-platform consistency. Confidence: 0.9
+- Prefers light mode themes for web/landing pages, avoiding dark mode. Confidence: 0.9
+- Prefers clean, minimal section-based layouts with card surfaces and consistent vertical rhythm. Confidence: 0.8
+- Avoids app screenshots in web/landing pages; prefers clean visual elements or component-based demos (e.g., an illustrative interactive board) instead. Confidence: 0.75

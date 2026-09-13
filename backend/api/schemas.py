@@ -13,6 +13,7 @@ class GameStartRequest(BaseModel):
     mode: str = Field(default="human_vs_ai")
     difficulty: int = Field(default=5, ge=1, le=10)
     players: Optional[list[str]] = None
+    player_side: Optional[str] = Field(default="white")
 
 
 class MoveAiRequest(BaseModel):

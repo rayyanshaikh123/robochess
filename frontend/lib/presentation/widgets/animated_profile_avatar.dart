@@ -1,156 +1,105 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 
-// ── Colour tokens ────────────────────────────────────────────────────────────
-const _kSurfaceContHighest = Color(0xFF373431);
-const _kPrimary = Color(0xFF8ADB52);
-const _kPrimaryContainer = Color(0xFF68B631);
-const _kSecondary = Color(0xFFA2E7FF);
-const _kOutlineVariant = Color(0xFF414939);
+import '../providers/user_provider.dart';
+import '../theme/app_colors.dart';
 
-/// An animated profile avatar with a rotating gradient border and glow pulse.
+/// A sleek, minimal name-based profile monogram avatar.
+/// Derives initials from the user's display name.
 /// Tapping it navigates to the `/profile` route.
-class AnimatedProfileAvatar extends StatefulWidget {
-  /// Outer diameter of the entire widget (border + image).
+class AnimatedProfileAvatar extends ConsumerWidget {
+  /// Outer diameter of the entire widget.
   final double size;
 
-  const AnimatedProfileAvatar({super.key, this.size = 36});
+  /// Optional override name. If null, reads from [userProfileProvider].
+  final String? name;
 
-  @override
-  State<AnimatedProfileAvatar> createState() => _AnimatedProfileAvatarState();
-}
+  const AnimatedProfileAvatar({
+    super.key,
+    this.size = 36,
+    this.name,
+  });
 
-class _AnimatedProfileAvatarState extends State<AnimatedProfileAvatar>
-    with TickerProviderStateMixin {
-  late final AnimationController _rotationCtrl;
-  late final AnimationController _glowCtrl;
-  late final Animation<double> _glowAnim;
-
-  @override
-  void initState() {
-    super.initState();
-
-    // Slow-spinning gradient border
-    _rotationCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 4),
-    )..repeat();
-
-    // Pulsing glow
-    _glowCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1800),
-    )..repeat(reverse: true);
-
-    _glowAnim = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _glowCtrl, curve: Curves.easeInOut),
-    );
+  static String getInitials(String displayName) {
+    final trimmed = displayName.trim();
+    if (trimmed.isEmpty) return 'P';
+    final parts =
+        trimmed.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.length >= 2) {
+      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    }
+    return trimmed.substring(0, 1).toUpperCase();
   }
 
   @override
-  void dispose() {
-    _rotationCtrl.dispose();
-    _glowCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final size = widget.size;
-    final borderWidth = size * 0.07; // ~2.5px at 36
-    final innerSize = size - borderWidth * 2;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final profile = ref.watch(userProfileProvider).valueOrNull;
+    final displayName = name ?? profile?.displayName ?? 'Player';
+    final initials = getInitials(displayName);
 
     return GestureDetector(
-      onTap: () => context.push('/profile'),
-      child: AnimatedBuilder(
-        animation: Listenable.merge([_rotationCtrl, _glowAnim]),
-        builder: (_, __) {
-          final glowOpacity = 0.15 + _glowAnim.value * 0.35;
-
-          return Container(
-            margin: const EdgeInsets.only(right: 20, top: 8, bottom: 8),
-            width: size,
-            height: size,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: _kPrimary.withOpacity(glowOpacity),
-                  blurRadius: 12 + _glowAnim.value * 6,
-                  spreadRadius: _glowAnim.value * 2,
-                ),
-              ],
+      onTap: () {
+        final location = GoRouterState.of(context).uri.toString();
+        if (!location.startsWith('/profile')) {
+          context.push('/profile');
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.only(right: 16, top: 6, bottom: 6),
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: kPrimary,
+          border: Border.all(
+            color: kOutlineVariant.withValues(alpha: 0.6),
+            width: 1.2,
+          ),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x14000000),
+              blurRadius: 4,
+              offset: Offset(0, 1.5),
             ),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                // ── Rotating gradient ring ──
-                Transform.rotate(
-                  angle: _rotationCtrl.value * 2 * math.pi,
-                  child: Container(
-                    width: size,
-                    height: size,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: const SweepGradient(
-                        colors: [
-                          _kPrimary,
-                          _kSecondary,
-                          _kPrimaryContainer,
-                          _kPrimary,
-                        ],
-                      ),
-                    ),
-                  ),
+          ],
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Center(
+              child: Text(
+                initials,
+                style: GoogleFonts.outfit(
+                  fontSize: size * 0.40,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                  letterSpacing: 0.5,
                 ),
-
-                // ── Inner image circle ──
-                Container(
-                  width: innerSize,
-                  height: innerSize,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _kSurfaceContHighest,
-                    border: Border.all(
-                      color: _kOutlineVariant.withOpacity(0.2),
-                      width: 0.5,
-                    ),
-                    image: const DecorationImage(
-                      image: AssetImage('assets/images/profile_avatar.png'),
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                ),
-
-                // ── Online indicator dot ──
-                Positioned(
-                  bottom: 0,
-                  right: 0,
-                  child: Container(
-                    width: size * 0.28,
-                    height: size * 0.28,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _kPrimary,
-                      border: Border.all(
-                        color: const Color(0xFF151311),
-                        width: 1.5,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _kPrimary.withOpacity(0.6),
-                          blurRadius: 4,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
-          );
-        },
+            // Active status dot at bottom-right
+            Positioned(
+              bottom: 0,
+              right: 0,
+              child: Container(
+                width: size * 0.28,
+                height: size * 0.28,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFF22C55E),
+                  border: Border.all(
+                    color: kBackground,
+                    width: 1.5,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
+

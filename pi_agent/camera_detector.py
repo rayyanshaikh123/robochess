@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from pi_agent.calibration import rotate_warped
+from pi_agent.vision_recognizer import BoardRecognizer
 
 
 class PiCameraDetector:
@@ -61,7 +62,6 @@ class PiCameraDetector:
             self.last_error = "Configure a local model path or Roboflow model/key"
             return
         try:
-            from backend.board_recognizer import BoardRecognizer
             self.recognizer = BoardRecognizer(self.model_path, self.confidence)
             if not self.recognizer.is_ready:
                 self.last_error = "Vision model could not be loaded"

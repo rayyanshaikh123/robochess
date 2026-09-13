@@ -6,11 +6,17 @@ Use the existing Control characteristic. Every JSON envelope uses protocol versi
 
 Messages are `session.start` (`initial_fen` optional, `human_color`), `move.propose` (`uci`, `expected_version`), `session.reset` (`initial_fen` optional), `session.resume`, `state.request`, `gantry.home`, and `gantry.status`. Responses are `control.result`; the Status characteristic exposes the newest `game.state` envelope. The state contains FEN, UCI history, version, phase, state hash and recovery error.
 
-During hardware bring-up the app can also send `camera.calibrate` with
-`camera_index`, `rotation` (0, 90, 180, or 270), and `board_orientation`
-(`white_bottom` or `black_bottom`). The Pi persists these settings for the
-future OpenCV detector; it does not claim that a camera/model is calibrated
-until the detector integration exists.
+During setup the app can send `camera.calibrate` with `camera_index`, `rotation`
+(0, 90, 180, or 270), and `board_orientation` (`white_bottom` or `black_bottom`).
+The Pi persists these settings and exposes the complete local readiness checklist
+through `/local/setup/status`. Normal play is refused until the Pi has internet for
+Roboflow, a usable camera, a calibrated board, a valid starting position, and a
+homed gantry.
+
+The app uses BLE only for discovery, device ID, Wi-Fi provisioning, onboarding,
+and recovery. Once the Pi reports a usable LAN IP, camera setup and gameplay use
+`http://<pi-ip>:8765`. Camera frames are sent directly from the Pi to Roboflow;
+the backend is not in the inference path.
 
 The BlueZ deployment must require encrypted, bonded pairing before exposing gameplay control. The Flutter app performs bonding, stores the board identity, subscribes to status notifications, and presents manual setup/recovery actions.
 

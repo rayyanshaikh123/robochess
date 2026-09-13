@@ -21,28 +21,53 @@ class GameSocketClient {
     await _subscription?.cancel();
     await _channel?.sink.close();
 
-    _channel = WebSocketChannel.connect(Uri.parse(wsBaseUrl));
-    _subscription = _channel!.stream.listen((event) {
-      final data = jsonDecode(event as String) as Map<String, dynamic>;
-      _controller.add(data);
-    });
-    _channel!.sink.add(jsonEncode({
-      'type': 'hello',
-      'game_id': gameId,
-      'last_known_version': lastKnownVersion,
-    }));
+    try {
+      final channel = WebSocketChannel.connect(Uri.parse(wsBaseUrl));
+      channel.ready.catchError((_) {
+        // Suppress unhandled socket connect timeout
+      });
+      _channel = channel;
+      _subscription = channel.stream.listen(
+        (event) {
+          try {
+            final data = jsonDecode(event as String) as Map<String, dynamic>;
+            _controller.add(data);
+          } catch (_) {}
+        },
+        onError: (err) {
+          // Gracefully absorb connection / socket error
+        },
+        onDone: () {},
+        cancelOnError: false,
+      );
+
+      // Attempt initial hello if channel exists
+      try {
+        _channel?.sink.add(jsonEncode({
+          'type': 'hello',
+          'game_id': gameId,
+          'last_known_version': lastKnownVersion,
+        }));
+      } catch (_) {}
+    } catch (_) {
+      // Gracefully handle connect failure
+    }
   }
 
   void resync({required String gameId, required int lastKnownVersion}) {
-    _channel?.sink.add(jsonEncode({
-      'type': 'resync',
-      'game_id': gameId,
-      'last_known_version': lastKnownVersion,
-    }));
+    try {
+      _channel?.sink.add(jsonEncode({
+        'type': 'resync',
+        'game_id': gameId,
+        'last_known_version': lastKnownVersion,
+      }));
+    } catch (_) {}
   }
 
   void ping() {
-    _channel?.sink.add(jsonEncode({'type': 'ping'}));
+    try {
+      _channel?.sink.add(jsonEncode({'type': 'ping'}));
+    } catch (_) {}
   }
 
   Future<void> close() async {
@@ -67,26 +92,47 @@ class DeviceSocketClient {
     await _subscription?.cancel();
     await _channel?.sink.close();
 
-    final session = await tokenStore.loadSession();
-    final uri = Uri.parse(wsBaseUrl).replace(queryParameters: {
-      if (session != null) 'access_token': session.accessToken,
-    });
-    _channel = WebSocketChannel.connect(uri);
-    _subscription = _channel!.stream.listen((event) {
-      final data = jsonDecode(event as String) as Map<String, dynamic>;
-      _controller.add(data);
-    });
+    try {
+      final session = await tokenStore.loadSession();
+      final uri = Uri.parse(wsBaseUrl).replace(queryParameters: {
+        if (session != null) 'access_token': session.accessToken,
+      });
+      final channel = WebSocketChannel.connect(uri);
+      channel.ready.catchError((_) {
+        // Suppress unhandled socket connect timeout
+      });
+      _channel = channel;
+      _subscription = channel.stream.listen(
+        (event) {
+          try {
+            final data = jsonDecode(event as String) as Map<String, dynamic>;
+            _controller.add(data);
+          } catch (_) {}
+        },
+        onError: (err) {
+          // Gracefully absorb socket timeout / network unreachable error
+        },
+        onDone: () {},
+        cancelOnError: false,
+      );
+    } catch (_) {
+      // Connect failure caught gracefully
+    }
   }
 
   void subscribe(List<String> deviceIds) {
-    _channel?.sink.add(jsonEncode({
-      'type': 'device.subscribe',
-      'device_ids': deviceIds,
-    }));
+    try {
+      _channel?.sink.add(jsonEncode({
+        'type': 'device.subscribe',
+        'device_ids': deviceIds,
+      }));
+    } catch (_) {}
   }
 
   void ping() {
-    _channel?.sink.add(jsonEncode({'type': 'ping'}));
+    try {
+      _channel?.sink.add(jsonEncode({'type': 'ping'}));
+    } catch (_) {}
   }
 
   Future<void> close() async {

@@ -11,20 +11,8 @@ import '../../domain/models/multiplayer_game_model.dart';
 import '../providers/multiplayer_game_provider.dart';
 import '../providers/social_provider.dart';
 import '../widgets/chess_board_view.dart';
+import '../theme/app_colors.dart';
 
-// ── Colour tokens ──────────────────────────────────────
-const kBackground = Color(0xFF151311);
-const kSurfaceContLowest = Color(0xFF0F0E0C);
-const kSurfaceContLow = Color(0xFF1D1B19);
-const kSurfaceContHigh = Color(0xFF2C2A27);
-const kSurfaceContHighest = Color(0xFF373431);
-const kPrimary = Color(0xFF8ADB52);
-const kOnPrimary = Color(0xFF173800);
-const kSecondary = Color(0xFFA2E7FF);
-const kOnSurface = Color(0xFFE7E2DD);
-const kOnSurfaceVariant = Color(0xFFC0CAB4);
-const kOutlineVariant = Color(0xFF414939);
-const kError = Color(0xFFFFB4AB);
 
 class MultiplayerGameScreen extends ConsumerStatefulWidget {
   final String gameId;
@@ -191,10 +179,16 @@ class _MultiplayerGameScreenState
         leading: IconButton(
           tooltip: 'Back',
           icon: const Icon(Icons.arrow_back, color: kOnSurfaceVariant),
-          onPressed: () => context.go('/friends/games'),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/friends/games');
+            }
+          },
         ),
         title: Text('FRIEND GAME',
-            style: GoogleFonts.spaceGrotesk(
+            style: GoogleFonts.cinzel(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
                 color: kPrimary,
@@ -337,7 +331,7 @@ class _MultiplayerGameScreenState
                 }),
         icon: const Icon(Icons.refresh, size: 18),
         label: Text('OFFER REMATCH',
-            style: GoogleFonts.spaceGrotesk(
+            style: GoogleFonts.cinzel(
                 fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 2)),
       ),
     );
@@ -433,7 +427,7 @@ class _PlayerBar extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(_clock,
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.outfit(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
                       color: active ? kPrimary : kOnSurfaceVariant)),

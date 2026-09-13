@@ -1,59 +1,53 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-class AppTheme {
-  // Theme Colors
-  static const Color primaryNeonGreen = Color(0xFF00FF40);
-  static const Color backgroundBlack = Color(0xFF000000);
-  static const Color surfaceDarkGrey = Color(0xFF1A1A1A);
-  static const Color textWhite = Color(0xFFFFFFFF);
-  static const Color textGrey = Color(0xFFAAAAAA);
+import 'app_colors.dart';
 
-  static ThemeData get darkTheme {
+class AppTheme {
+  static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: backgroundBlack,
-      primaryColor: primaryNeonGreen,
-      colorScheme: const ColorScheme.dark(
-        primary: primaryNeonGreen,
-        background: backgroundBlack,
-        surface: surfaceDarkGrey,
-        onPrimary: backgroundBlack,
-        onBackground: textWhite,
-        onSurface: textWhite,
-        secondary: primaryNeonGreen,
+      brightness: Brightness.light,
+      scaffoldBackgroundColor: kBackground,
+      primaryColor: kPrimary,
+      colorScheme: const ColorScheme.light(
+        primary: kPrimary,
+        surface: kSurfaceContLowest,
+        onPrimary: kOnPrimary,
+        onSurface: kOnSurface,
+        secondary: kSecondary,
+        error: kError,
       ),
       textTheme: GoogleFonts.outfitTextTheme(
-        ThemeData.dark().textTheme.copyWith(
-              displayLarge: const TextStyle(color: textWhite, fontWeight: FontWeight.bold),
-              bodyLarge: const TextStyle(color: textWhite),
-              bodyMedium: const TextStyle(color: textGrey),
+        ThemeData.light().textTheme.copyWith(
+              displayLarge: const TextStyle(color: kOnSurface, fontWeight: FontWeight.bold),
+              bodyLarge: const TextStyle(color: kOnSurface),
+              bodyMedium: const TextStyle(color: kOnSurfaceVariant),
             ),
       ),
       appBarTheme: const AppBarTheme(
-        backgroundColor: backgroundBlack,
+        backgroundColor: kBackground,
         elevation: 0,
         centerTitle: true,
-        iconTheme: IconThemeData(color: primaryNeonGreen),
+        iconTheme: IconThemeData(color: kPrimary),
         titleTextStyle: TextStyle(
-          color: textWhite,
+          color: kOnSurface,
           fontSize: 20,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w700,
         ),
       ),
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: backgroundBlack,
-        selectedItemColor: primaryNeonGreen,
-        unselectedItemColor: textGrey,
+        backgroundColor: kSurfaceContLowest,
+        selectedItemColor: kPrimary,
+        unselectedItemColor: kOnSurfaceVariant,
         type: BottomNavigationBarType.fixed,
         showUnselectedLabels: true,
-        elevation: 10,
+        elevation: 6,
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: primaryNeonGreen,
-          foregroundColor: backgroundBlack,
+          backgroundColor: kPrimary,
+          foregroundColor: kOnPrimary,
           textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -61,12 +55,28 @@ class AppTheme {
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
         ),
       ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: kPrimary,
+          foregroundColor: kOnPrimary,
+          textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+        ),
+      ),
       cardTheme: CardThemeData(
-        color: surfaceDarkGrey,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        elevation: 4,
+        color: kSurfaceContLowest,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: kOutlineVariant.withOpacity(0.5)),
+        ),
+        elevation: 1,
         margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       ),
     );
   }
+
+  static ThemeData get darkTheme => lightTheme;
 }

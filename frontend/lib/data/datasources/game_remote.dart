@@ -10,11 +10,13 @@ class GameRemoteDataSource {
     String mode = 'human_vs_ai',
     int difficulty = 5,
     List<String>? players,
+    String? playerSide,
   }) async {
     final data = await _client.postJson('/game/start', body: {
       'mode': mode,
       'difficulty': difficulty,
       if (players != null) 'players': players,
+      if (playerSide != null) 'player_side': playerSide,
     });
     return GameStateModel.fromJson(data);
   }

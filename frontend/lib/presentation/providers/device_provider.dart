@@ -12,7 +12,7 @@ import 'session_provider.dart';
 final deviceSocketProvider = Provider<DeviceSocketClient>((ref) {
   return DeviceSocketClient(
     wsBaseUrl: AppConfig.wsBaseUrl,
-    tokenStore: ref.read(tokenStoreProvider),
+    tokenStore: ref.watch(tokenStoreProvider),
   );
 });
 
@@ -20,8 +20,8 @@ final deviceListProvider =
     StateNotifierProvider<DeviceListController, AsyncValue<List<DeviceModel>>>(
         (ref) {
   return DeviceListController(
-    ref.read(deviceRepositoryProvider),
-    ref.read(deviceSocketProvider),
+    ref.watch(deviceRepositoryProvider),
+    ref.watch(deviceSocketProvider),
   );
 });
 
@@ -33,21 +33,31 @@ class DeviceListController
 
   DeviceListController(this._repository, this._socket)
       : super(const AsyncValue.loading()) {
-    _init();
+    _init().catchError((_, __) {});
   }
 
   Future<void> _init() async {
-    await _socket.connect();
-    _sub = _socket.stream.listen(_handleEvent);
+    try {
+      await _socket.connect();
+      _sub = _socket.stream.listen(_handleEvent, onError: (e) {
+        // Socket stream error handled gracefully
+      });
+    } catch (_) {
+      // Offline / unreachable socket handled gracefully
+    }
     await load();
   }
 
   Future<void> load() async {
-    final items = await _repository.list();
-    state = AsyncValue.data(items);
-    final deviceIds = items.map((device) => device.deviceId).toList();
-    if (deviceIds.isNotEmpty) {
-      _socket.subscribe(deviceIds);
+    try {
+      final items = await _repository.list();
+      state = AsyncValue.data(items);
+      final deviceIds = items.map((device) => device.deviceId).toList();
+      if (deviceIds.isNotEmpty) {
+        _socket.subscribe(deviceIds);
+      }
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
     }
   }
 
@@ -103,5 +113,5 @@ class SelectedDeviceController extends StateNotifier<String?> {
 
 final selectedDeviceProvider =
     StateNotifierProvider<SelectedDeviceController, String?>((ref) {
-  return SelectedDeviceController(ref.read(tokenStoreProvider));
+  return SelectedDeviceController(ref.watch(tokenStoreProvider));
 });

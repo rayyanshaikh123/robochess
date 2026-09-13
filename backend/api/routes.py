@@ -709,7 +709,8 @@ async def detect_move_if_clear(
             },
         )
 
-    if manager.mode == "human_vs_ai" and not manager.board.is_game_over():
+    ai_color = chess.BLACK if getattr(manager, "player_side", "white") == "white" else chess.WHITE
+    if manager.mode == "human_vs_ai" and not manager.board.is_game_over() and manager.board.turn == ai_color:
         background_tasks.add_task(_trigger_ai_move, db)
 
     data = {
@@ -921,7 +922,8 @@ async def analyze_move_snapshot(
             },
         )
 
-    if manager.mode == "human_vs_ai" and not manager.board.is_game_over():
+    ai_color = chess.BLACK if getattr(manager, "player_side", "white") == "white" else chess.WHITE
+    if manager.mode == "human_vs_ai" and not manager.board.is_game_over() and manager.board.turn == ai_color:
         background_tasks.add_task(_trigger_ai_move, db)
 
     data = {
@@ -1118,7 +1120,8 @@ async def check_auto_detect_ready(background_tasks: BackgroundTasks, db=Depends(
                     },
                 )
         
-        if manager.mode == "human_vs_ai" and not manager.board.is_game_over():
+        ai_color = chess.BLACK if getattr(manager, "player_side", "white") == "white" else chess.WHITE
+        if manager.mode == "human_vs_ai" and not manager.board.is_game_over() and manager.board.turn == ai_color:
             background_tasks.add_task(_trigger_ai_move, db)
         
         return ok(
@@ -1286,11 +1289,12 @@ def calibrate_force() -> ApiResponse:
 
 
 @router.post("/game/start", response_model=ApiResponse)
-async def start_game(payload: GameStartRequest, db=Depends(get_db)) -> ApiResponse:
+async def start_game(payload: GameStartRequest, background_tasks: BackgroundTasks, db=Depends(get_db)) -> ApiResponse:
     manager = GameManager.get_instance()
     with manager.state_lock:
         manager.mode = payload.mode
         manager.difficulty = payload.difficulty
+        manager.player_side = getattr(payload, "player_side", "white") or "white"
         manager.board.reset()
         # Keep calibration and baseline board state from setup/validation.
         # Resetting these here causes move detection to fail right after game start.
@@ -1309,6 +1313,11 @@ async def start_game(payload: GameStartRequest, db=Depends(get_db)) -> ApiRespon
     # Start auto-detect if using a board (players list provided)
     if payload.players and len(payload.players) > 0:
         manager.start_auto_detect()
+
+    # If playing vs AI and user is Black, AI needs to make the first move (White)
+    ai_color = chess.BLACK if manager.player_side == "white" else chess.WHITE
+    if manager.mode == "human_vs_ai" and manager.board.turn == ai_color:
+        background_tasks.add_task(_trigger_ai_move, db)
 
     data = {
         "fen": manager.get_fen(),
@@ -1408,7 +1417,8 @@ async def detect_move_endpoint(
         )
 
     # Trigger AI response when playing against the bot
-    if manager.mode == "human_vs_ai" and not manager.board.is_game_over():
+    ai_color = chess.BLACK if getattr(manager, "player_side", "white") == "white" else chess.WHITE
+    if manager.mode == "human_vs_ai" and not manager.board.is_game_over() and manager.board.turn == ai_color:
         background_tasks.add_task(_trigger_ai_move, db)
 
     data = {
@@ -1473,6 +1483,10 @@ async def _trigger_ai_move(db):
     
     if manager.board.is_game_over():
         return
+
+    ai_color = chess.BLACK if getattr(manager, "player_side", "white") == "white" else chess.WHITE
+    if manager.mode == "human_vs_ai" and manager.board.turn != ai_color:
+        return  # AI must never make a move if it's the human player's turn
 
     difficulty = manager.difficulty
     try:
@@ -1550,7 +1564,8 @@ async def submit_move(payload: GameMoveRequest, background_tasks: BackgroundTask
     )
 
     # Trigger AI move if in AI mode and it's AI's turn
-    if manager.mode == "human_vs_ai" and not manager.board.is_game_over():
+    ai_color = chess.BLACK if getattr(manager, "player_side", "white") == "white" else chess.WHITE
+    if manager.mode == "human_vs_ai" and not manager.board.is_game_over() and manager.board.turn == ai_color:
         background_tasks.add_task(_trigger_ai_move, db)
 
     return ok("Move accepted", game_state)

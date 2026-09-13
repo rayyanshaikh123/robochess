@@ -19,20 +19,20 @@ final apiClientProvider = Provider<ApiClient>((ref) {
   final baseUrl = ref.watch(serverConfigProvider);
   return ApiClient(
       baseUrl: baseUrl,
-      tokenStore: ref.read(tokenStoreProvider),
+      tokenStore: ref.watch(tokenStoreProvider),
       timeout: Duration(seconds: AppConfig.apiTimeoutSeconds));
 });
 
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
-  return AuthRepository(AuthRemoteDataSource(ref.read(apiClientProvider)));
+  return AuthRepository(AuthRemoteDataSource(ref.watch(apiClientProvider)));
 });
 
 final deviceRepositoryProvider = Provider<DeviceRepository>((ref) {
-  return DeviceRepository(DeviceRemoteDataSource(ref.read(apiClientProvider)));
+  return DeviceRepository(DeviceRemoteDataSource(ref.watch(apiClientProvider)));
 });
 
 final gameRepositoryProvider = Provider<GameRepository>((ref) {
-  return GameRepository(GameRemoteDataSource(ref.read(apiClientProvider)));
+  return GameRepository(GameRemoteDataSource(ref.watch(apiClientProvider)));
 });
 
 final gameSocketProvider = Provider<GameSocketClient>((ref) {
@@ -55,7 +55,13 @@ class SessionController extends StateNotifier<AsyncValue<AuthSession?>> {
 
   Future<void> _load() async {
     final session = await _tokenStore.loadSession();
-    state = AsyncValue.data(session);
+    if (mounted) {
+      Future.microtask(() {
+        if (mounted) {
+          state = AsyncValue.data(session);
+        }
+      });
+    }
   }
 
   Future<void> register({
@@ -104,5 +110,5 @@ class SessionController extends StateNotifier<AsyncValue<AuthSession?>> {
 final sessionProvider =
     StateNotifierProvider<SessionController, AsyncValue<AuthSession?>>((ref) {
   return SessionController(
-      ref.read(authRepositoryProvider), ref.read(tokenStoreProvider));
+      ref.watch(authRepositoryProvider), ref.watch(tokenStoreProvider));
 });

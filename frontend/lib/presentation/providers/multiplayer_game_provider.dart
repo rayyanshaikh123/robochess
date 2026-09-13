@@ -49,8 +49,8 @@ class GameListController
 final activeGamesProvider = StateNotifierProvider<GameListController,
     AsyncValue<List<MultiplayerGame>>>((ref) {
   return GameListController(
-    ref.read(multiplayerRepositoryProvider),
-    ref.read(socialSocketProvider),
+    ref.watch(multiplayerRepositoryProvider),
+    ref.watch(socialSocketProvider),
     'active',
   );
 });
@@ -58,8 +58,8 @@ final activeGamesProvider = StateNotifierProvider<GameListController,
 final gameHistoryProvider = StateNotifierProvider<GameListController,
     AsyncValue<List<MultiplayerGame>>>((ref) {
   return GameListController(
-    ref.read(multiplayerRepositoryProvider),
-    ref.read(socialSocketProvider),
+    ref.watch(multiplayerRepositoryProvider),
+    ref.watch(socialSocketProvider),
     'completed',
   );
 });
@@ -270,8 +270,8 @@ class MultiplayerGameController
 final multiplayerGameProvider = StateNotifierProvider.family<
     MultiplayerGameController, AsyncValue<MultiplayerGame>, String>((ref, gameId) {
   return MultiplayerGameController(
-    ref.read(multiplayerRepositoryProvider),
-    ref.read(socialSocketProvider),
+    ref.watch(multiplayerRepositoryProvider),
+    ref.watch(socialSocketProvider),
     gameId,
   );
 });

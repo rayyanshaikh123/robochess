@@ -26,6 +26,7 @@ class GameManager:
         self.prev_state: Optional[dict[str, Optional[str]]] = None
         self.calibrated = False
         self.mode = "human_vs_ai"
+        self.player_side = "white"
         self.difficulty = 5
         self.current_game_id: Optional[str] = None
         self.hand_prev_gray = None

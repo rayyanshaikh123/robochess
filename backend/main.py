@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+# pyrefly: ignore [missing-import]
 from fastapi import FastAPI
 from pathlib import Path
 import sys
@@ -27,7 +28,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         manager = GameManager.get_instance()
-        manager.close()
+        manager.close() 
         pubsub = getattr(app.state, "redis_pubsub", None)
         if pubsub is not None:
             await pubsub.close()
@@ -39,3 +40,7 @@ configure_logging()
 app = FastAPI(title="RoboChess Backend", lifespan=lifespan)
 app.include_router(api_router)
 app.middleware("http")(request_logging_middleware())
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

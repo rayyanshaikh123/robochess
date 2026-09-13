@@ -29,6 +29,8 @@ from pi_agent.config import (
     AUTO_DETECT_ENABLED,
     DETECT_INTERVAL_SECONDS,
     STABLE_LABEL_COUNT,
+    VISION_MODE,
+    VISION_REQUIRE_INTERNET,
 )
 from pi_agent.heartbeat import HeartbeatWorker
 from pi_agent.vision_adapter import VisionAdapter
@@ -62,7 +64,9 @@ def main() -> None:
         "internet_check_enabled": INTERNET_CHECK_ENABLED,
         "internet_check_url": INTERNET_CHECK_URL,
         "internet_check_timeout": INTERNET_CHECK_TIMEOUT_SECONDS,
-        "backend_available": False,
+         "backend_available": False,
+         "vision_mode": VISION_MODE,
+         "vision_require_internet": VISION_REQUIRE_INTERNET,
     }
 
     def claim_pending_token() -> dict:
@@ -132,7 +136,11 @@ def main() -> None:
                 raise NetworkManagerError(claim.get("error", "Cloud linking failed"))
             if api.device_token:
                 api.update_status("wifi_connected", wifi_status="connected")
-            return {"status": "wifi_connected", "ssid": result.ssid}
+            return {
+                "status": "wifi_connected",
+                "ssid": result.ssid,
+                "network": result.to_dict(),
+            }
         except Exception as exc:
             if api.device_token:
                 try:

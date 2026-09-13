@@ -13,12 +13,14 @@ class GameController extends StateNotifier<AsyncValue<GameStateModel?>> {
     String mode = 'human_vs_ai',
     int difficulty = 5,
     List<String>? players,
+    String? playerSide,
   }) async {
     state = const AsyncValue.loading();
     final game = await _repository.createGame(
       mode: mode,
       difficulty: difficulty,
       players: players,
+      playerSide: playerSide,
     );
     state = AsyncValue.data(game);
   }
@@ -57,5 +59,5 @@ class GameController extends StateNotifier<AsyncValue<GameStateModel?>> {
 
 final gameControllerProvider =
     StateNotifierProvider<GameController, AsyncValue<GameStateModel?>>((ref) {
-  return GameController(ref.read(gameRepositoryProvider));
+  return GameController(ref.watch(gameRepositoryProvider));
 });

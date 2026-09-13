@@ -5,17 +5,8 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../domain/models/multiplayer_game_model.dart';
 import '../providers/multiplayer_game_provider.dart';
+import '../theme/app_colors.dart';
 
-// ── Colour tokens ──────────────────────────────────────
-const kBackground = Color(0xFF151311);
-const kSurfaceContLow = Color(0xFF1D1B19);
-const kSurfaceContHighest = Color(0xFF373431);
-const kPrimary = Color(0xFF8ADB52);
-const kSecondary = Color(0xFFA2E7FF);
-const kOnSurface = Color(0xFFE7E2DD);
-const kOnSurfaceVariant = Color(0xFFC0CAB4);
-const kOutlineVariant = Color(0xFF414939);
-const kError = Color(0xFFFFB4AB);
 
 class MultiplayerGamesScreen extends ConsumerStatefulWidget {
   const MultiplayerGamesScreen({super.key});
@@ -43,10 +34,16 @@ class _MultiplayerGamesScreenState
         leading: IconButton(
           tooltip: 'Back',
           icon: const Icon(Icons.arrow_back, color: kOnSurfaceVariant),
-          onPressed: () => context.go('/friends'),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/friends');
+            }
+          },
         ),
         title: Text('YOUR GAMES',
-            style: GoogleFonts.spaceGrotesk(
+            style: GoogleFonts.cinzel(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
                 color: kPrimary,

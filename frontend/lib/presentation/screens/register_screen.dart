@@ -5,15 +5,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/errors/api_exception.dart';
 import '../providers/session_provider.dart';
+import '../theme/app_colors.dart';
 
-const kBackground = Color(0xFF151311);
-const kSurfaceContLow = Color(0xFF1D1B19);
-const kSurfaceContHighest = Color(0xFF373431);
-const kPrimary = Color(0xFF8ADB52);
-const kOnPrimary = Color(0xFF173800);
-const kOnSurface = Color(0xFFE7E2DD);
-const kOnSurfaceVariant = Color(0xFFC0CAB4);
-const kError = Color(0xFFFFB4AB);
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -71,10 +64,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Create your account',
-                  style: GoogleFonts.spaceGrotesk(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
+              Text('Create Account',
+                  style: GoogleFonts.outfit(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
                       color: kOnSurface)),
               const SizedBox(height: 8),
               Text('Pair your boards and keep your progress synced.',
@@ -82,10 +75,18 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                       fontSize: 13, color: kOnSurfaceVariant)),
               const SizedBox(height: 24),
               Container(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(22),
                 decoration: BoxDecoration(
-                  color: kSurfaceContLow,
-                  borderRadius: BorderRadius.circular(16),
+                  color: kSurfaceContLowest,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: kOutlineVariant),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
                 child: Form(
                   key: _formKey,
@@ -159,8 +160,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           ),
                           child: Text(
                               _submitting ? 'CREATING...' : 'CREATE ACCOUNT',
-                              style: GoogleFonts.spaceGrotesk(
-                                  fontSize: 12,
+                              style: GoogleFonts.outfit(
+                                  fontSize: 13,
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: 2)),
                         ),
@@ -196,12 +197,20 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   InputDecoration _inputDecoration(String hint) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: GoogleFonts.inter(color: kOnSurfaceVariant),
+      hintStyle: GoogleFonts.inter(color: kOnSurfaceVariant.withOpacity(0.7)),
       filled: true,
-      fillColor: kSurfaceContHighest,
+      fillColor: kSurfaceContLow,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide.none,
+        borderSide: const BorderSide(color: kOutlineVariant),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: kOutlineVariant),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: kPrimary, width: 1.5),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
     );

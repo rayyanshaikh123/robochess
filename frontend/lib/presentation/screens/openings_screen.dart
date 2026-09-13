@@ -1,21 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
+
+import '../theme/app_colors.dart';
 import 'package:chess/chess.dart' as chess_lib;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../widgets/animated_profile_avatar.dart';
+import '../widgets/chess_piece_widget.dart';
 import '../../domain/models/opening_context.dart';
 
 // ── Colour tokens (matching the Learn Section palette) ───────────────────────
-const _kBackground = Color(0xFF151311);
-const _kSurfaceContLow = Color(0xFF1D1B19);
-const _kSurfaceContHigh = Color(0xFF2C2A27);
-const _kSurfaceContHighest = Color(0xFF373431);
-const _kPrimary = Color(0xFF8ADB52);
-const _kOnSurface = Color(0xFFE7E2DD);
-const _kOnSurfaceVariant = Color(0xFFC0CAB4);
-const _kOutlineVariant = Color(0xFF414939);
-const _kOutline = Color(0xFF8A9480);
 
 // ── Data model for an opening ────────────────────────────────────────────────
 class _Opening {
@@ -139,26 +133,32 @@ class _OpeningsScreenState extends State<OpeningsScreen> {
     final results = _filtered;
 
     return Scaffold(
-      backgroundColor: _kBackground,
+      backgroundColor: kBackground,
       body: CustomScrollView(
         slivers: [
           // ── App Bar ──────────────────────────────────────────────────
           SliverAppBar(
             floating: true,
             pinned: true,
-            backgroundColor: _kBackground,
+            backgroundColor: kBackground,
             surfaceTintColor: Colors.transparent,
             elevation: 0,
             leading: IconButton(
-              icon: const Icon(Icons.arrow_back, color: _kPrimary),
-              onPressed: () => context.pop(),
+              icon: const Icon(Icons.arrow_back, color: kPrimary),
+              onPressed: () {
+                if (context.canPop()) {
+                  context.pop();
+                } else {
+                  context.go('/learn');
+                }
+              },
             ),
             title: Text(
               'ROBOCHESS',
-              style: GoogleFonts.spaceGrotesk(
-                color: _kPrimary,
+              style: GoogleFonts.cinzel(
+                color: kPrimary,
                 fontWeight: FontWeight.w800,
-                fontSize: 16,
+                fontSize: 17,
                 letterSpacing: 2,
               ),
             ),
@@ -179,11 +179,11 @@ class _OpeningsScreenState extends State<OpeningsScreen> {
                   // Title
                   Text(
                     'OPENINGS',
-                    style: GoogleFonts.spaceGrotesk(
-                      fontSize: 34,
+                    style: GoogleFonts.cinzel(
+                      fontSize: 32,
                       fontWeight: FontWeight.w700,
-                      color: _kOnSurface,
-                      letterSpacing: -0.5,
+                      color: kOnSurface,
+                      letterSpacing: 0,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -191,7 +191,7 @@ class _OpeningsScreenState extends State<OpeningsScreen> {
                     'Master the first phase of the game. Access our curated library of classical and hypermodern setups.',
                     style: GoogleFonts.inter(
                       fontSize: 13,
-                      color: _kOnSurfaceVariant,
+                      color: kOnSurfaceVariant,
                       height: 1.5,
                     ),
                   ),
@@ -200,23 +200,23 @@ class _OpeningsScreenState extends State<OpeningsScreen> {
                   // Search Bar
                   Container(
                     decoration: BoxDecoration(
-                      color: _kSurfaceContHighest,
+                      color: kSurfaceContHighest,
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: TextField(
                       onChanged: (v) => setState(() => _searchQuery = v),
                       style: GoogleFonts.inter(
-                        color: _kOnSurface,
+                        color: kOnSurface,
                         fontSize: 14,
                       ),
                       decoration: InputDecoration(
                         hintText: 'Search openings (e.g. Sicilian)',
                         hintStyle: GoogleFonts.inter(
-                          color: _kOutline,
+                          color: kOutlineVariant,
                           fontSize: 14,
                         ),
                         prefixIcon:
-                            const Icon(Icons.search, color: _kOutlineVariant),
+                            const Icon(Icons.search, color: kOutlineVariant),
                         border: InputBorder.none,
                         contentPadding:
                             const EdgeInsets.symmetric(vertical: 16),
@@ -242,12 +242,12 @@ class _OpeningsScreenState extends State<OpeningsScreen> {
                                 horizontal: 18, vertical: 10),
                             decoration: BoxDecoration(
                               color: selected
-                                  ? _kPrimary.withOpacity(0.10)
-                                  : _kSurfaceContLow,
+                                  ? kPrimary.withOpacity(0.10)
+                                  : kSurfaceContLow,
                               borderRadius: BorderRadius.circular(99),
                               border: Border.all(
                                 color: selected
-                                    ? _kPrimary.withOpacity(0.25)
+                                    ? kPrimary.withOpacity(0.25)
                                     : Colors.transparent,
                               ),
                             ),
@@ -256,7 +256,7 @@ class _OpeningsScreenState extends State<OpeningsScreen> {
                               style: GoogleFonts.inter(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
-                                color: selected ? _kPrimary : _kOnSurfaceVariant,
+                                color: selected ? kPrimary : kOnSurfaceVariant,
                                 letterSpacing: 0.3,
                               ),
                             ),
@@ -282,7 +282,7 @@ class _OpeningsScreenState extends State<OpeningsScreen> {
                         'No openings match your search.',
                         style: GoogleFonts.inter(
                           fontSize: 14,
-                          color: _kOnSurfaceVariant,
+                          color: kOnSurfaceVariant,
                         ),
                       ),
                     ),
@@ -325,7 +325,7 @@ class _OpeningCard extends StatelessWidget {
   void _openLesson(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: _kSurfaceContLow,
+      backgroundColor: kSurfaceContLow,
       showDragHandle: true,
       builder: (sheetContext) => Padding(
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
@@ -334,21 +334,21 @@ class _OpeningCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(opening.name,
-                style: GoogleFonts.spaceGrotesk(
-                    fontSize: 24,
+                style: GoogleFonts.cinzel(
+                    fontSize: 22,
                     fontWeight: FontWeight.w700,
-                    color: _kOnSurface)),
+                    color: kOnSurface)),
             const SizedBox(height: 6),
             Text('${opening.style} opening • ${opening.difficultyDots}/4 difficulty',
-                style: GoogleFonts.inter(color: _kOnSurfaceVariant)),
+                style: GoogleFonts.inter(color: kOnSurfaceVariant)),
             const SizedBox(height: 18),
             Text('Main line',
                 style: GoogleFonts.inter(
-                    fontWeight: FontWeight.w700, color: _kPrimary)),
+                    fontWeight: FontWeight.w700, color: kPrimary)),
             const SizedBox(height: 6),
             Text(opening.notation,
-                style: GoogleFonts.spaceGrotesk(
-                    fontSize: 18, color: _kOnSurface)),
+                style: GoogleFonts.outfit(
+                    fontSize: 17, color: kOnSurface, fontWeight: FontWeight.w600)),
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
@@ -381,7 +381,7 @@ class _OpeningCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(18),
       child: Container(
       decoration: BoxDecoration(
-        color: _kSurfaceContLow,
+        color: kSurfaceContLow,
         borderRadius: BorderRadius.circular(18),
       ),
       clipBehavior: Clip.antiAlias,
@@ -396,7 +396,7 @@ class _OpeningCard extends StatelessWidget {
               height: 100,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: _kPrimary.withOpacity(0.04),
+                color: kPrimary.withOpacity(0.04),
               ),
             ),
           ),
@@ -415,10 +415,10 @@ class _OpeningCard extends StatelessWidget {
                         children: [
                           Text(
                             opening.name,
-                            style: GoogleFonts.spaceGrotesk(
-                              fontSize: 20,
+                            style: GoogleFonts.outfit(
+                              fontSize: 19,
                               fontWeight: FontWeight.w700,
-                              color: _kOnSurface,
+                              color: kOnSurface,
                               letterSpacing: -0.3,
                             ),
                           ),
@@ -427,7 +427,7 @@ class _OpeningCard extends StatelessWidget {
                             opening.notation,
                             style: GoogleFonts.inter(
                               fontSize: 12,
-                              color: _kOnSurfaceVariant,
+                              color: kOnSurfaceVariant,
                             ),
                           ),
                         ],
@@ -457,7 +457,7 @@ class _OpeningCard extends StatelessWidget {
                           Row(
                             children: [
                               Icon(Icons.psychology,
-                                  color: _kOutline, size: 16),
+                                  color: kOutlineVariant, size: 16),
                               const SizedBox(width: 8),
                               ...List.generate(4, (i) {
                                 final filled =
@@ -471,8 +471,8 @@ class _OpeningCard extends StatelessWidget {
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
                                       color: filled
-                                          ? _kPrimary
-                                          : _kSurfaceContHighest,
+                                          ? kPrimary
+                                          : kSurfaceContHighest,
                                     ),
                                   ),
                                 );
@@ -491,7 +491,7 @@ class _OpeningCard extends StatelessWidget {
                                 'Practice line',
                                 style: GoogleFonts.inter(
                                   fontSize: 10,
-                                  color: _kOnSurfaceVariant,
+                                  color: kOnSurfaceVariant,
                                 ),
                               ),
                               Text(
@@ -499,7 +499,7 @@ class _OpeningCard extends StatelessWidget {
                                 style: GoogleFonts.inter(
                                   fontSize: 10,
                                   fontWeight: FontWeight.w700,
-                                  color: _kPrimary,
+                                  color: kPrimary,
                                 ),
                               ),
                             ],
@@ -530,20 +530,20 @@ class _StyleBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: _kSurfaceContHighest,
+        color: kSurfaceContHighest,
         borderRadius: BorderRadius.circular(99),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 13, color: _kOnSurfaceVariant),
+          Icon(icon, size: 13, color: kOnSurfaceVariant),
           const SizedBox(width: 5),
           Text(
             label.toUpperCase(),
             style: GoogleFonts.inter(
               fontSize: 9,
               fontWeight: FontWeight.w800,
-              color: _kOnSurfaceVariant,
+              color: kOnSurfaceVariant,
               letterSpacing: 0.8,
             ),
           ),
@@ -571,21 +571,10 @@ class _MiniBoardState extends State<_MiniBoard> {
     _board.load_pgn(widget.pgn);
   }
 
-  String _pieceAt(int row, int col) {
+  chess_lib.Piece? _pieceAt(int row, int col) {
     final files = 'abcdefgh';
     final sq = '${files[col]}${8 - row}';
-    final p = _board.get(sq);
-    if (p == null) return '';
-    const wp = {'K':'♔','Q':'♕','R':'♖','B':'♗','N':'♘','P':'♙'};
-    return wp[p.type.toUpperCase()] ?? '';
-  }
-
-  Color _pieceColor(int row, int col) {
-    final files = 'abcdefgh';
-    final sq = '${files[col]}${8 - row}';
-    final p = _board.get(sq);
-    if (p == null) return Colors.transparent;
-    return p.color == chess_lib.Color.WHITE ? _kPrimary : const Color(0xFFA2E7FF);
+    return _board.get(sq);
   }
 
   @override
@@ -594,9 +583,9 @@ class _MiniBoardState extends State<_MiniBoard> {
       width: 80,
       height: 80,
       decoration: BoxDecoration(
-        color: _kSurfaceContHighest,
+        color: kSurfaceContHighest,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _kOutlineVariant.withOpacity(0.15)),
+        border: Border.all(color: kOutlineVariant.withOpacity(0.15)),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
@@ -610,23 +599,16 @@ class _MiniBoardState extends State<_MiniBoard> {
               itemBuilder: (context, index) {
                 final row = index ~/ 8, col = index % 8;
                 final isLight = (row + col) % 2 == 0;
+                final piece = _pieceAt(row, col);
                 return Container(
-                  color: isLight ? _kSurfaceContHigh : _kSurfaceContLow,
+                  color: isLight ? kWoodLightSquare : kWoodDarkSquare,
                   child: Center(
-                    child: Text(
-                      _pieceAt(row, col),
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: _pieceColor(row, col),
-                        height: 1.0,
-                        shadows: [
-                          Shadow(
-                            color: _pieceColor(row, col).withOpacity(0.4),
-                            blurRadius: 2,
+                    child: piece != null
+                        ? ChessPieceWidget.fromPiece(
+                            piece: piece,
+                            size: 9,
                           )
-                        ]
-                      ),
-                    ),
+                        : null,
                   ),
                 );
               },
@@ -639,7 +621,7 @@ class _MiniBoardState extends State<_MiniBoard> {
                     begin: Alignment.bottomLeft,
                     end: Alignment.topRight,
                     colors: [
-                      _kBackground.withOpacity(0.5),
+                      kBackground.withOpacity(0.5),
                       Colors.transparent,
                     ],
                   ),

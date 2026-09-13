@@ -2,6 +2,8 @@ import 'dart:typed_data';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
+import '../../domain/models/pi_setup.dart';
+
 class PiLocalApi {
   final String baseUrl;
   final http.Client client;
@@ -14,6 +16,19 @@ class PiLocalApi {
   static const _requestTimeout = Duration(seconds: 5);
   static const _cameraRequestTimeout = Duration(seconds: 2);
 
+  Future<PiSetupStatus> setupStatus() async {
+    final response =
+        await client.get(_uri('/local/setup/status')).timeout(_requestTimeout);
+    final data = await _data(response, 'Pi setup status failed');
+    return PiSetupStatus.fromJson(data);
+  }
+
+  Future<Map<String, dynamic>> localStatus() async {
+    final response =
+        await client.get(_uri('/local/status')).timeout(_requestTimeout);
+    return _data(response, 'Pi local status failed');
+  }
+
   Future<Map<String, dynamic>> networkStatus() async {
     final response = await client
         .get(_uri('/local/network/status'))
@@ -24,16 +39,14 @@ class PiLocalApi {
   }
 
   Future<Map<String, dynamic>> modelStatus() async {
-    final response = await client
-        .get(_uri('/local/model/status'))
-        .timeout(_requestTimeout);
+    final response =
+        await client.get(_uri('/local/model/status')).timeout(_requestTimeout);
     return _data(response, 'Pi model status failed');
   }
 
   Future<Map<String, dynamic>> loadModel() async {
-    final response = await client
-        .post(_uri('/local/model/load'))
-        .timeout(_requestTimeout);
+    final response =
+        await client.post(_uri('/local/model/load')).timeout(_requestTimeout);
     return _data(response, 'Pi model load failed');
   }
 
@@ -58,17 +71,67 @@ class PiLocalApi {
     return _data(response, 'Pi force validation failed');
   }
 
-  Future<Map<String, dynamic>> startGame() async {
+  Future<Map<String, dynamic>> homeGantry() async {
     final response = await client
-        .post(_uri('/local/game/start'))
-        .timeout(_requestTimeout);
+        .post(_uri('/local/gantry/home'))
+        .timeout(const Duration(seconds: 100));
+    return _data(response, 'Pi gantry homing failed');
+  }
+
+  Future<Map<String, dynamic>> gantryStatus() async {
+    final response =
+        await client.get(_uri('/local/gantry/status')).timeout(_requestTimeout);
+    return _data(response, 'Pi gantry status failed');
+  }
+
+  Future<Map<String, dynamic>> startGame() async {
+    final response =
+        await client.post(_uri('/local/game/start')).timeout(_requestTimeout);
     return _data(response, 'Pi game start failed');
   }
 
-  Future<Map<String, dynamic>> detectMove() async {
+  Future<Map<String, dynamic>> gameState() async {
+    final response =
+        await client.get(_uri('/local/game/state')).timeout(_requestTimeout);
+    return _data(response, 'Pi game state failed');
+  }
+
+  Future<Map<String, dynamic>> gameMove(
+      String uci, int? expectedVersion) async {
     final response = await client
-        .post(_uri('/local/move/detect'))
+        .post(
+          _uri('/local/game/move'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'uci': uci,
+            if (expectedVersion != null) 'expected_version': expectedVersion,
+          }),
+        )
         .timeout(_requestTimeout);
+    return _data(response, 'Pi move failed');
+  }
+
+  Future<Map<String, dynamic>> resetGame() async {
+    final response =
+        await client.post(_uri('/local/game/reset')).timeout(_requestTimeout);
+    return _data(response, 'Pi game reset failed');
+  }
+
+  Future<Map<String, dynamic>> undoGame() async {
+    final response =
+        await client.post(_uri('/local/game/undo')).timeout(_requestTimeout);
+    return _data(response, 'Pi game undo failed');
+  }
+
+  Future<Map<String, dynamic>> resumeGame() async {
+    final response =
+        await client.post(_uri('/local/game/start')).timeout(_requestTimeout);
+    return _data(response, 'Pi game resume failed');
+  }
+
+  Future<Map<String, dynamic>> detectMove() async {
+    final response =
+        await client.post(_uri('/local/move/detect')).timeout(_requestTimeout);
     return _data(response, 'Pi move detection failed');
   }
 
@@ -93,9 +156,10 @@ class PiLocalApi {
       payload = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
     } catch (_) {}
     if (response.statusCode >= 400 || payload['status'] == 'error') {
-      final detail = payload['detail']?.toString() ??
-          payload['message']?.toString() ??
-          fallback;
+      final rawDetail = payload['detail'];
+      final detail = rawDetail is Map
+          ? rawDetail['message']?.toString() ?? fallback
+          : rawDetail?.toString() ?? payload['message']?.toString() ?? fallback;
       throw Exception(detail);
     }
     return Map<String, dynamic>.from((payload['data'] as Map?) ?? const {});
@@ -176,13 +240,29 @@ class PiLocalApi {
         (jsonDecode(response.body) as Map)['data'] as Map);
   }
 
+  Future<Map<String, dynamic>> manualCalibrate(List<List<double>> corners,
+      {String orientation = 'white_bottom'}) async {
+    final response = await client
+        .post(
+          _uri('/local/calibration/manual'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'corners': corners,
+            'board_orientation': orientation,
+          }),
+        )
+        .timeout(_requestTimeout);
+    return _data(response, 'Pi manual calibration failed');
+  }
+
   Future<Map<String, dynamic>> autoCalibrate() async {
     final response = await client
         .post(_uri('/local/calibration/auto'))
         .timeout(_requestTimeout);
     if (response.statusCode >= 400) {
       final body = jsonDecode(response.body) as Map<String, dynamic>?;
-      throw Exception(body?['detail']?.toString() ?? 'Automatic calibration failed');
+      throw Exception(
+          body?['detail']?.toString() ?? 'Automatic calibration failed');
     }
     return Map<String, dynamic>.from(
         (jsonDecode(response.body) as Map)['data'] as Map);

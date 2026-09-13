@@ -9,20 +9,9 @@ import '../../core/errors/api_exception.dart';
 import '../../domain/models/challenge_model.dart';
 import '../../domain/models/friend_model.dart';
 import '../providers/social_provider.dart';
+import '../theme/app_colors.dart';
+import '../widgets/robo_app_bar.dart';
 
-// ── Colour tokens ──────────────────────────────────────
-const kBackground = Color(0xFF151311);
-const kSurfaceContLowest = Color(0xFF0F0E0C);
-const kSurfaceContLow = Color(0xFF1D1B19);
-const kSurfaceContHigh = Color(0xFF2C2A27);
-const kSurfaceContHighest = Color(0xFF373431);
-const kPrimary = Color(0xFF8ADB52);
-const kOnPrimary = Color(0xFF173800);
-const kSecondary = Color(0xFFA2E7FF);
-const kOnSurface = Color(0xFFE7E2DD);
-const kOnSurfaceVariant = Color(0xFFC0CAB4);
-const kOutlineVariant = Color(0xFF414939);
-const kError = Color(0xFFFFB4AB);
 
 enum _Tab { friends, incoming, sent, search }
 
@@ -108,15 +97,8 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
 
     return Scaffold(
       backgroundColor: kBackground,
-      appBar: AppBar(
-        backgroundColor: kBackground,
-        elevation: 0,
-        title: Text('PLAY WITH FRIENDS',
-            style: GoogleFonts.spaceGrotesk(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: kPrimary,
-                letterSpacing: 2)),
+      appBar: RoboAppBar(
+        sectionBadge: 'FRIENDS',
         actions: [
           IconButton(
             tooltip: 'Your games',
@@ -661,10 +643,11 @@ class _IncomingChallenges extends StatelessWidget {
             const Icon(Icons.sports_esports, color: kSecondary, size: 18),
             const SizedBox(width: 8),
             Text('GAME CHALLENGES',
-                style: GoogleFonts.spaceGrotesk(
+                style: GoogleFonts.cinzel(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color: kOnSurface)),
+                    color: kOnSurface,
+                    letterSpacing: 1.2)),
           ],
         ),
         const SizedBox(height: 12),
@@ -745,7 +728,7 @@ class _ChallengeSheetState extends State<_ChallengeSheet> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Challenge ${widget.displayName}',
-              style: GoogleFonts.spaceGrotesk(
+              style: GoogleFonts.cinzel(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
                   color: kOnSurface)),
@@ -805,7 +788,7 @@ class _ChallengeSheetState extends State<_ChallengeSheet> {
               ),
               icon: const Icon(Icons.send, size: 18),
               label: Text('SEND CHALLENGE',
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.cinzel(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 2)),

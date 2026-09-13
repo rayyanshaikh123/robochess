@@ -3,23 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import '../widgets/animated_profile_avatar.dart';
+import '../widgets/robo_app_bar.dart';
 import '../providers/device_provider.dart';
 import '../../domain/models/device_model.dart';
-import 'dart:math' as math;
+import '../theme/app_colors.dart';
 
-// ── Colour tokens ────────────────────────────────────────────────────────────
-const kBackground = Color(0xFF151311);
-const kSurfaceContLowest = Color(0xFF0F0E0C);
-const kSurfaceContLow = Color(0xFF1D1B19);
-const kSurfaceContHighest = Color(0xFF373431);
-const kPrimary = Color(0xFF8ADB52);
-const kPrimaryContainer = Color(0xFF68B631);
-const kOnPrimary = Color(0xFF173800);
-const kSecondary = Color(0xFFA2E7FF);
-const kOnSecondary = Color(0xFF003642);
-const kOnSurface = Color(0xFFE7E2DD);
-const kOnSurfaceVariant = Color(0xFFC0CAB4);
-const kOutlineVariant = Color(0xFF414939);
 
 class CrossConnect extends ConsumerWidget {
   const CrossConnect({super.key});
@@ -28,25 +16,10 @@ class CrossConnect extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       backgroundColor: kBackground,
-      appBar: AppBar(
-        backgroundColor: kBackground,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        titleSpacing: 20,
-        title: Row(
-          children: [
-            const Icon(Icons.settings_remote, color: kPrimary),
-            const SizedBox(width: 10),
-            Text('ROBOCHESS',
-                style: GoogleFonts.spaceGrotesk(
-                    color: kPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                    letterSpacing: 2)),
-          ],
-        ),
+      appBar: const RoboAppBar(
+        sectionBadge: 'CONNECT',
         actions: [
-          const AnimatedProfileAvatar(size: 34),
+          AnimatedProfileAvatar(size: 34),
         ],
       ),
       body: SingleChildScrollView(
@@ -62,7 +35,7 @@ class CrossConnect extends ConsumerWidget {
             const SizedBox(height: 24),
 
             // ── Game Launch ───────────────────────────────────────────────
-            _RadarSection(),
+            const _ArenaLaunchSection(),
             const SizedBox(height: 28),
 
             // ── Active Friends + Nearby Boards ────────────────────────────
@@ -146,7 +119,7 @@ class _StatusBanner extends ConsumerWidget {
                             color: kOnSurfaceVariant,
                             letterSpacing: 2)),
                     Text(lastSeenText,
-                        style: GoogleFonts.spaceGrotesk(
+                        style: GoogleFonts.outfit(
                             fontSize: 16,
                             fontWeight: FontWeight.w700,
                             color: kOnSurface)),
@@ -184,7 +157,7 @@ class _ActiveDeviceStatus extends ConsumerWidget {
                 letterSpacing: 2)),
         const SizedBox(height: 4),
         Text(active?.deviceId ?? 'Connect a board',
-            style: GoogleFonts.spaceGrotesk(
+            style: GoogleFonts.outfit(
                 fontSize: 16, fontWeight: FontWeight.w700, color: kOnSurface)),
         const SizedBox(height: 6),
         Row(
@@ -236,7 +209,7 @@ class _LinkedBoards extends ConsumerWidget {
               const Icon(Icons.router, color: kSecondary, size: 18),
               const SizedBox(width: 8),
               Text('LINKED BOARDS',
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.cinzel(
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
                       color: kOnSurface)),
@@ -374,140 +347,101 @@ class _LinkedBoards extends ConsumerWidget {
   }
 }
 
-// ── Radar Section ─────────────────────────────────────────────────────────────
-class _RadarSection extends StatefulWidget {
-  @override
-  State<_RadarSection> createState() => _RadarSectionState();
-}
-
-class _RadarSectionState extends State<_RadarSection>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl =
-        AnimationController(vsync: this, duration: const Duration(seconds: 4))
-          ..repeat();
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
+// ── Tournament Arena Launch Section ─────────────────────────────────────────────
+class _ArenaLaunchSection extends StatelessWidget {
+  const _ArenaLaunchSection();
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+      padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
       decoration: BoxDecoration(
-        color: kSurfaceContLowest,
+        color: kSurfaceContLow,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: kOutlineVariant.withOpacity(0.1)),
+        border: Border.all(color: kOutlineVariant.withValues(alpha: 0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
-      child: Stack(
-        alignment: Alignment.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Radar rings
-          ...[1.0, 0.67, 0.33].map((scale) => Container(
-                width: 260 * scale,
-                height: 260 * scale,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                      color: kPrimary.withOpacity(0.08 + (1 - scale) * 0.1),
-                      width: 1),
-                ),
-              )),
-          // Spinning sweep
-          AnimatedBuilder(
-            animation: _ctrl,
-            builder: (_, __) => Transform.rotate(
-              angle: _ctrl.value * 2 * math.pi,
-              child: CustomPaint(
-                size: const Size(260, 260),
-                painter: _RadarSweepPainter(),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: kPrimary.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+              border: Border.all(color: kPrimary.withValues(alpha: 0.2)),
+            ),
+            child: const Icon(Icons.shield_outlined, color: kPrimary, size: 28),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'TOURNAMENT ARENA',
+            style: GoogleFonts.cinzel(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: kPrimary,
+              letterSpacing: 2,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Ready to Play?',
+            style: GoogleFonts.outfit(
+              fontSize: 24,
+              fontWeight: FontWeight.w700,
+              color: kOnSurface,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Challenge the Stockfish engine, play on the wooden board, or match with friends.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.outfit(
+              fontSize: 13,
+              color: kOnSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton.icon(
+            onPressed: () => context.go('/play'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kPrimary,
+              foregroundColor: kOnPrimary,
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              elevation: 2,
+            ),
+            icon: const Icon(Icons.play_arrow, size: 20),
+            label: Text(
+              'START MATCH',
+              style: GoogleFonts.outfit(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.5,
               ),
             ),
           ),
-          // Content
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('GAME LAUNCH',
-                  style: GoogleFonts.spaceGrotesk(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: kPrimary,
-                      letterSpacing: 4)),
-              const SizedBox(height: 8),
-              Text('Ready to Play?',
-                  style: GoogleFonts.spaceGrotesk(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
-                      color: kOnSurface)),
-              const SizedBox(height: 24),
-              // Start a playable game. Online matchmaking is not available
-              // in the current backend, so this opens the working game flow
-              // instead of silently doing nothing.
-              Container(
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [kPrimary, kPrimaryContainer],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                        color: kPrimary.withOpacity(0.3),
-                        blurRadius: 24,
-                        spreadRadius: 2)
-                  ],
-                ),
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () => context.go('/play'),
-                    borderRadius: BorderRadius.circular(14),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 28, vertical: 16),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.explore,
-                              color: kOnPrimary, size: 22),
-                          const SizedBox(width: 10),
-                          Text('Start a Game',
-                              style: GoogleFonts.spaceGrotesk(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w700,
-                                  color: kOnPrimary)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
+          const SizedBox(height: 18),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              _StatChip(
+                icon: Icons.psychology_outlined,
+                label: 'STOCKFISH READY',
+                color: kSecondary,
               ),
-              const SizedBox(height: 20),
-              // Capabilities row
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _StatChip(
-                      icon: Icons.smart_toy,
-                      label: 'AI AVAILABLE',
-                      color: kSecondary),
-                  const SizedBox(width: 20),
-                  _StatChip(
-                      icon: Icons.timer,
-                      label: 'INSTANT START',
-                      color: kSecondary),
-                ],
+              SizedBox(width: 16),
+              _StatChip(
+                icon: Icons.wifi_tethering,
+                label: 'BOARD SYNC',
+                color: kSecondary,
               ),
             ],
           ),
@@ -515,28 +449,6 @@ class _RadarSectionState extends State<_RadarSection>
       ),
     );
   }
-}
-
-class _RadarSweepPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2;
-    final rect = Rect.fromCircle(center: center, radius: radius);
-    final paint = Paint()
-      ..shader = SweepGradient(
-        colors: [
-          Colors.transparent,
-          kPrimary.withOpacity(0.05),
-          kPrimary.withOpacity(0.25),
-        ],
-        stops: const [0.0, 0.6, 1.0],
-      ).createShader(rect);
-    canvas.drawCircle(center, radius, paint);
-  }
-
-  @override
-  bool shouldRepaint(_RadarSweepPainter _) => false;
 }
 
 class _StatChip extends StatelessWidget {
@@ -583,7 +495,7 @@ class _ActiveFriends extends ConsumerWidget {
                 const Icon(Icons.group, color: kPrimary, size: 22),
                 const SizedBox(width: 8),
                 Text('Active Boards',
-                    style: GoogleFonts.spaceGrotesk(
+                    style: GoogleFonts.outfit(
                         fontSize: 19,
                         fontWeight: FontWeight.w700,
                         color: kOnSurface)),
@@ -719,7 +631,7 @@ class _NearbyBoards extends ConsumerWidget {
                 const Icon(Icons.sensors, color: kSecondary, size: 22),
                 const SizedBox(width: 8),
                 Text('Nearby Boards',
-                    style: GoogleFonts.spaceGrotesk(
+                    style: GoogleFonts.outfit(
                         fontSize: 19,
                         fontWeight: FontWeight.w700,
                         color: kOnSurface)),

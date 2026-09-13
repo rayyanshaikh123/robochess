@@ -13,17 +13,17 @@ import 'session_provider.dart';
 // ── Wiring ────────────────────────────────────────────────────────────────────
 
 final friendsRepositoryProvider = Provider<FriendsRepository>((ref) {
-  return FriendsRepository(FriendsRemoteDataSource(ref.read(apiClientProvider)));
+  return FriendsRepository(FriendsRemoteDataSource(ref.watch(apiClientProvider)));
 });
 
 final challengesRepositoryProvider = Provider<ChallengesRepository>((ref) {
   return ChallengesRepository(
-      ChallengesRemoteDataSource(ref.read(apiClientProvider)));
+      ChallengesRemoteDataSource(ref.watch(apiClientProvider)));
 });
 
 final multiplayerRepositoryProvider = Provider<MultiplayerRepository>((ref) {
   return MultiplayerRepository(
-      MultiplayerRemoteDataSource(ref.read(apiClientProvider)));
+      MultiplayerRemoteDataSource(ref.watch(apiClientProvider)));
 });
 
 /// One authenticated socket shared by every social surface, so friend and
@@ -33,14 +33,14 @@ final socialSocketProvider = Provider<SocialSocketClient>((ref) {
   final wsBase = '${httpBase.replaceFirst(RegExp(r'^https://'), 'wss://').replaceFirst(RegExp(r'^http://'), 'ws://')}/ws';
   final client = SocialSocketClient(
     wsBaseUrl: wsBase,
-    tokenStore: ref.read(tokenStoreProvider),
+    tokenStore: ref.watch(tokenStoreProvider),
   );
   ref.onDispose(client.dispose);
   return client;
 });
 
 final timeControlsProvider = FutureProvider<List<TimeControlOption>>((ref) {
-  return ref.read(challengesRepositoryProvider).timeControls();
+  return ref.watch(challengesRepositoryProvider).timeControls();
 });
 
 // ── Friends ───────────────────────────────────────────────────────────────────
@@ -138,8 +138,8 @@ class FriendsController extends StateNotifier<AsyncValue<FriendsState>> {
 final friendsProvider =
     StateNotifierProvider<FriendsController, AsyncValue<FriendsState>>((ref) {
   return FriendsController(
-    ref.read(friendsRepositoryProvider),
-    ref.read(socialSocketProvider),
+    ref.watch(friendsRepositoryProvider),
+    ref.watch(socialSocketProvider),
   );
 });
 
@@ -179,7 +179,7 @@ class UserSearchController extends StateNotifier<AsyncValue<List<UserSearchResul
 final userSearchProvider =
     StateNotifierProvider<UserSearchController, AsyncValue<List<UserSearchResult>>>(
         (ref) {
-  return UserSearchController(ref.read(friendsRepositoryProvider));
+  return UserSearchController(ref.watch(friendsRepositoryProvider));
 });
 
 // ── Challenges ────────────────────────────────────────────────────────────────
@@ -293,7 +293,7 @@ class ChallengesController extends StateNotifier<AsyncValue<ChallengesState>> {
 final challengesProvider =
     StateNotifierProvider<ChallengesController, AsyncValue<ChallengesState>>((ref) {
   return ChallengesController(
-    ref.read(challengesRepositoryProvider),
-    ref.read(socialSocketProvider),
+    ref.watch(challengesRepositoryProvider),
+    ref.watch(socialSocketProvider),
   );
 });

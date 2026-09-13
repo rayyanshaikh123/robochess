@@ -108,20 +108,37 @@ class _PiLiveCameraViewState extends State<PiLiveCameraView> {
     return Card(
       clipBehavior: Clip.antiAlias,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        ListTile(
-          leading: Icon(Icons.videocam,
-              color: _frame == null ? Colors.orange : Colors.green),
-          title: const Text('Live board camera'),
-          subtitle: Text(_frame == null
-              ? (_error ?? 'Connecting to Pi…')
-              : 'Live over Wi-Fi'),
-          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-            IconButton(onPressed: _connect, icon: const Icon(Icons.refresh)),
-            if (widget.onCalibrate != null)
-              IconButton(
-                  onPressed: widget.onCalibrate,
-                  icon: const Icon(Icons.crop_free)),
-          ]),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          child: Row(
+            children: [
+              Icon(Icons.videocam,
+                  color: _frame == null ? Colors.orange : Colors.green),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Live board camera',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
+                    Text(
+                      _frame == null
+                          ? (_error ?? 'Connecting to Pi…')
+                          : 'Live over Wi-Fi',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(onPressed: _connect, icon: const Icon(Icons.refresh)),
+              if (widget.onCalibrate != null)
+                IconButton(
+                    onPressed: widget.onCalibrate,
+                    icon: const Icon(Icons.crop_free)),
+            ],
+          ),
         ),
         AspectRatio(
           aspectRatio: 4 / 3,

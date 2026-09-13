@@ -84,6 +84,12 @@ class GattServer:
         self._control_buffer.clear()
         print(f"BLE control received: {message.get('type')}", flush=True)
 
+        if message.get("device_id") not in {None, self.device_id}:
+            result = {"status": "error", "error": "Device ID mismatch"}
+            return encode_chunks(
+                envelope("control.result", self.device_id, **result)
+            )
+
         if message.get("type") in {
             "session.start",
             "session.reset",
@@ -202,11 +208,14 @@ class GattServer:
 
         self._wifi_buffer.clear()
 
-        result = (
-            self.on_wifi(message)
-            if self.on_wifi
-            else {"status": "unsupported"}
-        )
+        if message.get("device_id") not in {None, self.device_id}:
+            result = {"status": "error", "error": "Device ID mismatch"}
+        else:
+            result = (
+                self.on_wifi(message)
+                if self.on_wifi
+                else {"status": "unsupported"}
+            )
 
         # Update the board status based on the provisioning result.
         if result.get("status") == "wifi_connected":

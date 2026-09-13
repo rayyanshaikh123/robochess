@@ -4,24 +4,12 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import '../widgets/animated_profile_avatar.dart';
+import '../widgets/robo_app_bar.dart';
 import '../providers/puzzle_provider.dart';
 import '../../domain/models/puzzle_model.dart';
 import 'dart:math' as math;
+import '../theme/app_colors.dart';
 
-// ── Colour tokens ────────────────────────────────────────────────────────────
-const kBackground = Color(0xFF151311);
-const kSurfaceContLow = Color(0xFF1D1B19);
-const kSurfaceContHigh = Color(0xFF2C2A27);
-const kSurfaceContHighest = Color(0xFF373431);
-const kPrimary = Color(0xFF8ADB52);
-const kPrimaryContainer = Color(0xFF68B631);
-const kOnPrimary = Color(0xFF173800);
-const kSecondary = Color(0xFFA2E7FF);
-const kTertiary = Color(0xFF97D77E);
-const kOnSurface = Color(0xFFE7E2DD);
-const kOnSurfaceVariant = Color(0xFFC0CAB4);
-const kOutlineVariant = Color(0xFF414939);
-const kError = Color(0xFFFFB4AB);
 
 class LearnSection extends ConsumerWidget {
   const LearnSection({super.key});
@@ -30,25 +18,10 @@ class LearnSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       backgroundColor: kBackground,
-      appBar: AppBar(
-        backgroundColor: kBackground,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        titleSpacing: 20,
-        title: Row(
-          children: [
-            const Icon(Icons.settings_remote, color: kPrimary),
-            const SizedBox(width: 10),
-            Text('ROBOCHESS',
-                style: GoogleFonts.spaceGrotesk(
-                    color: kPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                    letterSpacing: 2)),
-          ],
-        ),
+      appBar: const RoboAppBar(
+        sectionBadge: 'ACADEMY',
         actions: [
-          const AnimatedProfileAvatar(size: 36),
+          AnimatedProfileAvatar(size: 36),
         ],
       ),
       body: Stack(
@@ -96,37 +69,37 @@ class _HeroSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // Title block
-        Text('NEURAL TRAINING MODULE',
-            style: GoogleFonts.spaceGrotesk(
-                fontSize: 10,
+        Text('CHESS MASTERY ACADEMY',
+            style: GoogleFonts.outfit(
+                fontSize: 11,
                 fontWeight: FontWeight.w700,
                 color: kPrimary,
                 letterSpacing: 2)),
         const SizedBox(height: 10),
         Text('GRANDMASTER',
-            style: GoogleFonts.spaceGrotesk(
-                fontSize: 36,
+            style: GoogleFonts.cinzel(
+                fontSize: 34,
                 fontWeight: FontWeight.w700,
                 color: kOnSurface,
-                letterSpacing: -1,
+                letterSpacing: 0,
                 height: 1)),
         ShaderMask(
           shaderCallback: (bounds) => const LinearGradient(
             colors: [kPrimary, kSecondary],
           ).createShader(bounds),
-          child: Text('ACADEMY',
-              style: GoogleFonts.spaceGrotesk(
-                  fontSize: 36,
+          child: Text('CURRICULUM',
+              style: GoogleFonts.cinzel(
+                  fontSize: 34,
                   fontWeight: FontWeight.w700,
                   color: Colors.white,
-                  letterSpacing: -1,
+                  letterSpacing: 0,
                   height: 1.1)),
         ),
         const SizedBox(height: 14),
         Text(
-          'Refine your algorithmic intuition. Our neural processing units have analyzed 400 million grandmaster games to prepare your next evolution.',
-          style: GoogleFonts.inter(
-              fontSize: 13, color: kOnSurfaceVariant, height: 1.6),
+          'Refine your positional mastery and tactical vision. Study master opening repertoires, endgame fundamentals, and concrete calculation.',
+          style: GoogleFonts.outfit(
+              fontSize: 14, color: kOnSurfaceVariant, height: 1.5),
         ),
         const SizedBox(height: 24),
         // Level tracker circle
@@ -165,12 +138,12 @@ class _LevelTracker extends StatelessWidget {
                             color: kOnSurfaceVariant,
                             letterSpacing: 2)),
                     Text('12',
-                        style: GoogleFonts.spaceGrotesk(
+                        style: GoogleFonts.outfit(
                             fontSize: 40,
                             fontWeight: FontWeight.w700,
                             color: kOnSurface)),
-                    Text('75% SYNC',
-                        style: GoogleFonts.inter(
+                    Text('75% COMPLETED',
+                        style: GoogleFonts.outfit(
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
                             color: kPrimary,
@@ -188,8 +161,8 @@ class _LevelTracker extends StatelessWidget {
               borderRadius: BorderRadius.circular(99),
               border: Border.all(color: kSecondary.withOpacity(0.2)),
             ),
-            child: Text('ADVANCED ENGINE',
-                style: GoogleFonts.inter(
+            child: Text('INTERMEDIATE MASTERY',
+                style: GoogleFonts.outfit(
                     fontSize: 9,
                     fontWeight: FontWeight.w700,
                     color: kSecondary,
@@ -243,29 +216,29 @@ class _CategoryGrid extends StatelessWidget {
     _Category(
       title: 'Mastering Openings',
       description:
-          'Systematically secure center control with robotic precision and deep theory.',
+          'Systematically secure center control with classical principles and master theory.',
       badge: '6 Lessons',
       badgeColor: kPrimary,
-      iconData: Icons.memory,
+      iconData: Icons.auto_stories,
       iconBg: Color(0x208ADB52),
       route: '/learn/openings',
     ),
     _Category(
       title: 'Endgame Strategy',
       description:
-          'Master the attrition phase. Turn minimal advantages into forced mechanical victories.',
+          'Master king and pawn endings, opposition, and decisive conversion techniques.',
       badge: '12 Lessons',
       badgeColor: kSecondary,
-      iconData: Icons.precision_manufacturing,
+      iconData: Icons.military_tech,
       iconBg: Color(0x20A2E7FF),
       route: '/learn/endgames',
     ),
     _Category(
       title: 'Tactical Drills',
       description:
-          'High-frequency pattern recognition modules to sharpen your real-time response.',
+          'Sharpen calculation and master pins, forks, skewers, and mating nets.',
       badge: 'Daily Drills',
-      badgeColor: kTertiary,
+      badgeColor: kPrimary,
       iconData: Icons.bolt,
       iconBg: Color(0x2097D77E),
       route: '/learn/tactics',
@@ -356,14 +329,14 @@ class _CategoryCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(category.title,
-                      style: GoogleFonts.spaceGrotesk(
+                      style: GoogleFonts.outfit(
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
                           color: kOnSurface)),
                   const SizedBox(height: 6),
                   Text(category.description,
-                      style: GoogleFonts.inter(
-                          fontSize: 12, color: kOnSurfaceVariant, height: 1.5)),
+                      style: GoogleFonts.outfit(
+                          fontSize: 13, color: kOnSurfaceVariant, height: 1.4)),
                   const SizedBox(height: 14),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -380,12 +353,12 @@ class _CategoryCard extends StatelessWidget {
                       ),
                       Row(
                         children: [
-                          Text('INITIALIZE',
-                              style: GoogleFonts.inter(
+                          Text('START LESSON',
+                              style: GoogleFonts.outfit(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
                                   color: kPrimary,
-                                  letterSpacing: 2)),
+                                  letterSpacing: 1.5)),
                           const SizedBox(width: 6),
                           const Icon(Icons.arrow_forward,
                               color: kPrimary, size: 16),
@@ -425,7 +398,7 @@ class _BentoRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Neural Analysis
+        // Engine Analysis
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(24),
@@ -439,9 +412,9 @@ class _BentoRow extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Neural Analysis',
-                      style: GoogleFonts.spaceGrotesk(
-                          fontSize: 20,
+                  Text('Grandmaster Game Analysis',
+                      style: GoogleFonts.outfit(
+                          fontSize: 19,
                           fontWeight: FontWeight.w700,
                           color: kOnSurface)),
                   const Icon(Icons.psychology, color: kPrimary, size: 28),
@@ -449,8 +422,8 @@ class _BentoRow extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'Upload your physical games for AI deep-learning analysis and error detection.',
-                style: GoogleFonts.inter(
+                'Review your physical board games with Stockfish engine evaluations and blunder detection.',
+                style: GoogleFonts.outfit(
                     fontSize: 13, color: kOnSurfaceVariant, height: 1.5),
               ),
               const SizedBox(height: 16),
@@ -465,7 +438,7 @@ class _BentoRow extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text('3 GAMES ANALYZED THIS WEEK',
-                  style: GoogleFonts.inter(
+                  style: GoogleFonts.outfit(
                       fontSize: 9,
                       fontWeight: FontWeight.w700,
                       color: kPrimary,
@@ -474,31 +447,27 @@ class _BentoRow extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 14),
-        // IoT Board Sync
+        // Robotic Board Sync
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [kSurfaceContLow, kSurfaceContHighest],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+            color: kSurfaceContLow,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: kOutlineVariant.withOpacity(0.1)),
+            border: Border.all(color: kOutlineVariant.withOpacity(0.3)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('IoT Board Sync',
-                  style: GoogleFonts.spaceGrotesk(
-                      fontSize: 20,
+              Text('Robotic Board Sync',
+                  style: GoogleFonts.outfit(
+                      fontSize: 19,
                       fontWeight: FontWeight.w700,
                       color: kOnSurface)),
               const SizedBox(height: 8),
               Text(
-                'Connect your physical RoboChess unit to stream real-time tutorials directly to the board.',
-                style: GoogleFonts.inter(
+                'Connect your physical RoboChess unit to stream real-time interactive lessons directly on the wooden board.',
+                style: GoogleFonts.outfit(
                     fontSize: 13, color: kOnSurfaceVariant, height: 1.5),
               ),
               const SizedBox(height: 16),
@@ -515,8 +484,8 @@ class _BentoRow extends StatelessWidget {
                   children: [
                     _PulsingDot(color: kSecondary),
                     const SizedBox(width: 8),
-                    Text('READY TO SYNC',
-                        style: GoogleFonts.inter(
+                    Text('BOARD READY',
+                        style: GoogleFonts.outfit(
                             fontSize: 9,
                             fontWeight: FontWeight.w700,
                             color: kSecondary,
@@ -585,7 +554,7 @@ class _ContinueFABState extends State<_ContinueFAB> {
                 const Icon(Icons.play_arrow, color: kOnPrimary, size: 20),
                 const SizedBox(width: 8),
                 Text('CONTINUE LESSON',
-                    style: GoogleFonts.spaceGrotesk(
+                    style: GoogleFonts.outfit(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
                         color: kOnPrimary,
@@ -620,7 +589,7 @@ class _PuzzleVault extends ConsumerWidget {
               const Icon(Icons.extension, color: kSecondary, size: 20),
               const SizedBox(width: 8),
               Text('PUZZLE VAULT',
-                  style: GoogleFonts.spaceGrotesk(
+                  style: GoogleFonts.cinzel(
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
                       color: kOnSurface,
@@ -636,9 +605,9 @@ class _PuzzleVault extends ConsumerWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'Solve curated positions synced from the backend. Your progress fuels the training matrix.',
-            style: GoogleFonts.inter(
-                fontSize: 12, color: kOnSurfaceVariant, height: 1.5),
+            'Solve curated positions from real tournament play. Sharpen your tactical intuition with every puzzle.',
+            style: GoogleFonts.outfit(
+                fontSize: 13, color: kOnSurfaceVariant, height: 1.5),
           ),
           const SizedBox(height: 16),
           puzzles.when(
@@ -719,8 +688,8 @@ class _PuzzleCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text('Tactical sequence ready',
-              style: GoogleFonts.spaceGrotesk(
-                  fontSize: 14,
+              style: GoogleFonts.outfit(
+                  fontSize: 15,
                   fontWeight: FontWeight.w700,
                   color: kOnSurface)),
           const SizedBox(height: 8),
