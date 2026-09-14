@@ -12,6 +12,7 @@ import time
 from pi_agent.ble_protocol import (
     CONTROL_UUID,
     DEVICE_INFO_UUID,
+    PROTOCOL_VERSION,
     SERVICE_UUID,
     STATUS_UUID,
     WIFI_UUID,
@@ -42,11 +43,14 @@ class GattServer:
         self.on_wifi = on_wifi
 
         # Initial board state before provisioning.
-        self._status = envelope(
-            "status",
-            device_id,
-            status="unpaired",
-        )
+        # Status messages are compact (no request_id) so the payload always
+        # fits in a single BLE read response (< 180 bytes).
+        self._status = {
+            "version": PROTOCOL_VERSION,
+            "type": "status",
+            "device_id": device_id,
+            "data": {"status": "unpaired"},
+        }
 
         # Buffers for BLE messages that may arrive in multiple writes.
         self._control_buffer = bytearray()
@@ -117,11 +121,12 @@ class GattServer:
                     "error": str(exc),
                 }
 
-            self._status = envelope(
-                "game.state",
-                self.device_id,
-                **result,
-            )
+            self._status = {
+                "version": PROTOCOL_VERSION,
+                "type": "game.state",
+                "device_id": self.device_id,
+                "data": result,
+            }
 
         else:
             result = (
@@ -238,21 +243,27 @@ class GattServer:
         # Update the board status based on the provisioning result.
         if result.get("status") == "wifi_connected":
             network = result.get("network") or {}
-            self._status = envelope(
-                "status",
-                self.device_id,
-                status="wifi_connected",
-                ssid=result.get("ssid"),
-                ip_address=network.get("ip_address"),
-            )
+            self._status = {
+                "version": PROTOCOL_VERSION,
+                "type": "status",
+                "device_id": self.device_id,
+                "data": {
+                    "status": "wifi_connected",
+                    "ssid": result.get("ssid"),
+                    "ip_address": network.get("ip_address"),
+                },
+            }
 
         elif result.get("status") == "error":
-            self._status = envelope(
-                "status",
-                self.device_id,
-                status="error",
-                error=result.get("error"),
-            )
+            self._status = {
+                "version": PROTOCOL_VERSION,
+                "type": "status",
+                "device_id": self.device_id,
+                "data": {
+                    "status": "error",
+                    "error": result.get("error"),
+                },
+            }
 
         return encode_chunks(
             envelope(
