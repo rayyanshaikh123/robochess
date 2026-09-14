@@ -79,7 +79,7 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
       _selectedRemoteId = candidate.result.device.remoteId.str;
       if (_needsWifi != true) {
         setState(() => _message = 'Checking the board network...');
-        final completer = Completer<Map<String, dynamic>>();
+        final completer = Completer<Map<String, dynamic>?>();
         late final StreamSubscription<Map<String, dynamic>> subscription;
         subscription = _ble.messages.listen((message) {
           if (message['type'] == 'control.result' &&
@@ -99,13 +99,27 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
           'data': const {},
         });
 
+        // Null means the Pi didn't respond in time — treat as no internet.
         final response = await completer.future.timeout(
-          const Duration(seconds: 15),
+          const Duration(seconds: 20),
           onTimeout: () {
             subscription.cancel();
-            throw TimeoutException('Network status check timed out.');
+            return null;
           },
         );
+
+        if (response == null) {
+          // Pi didn't respond — could be starting up or no internet.
+          // Prompt for Wi-Fi so the user can push credentials.
+          if (mounted) {
+            setState(() {
+              _needsWifi = true;
+              _message =
+                  'Could not read board network status. Enter Wi-Fi credentials to connect it.';
+            });
+          }
+          return;
+        }
 
         final network = Map<String, dynamic>.from(
           ((response['data'] as Map)['network'] as Map?) ?? const {},

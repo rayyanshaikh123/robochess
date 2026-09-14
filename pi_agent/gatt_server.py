@@ -150,14 +150,21 @@ class GattServer:
     ) -> None:
         """Handle writes received on the Control characteristic.
 
-        BlueZero callbacks do not return data directly, so the response is
-        written back into the characteristic value.
+        Dispatches to a background thread so the GLib/BLE event loop is never
+        blocked by slow operations (e.g. internet-connectivity checks).
         """
 
-        replies = self.handle_control(bytes(value))
+        raw = bytes(value)
+        threading.Thread(
+            target=self._handle_control_in_bg,
+            args=(raw,),
+            daemon=True,
+            name="robochess-ble-ctrl",
+        ).start()
 
+    def _handle_control_in_bg(self, raw: bytes) -> None:
+        replies = self.handle_control(raw)
         self._send_replies(self._control_characteristic, replies)
-
         self._publish_status()
 
     def _on_wifi_write(
@@ -165,14 +172,25 @@ class GattServer:
         value: list[int],
         _: dict,
     ) -> None:
-        """Handle Wi-Fi provisioning messages received through F010."""
+        """Handle Wi-Fi provisioning messages received through F010.
 
-        replies = self.handle_wifi(bytes(value))
+        Dispatched to a background thread so the GLib event loop is not
+        blocked while waiting for the network to associate.
+        """
 
+        raw = bytes(value)
+        threading.Thread(
+            target=self._handle_wifi_in_bg,
+            args=(raw,),
+            daemon=True,
+            name="robochess-ble-wifi",
+        ).start()
+
+    def _handle_wifi_in_bg(self, raw: bytes) -> None:
+        replies = self.handle_wifi(raw)
         # IMPORTANT:
         # Wi-Fi responses must be written to F010, not F00F.
         self._send_replies(self._wifi_characteristic, replies)
-
         # Publish the updated provisioning/network status through F011.
         self._publish_status()
 
