@@ -1217,44 +1217,26 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     }
   }
 
-  Future<void> _setupValidateBoard() async {
+  Future<void> _setupHomeGantry() async {
     if (_setupBusy) return;
     await _runSetupStep(() async {
-      final data = await PiLocalApi(baseUrl: _piBaseUrl).validateStart();
-      final valid = data['valid'] == true;
-      final detected = data['pieces_detected'] as int? ?? 0;
-      final summary = data['summary'] as Map<String, dynamic>? ?? {};
-      final missing = summary['missing'] as int? ?? 0;
-      final extra = summary['extra'] as int? ?? 0;
-      final wrongColor = summary['wrong_color'] as int? ?? 0;
+      final data = await PiLocalApi(baseUrl: _piBaseUrl).homeGantry();
+      
+      // The API returns either status: "gantry_homed" or setup: { "gantry_homed": true }
+      final homed = data['status'] == 'gantry_homed' || 
+                   (data['setup'] != null && data['setup']['gantry_homed'] == true);
+                   
+      final error = data['error']?.toString();
 
       if (!mounted) return;
 
       setState(() {
-        _setupValidated = valid;
-        if (valid) {
-          _setupValidationNote =
-              'Position valid ✓  ($detected/32 pieces detected)';
+        _setupValidated = homed;
+        if (homed) {
+          _setupValidationNote = 'Gantry homed successfully ✓';
         } else {
-          final parts = <String>[];
-          if (missing > 0) parts.add('$missing missing');
-          if (extra > 0) parts.add('$extra extra');
-          if (wrongColor > 0) parts.add('$wrongColor wrong color');
-          _setupValidationNote =
-              'Detected $detected/32 pieces. Issues: ${parts.join(', ')}.\n'
-              'Tip: ${wrongColor > 0 ? "Re-calibrate — board orientation may be flipped." : "Ensure all pieces are placed and lighting is good."}';
+          _setupValidationNote = 'Gantry homing failed: ${error ?? 'Unknown error'}';
         }
-      });
-    });
-  }
-
-  Future<void> _setupForceValidate() async {
-    await _runSetupStep(() async {
-      await PiLocalApi(baseUrl: _piBaseUrl).forceValidate();
-      setState(() {
-        _setupValidated = true;
-        _setupValidationNote =
-            'Force-validated: Using standard starting position.';
       });
     });
   }
@@ -2097,7 +2079,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           ),
           const SizedBox(height: 10),
 
-          // Step 4: Piece Setup & Placement Verification
+          // Step 4: Gantry Homing
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -2140,7 +2122,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Starting Position Verification',
+                            'Gantry Homing',
                             style: GoogleFonts.outfit(
                               fontSize: 13,
                               fontWeight: FontWeight.w700,
@@ -2148,7 +2130,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                             ),
                           ),
                           Text(
-                            'Place all 32 pieces in standard starting squares (ranks 1-2 & 7-8).',
+                            'Move the robotic gantry to its zero position.',
                             style: GoogleFonts.inter(
                                 fontSize: 11, color: kOnSurfaceVariant),
                           ),
@@ -2180,16 +2162,16 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: FilledButton.icon(
-                        onPressed: _setupBusy ? null : _setupValidateBoard,
+                        onPressed: _setupBusy ? null : _setupHomeGantry,
                         icon: _setupBusy
                             ? const SizedBox(
                                 width: 14,
                                 height: 14,
                                 child: CircularProgressIndicator(
                                     color: Colors.white, strokeWidth: 2))
-                            : const Icon(Icons.center_focus_strong_rounded,
+                            : const Icon(Icons.home_rounded,
                                 size: 16),
-                        label: Text('VERIFY PIECES',
+                        label: Text('HOME GANTRY',
                             style: GoogleFonts.inter(
                                 fontSize: 10, fontWeight: FontWeight.w700)),
                         style: FilledButton.styleFrom(
@@ -2241,21 +2223,6 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                             color: _setupValidated ? kPrimary : kError,
                           ),
                         ),
-                        if (!_setupValidated) ...[
-                          const SizedBox(height: 6),
-                          GestureDetector(
-                            onTap: _setupForceValidate,
-                            child: Text(
-                              'Force-confirm standard initial position →',
-                              style: GoogleFonts.inter(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: kSecondary,
-                                decoration: TextDecoration.underline,
-                              ),
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   ),
