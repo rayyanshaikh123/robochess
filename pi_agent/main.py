@@ -3,6 +3,7 @@ import threading
 from pathlib import Path
 
 from pi_agent.api_client import DeviceApiClient
+from pi_agent.ble_protocol import envelope as ble_envelope
 from pi_agent.gatt_server import GattServer
 from pi_agent.network_manager import NetworkManager, NetworkManagerError
 from pi_agent.provisioning_store import ProvisioningStore
@@ -173,6 +174,16 @@ def main() -> None:
     ) if BLE_ENABLED else None
     if gatt:
         gatt.set_game_handler(game.handle)
+        # Seed F011 with the real network state so the app reads the correct
+        # status on first BLE connect, without needing to send a command.
+        if current_network.connected:
+            gatt._status = ble_envelope(
+                "status",
+                device_id,
+                status="wifi_connected",
+                ip_address=current_network.ip_address,
+                ssid=current_network.ssid,
+            )
         gatt.publish()
 
     if device_secret:
