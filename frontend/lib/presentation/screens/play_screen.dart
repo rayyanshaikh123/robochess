@@ -1092,7 +1092,22 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final devices = ref.watch(deviceListProvider).valueOrNull ?? [];
+    final cloudDevices = ref.watch(deviceListProvider).valueOrNull ?? [];
+    final devices = List<DeviceModel>.from(cloudDevices);
+    
+    final localState = ref.watch(localBoardProvider);
+    final localDevice = localState.selected;
+    if (localDevice?.deviceId != null &&
+        devices.every((d) => d.deviceId != localDevice!.deviceId)) {
+      devices.insert(
+          0,
+          DeviceModel(
+            deviceId: localDevice!.deviceId!,
+            status: 'online',
+            lastSeen: DateTime.now(),
+          ));
+    }
+
     final selectedId = ref.watch(selectedDeviceProvider);
     final activeDevice = _resolveActiveDevice(devices, selectedId);
 
@@ -2077,7 +2092,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
             busy: _setupBusy && !_setupCalibrated,
             actionLabel: _setupCalibrated ? 'RE-CAL' : 'CALIBRATE',
             onAction: _setupAutoCalibrate,
-            secondaryLabel: 'MANUAL',
+            secondaryLabel: 'CROP (MANUAL)',
             onSecondaryAction: _setupManualCalibrate,
           ),
           const SizedBox(height: 10),

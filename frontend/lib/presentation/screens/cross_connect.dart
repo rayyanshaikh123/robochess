@@ -5,9 +5,9 @@ import 'package:go_router/go_router.dart';
 import '../widgets/animated_profile_avatar.dart';
 import '../widgets/robo_app_bar.dart';
 import '../providers/device_provider.dart';
+import '../providers/local_board_provider.dart';
 import '../../domain/models/device_model.dart';
 import '../theme/app_colors.dart';
-
 
 class CrossConnect extends ConsumerWidget {
   const CrossConnect({super.key});
@@ -192,6 +192,7 @@ class _LinkedBoards extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final devicesState = ref.watch(deviceListProvider);
+    final localState = ref.watch(localBoardProvider);
     final selectedId = ref.watch(selectedDeviceProvider);
 
     return Container(
@@ -229,7 +230,10 @@ class _LinkedBoards extends ConsumerWidget {
           const SizedBox(height: 12),
           devicesState.when(
             data: (items) {
-              if (items.isEmpty) {
+              final localDevice = localState.selected;
+              final hasLocalDevice = localDevice?.deviceId != null &&
+                  items.every((item) => item.deviceId != localDevice!.deviceId);
+              if (items.isEmpty && !hasLocalDevice) {
                 return Text('No boards linked yet.',
                     style: GoogleFonts.inter(
                         fontSize: 12, color: kOnSurfaceVariant));
@@ -243,6 +247,11 @@ class _LinkedBoards extends ConsumerWidget {
               }
               return Column(
                 children: [
+                  if (hasLocalDevice)
+                    _LocalLinkedBoardCard(
+                      deviceId: localDevice!.deviceId!,
+                      onPlay: () => context.go('/play'),
+                    ),
                   ...items.map((device) {
                     final isSelected = device.deviceId == selectedId;
                     return Container(
@@ -348,6 +357,64 @@ class _LinkedBoards extends ConsumerWidget {
 }
 
 // ── Tournament Arena Launch Section ─────────────────────────────────────────────
+class _LocalLinkedBoardCard extends StatelessWidget {
+  final String deviceId;
+  final VoidCallback onPlay;
+
+  const _LocalLinkedBoardCard({
+    required this.deviceId,
+    required this.onPlay,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: kSurfaceContHighest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: kPrimary),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.bluetooth_connected, color: kPrimary, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(deviceId,
+                    style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: kOnSurface)),
+                const SizedBox(height: 4),
+                Text('CONNECTED LOCALLY',
+                    style: GoogleFonts.inter(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: kPrimary,
+                        letterSpacing: 1)),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: onPlay,
+            child: Text('PLAY',
+                style: GoogleFonts.inter(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: kPrimary,
+                    letterSpacing: 1)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ArenaLaunchSection extends StatelessWidget {
   const _ArenaLaunchSection();
 
@@ -415,7 +482,8 @@ class _ArenaLaunchSection extends StatelessWidget {
               backgroundColor: kPrimary,
               foregroundColor: kOnPrimary,
               padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
               elevation: 2,
             ),
             icon: const Icon(Icons.play_arrow, size: 20),

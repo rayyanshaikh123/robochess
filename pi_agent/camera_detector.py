@@ -93,9 +93,13 @@ class PiCameraDetector:
     def _apply_calibration(self) -> None:
         if not self.recognizer:
             return
-        corners = self._read_calibration().get("corners")
+        calibration = self._read_calibration()
+        corners = calibration.get("corners")
         if corners and len(corners) == 4:
             self.recognizer.calibrate([(float(p[0]), float(p[1])) for p in corners])
+            
+        orientation = calibration.get("board_orientation", "white_bottom")
+        self.recognizer.is_flipped = (orientation == "black_bottom")
 
     def _video_nodes(self) -> list[str]:
         return sorted(glob.glob("/dev/video*"),

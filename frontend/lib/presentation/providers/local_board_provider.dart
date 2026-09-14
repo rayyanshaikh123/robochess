@@ -205,6 +205,34 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
     }
   }
 
+  Future<String> connectBluetoothDevice(RoboChessBleDevice device) async {
+    state = state.copyWith(
+      connection: LocalConnectionState.connecting,
+      clearError: true,
+    );
+    try {
+      final id = await repository.connect(device);
+      await store.saveDevice(id);
+      state = state.copyWith(
+        selected: RoboChessDevice(
+          remoteId: device.result.device.remoteId.str,
+          displayName: device.name,
+          deviceId: id,
+          rssi: device.rssi,
+          state: LocalConnectionState.connected,
+        ),
+        connection: LocalConnectionState.paired,
+      );
+      return id;
+    } catch (error) {
+      state = state.copyWith(
+        error: 'Board connection failed: $error',
+        connection: LocalConnectionState.disconnected,
+      );
+      rethrow;
+    }
+  }
+
   PiLocalApi _localApi() => PiLocalApi(
         baseUrl: state.localApiBaseUrl ?? AppConfig.piLocalApiBaseUrl,
       );

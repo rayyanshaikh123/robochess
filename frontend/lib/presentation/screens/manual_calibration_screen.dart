@@ -67,6 +67,8 @@ class _ManualCalibrationScreenState
 
   static const _labels = ['TL', 'TR', 'BR', 'BL'];
 
+  String _boardOrientation = 'white_bottom';
+
   @override
   void dispose() {
     widget.localApi?.client.close();
@@ -128,7 +130,8 @@ class _ManualCalibrationScreenState
       if (widget.localApi == null) {
         await ref.read(boardRepositoryProvider).manualCalibrate(corners);
       } else {
-        await widget.localApi!.saveCalibration(corners: corners);
+        await widget.localApi!.saveCalibration(
+            corners: corners, orientation: _boardOrientation);
       }
       if (mounted) Navigator.of(context).pop(true);
     } catch (err) {
@@ -355,6 +358,30 @@ class _ManualCalibrationScreenState
                         onPressed: _loading ? null : _autoCalibratePi,
                         icon: const Icon(Icons.auto_fix_high, size: 16),
                         label: const Text('AUTO-DETECT BOARD CORNERS'),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(
+                          value: 'white_bottom',
+                          label: Text('White at Bottom', style: TextStyle(fontSize: 12)),
+                          icon: Icon(Icons.arrow_downward, size: 16),
+                        ),
+                        ButtonSegment(
+                          value: 'black_bottom',
+                          label: Text('Black at Bottom', style: TextStyle(fontSize: 12)),
+                          icon: Icon(Icons.arrow_upward, size: 16),
+                        ),
+                      ],
+                      selected: {_boardOrientation},
+                      onSelectionChanged: (Set<String> newSelection) {
+                        setState(() {
+                          _boardOrientation = newSelection.first;
+                        });
+                      },
+                      style: SegmentedButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
                       ),
                     ),
                     const SizedBox(height: 10),
