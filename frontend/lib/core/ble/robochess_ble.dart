@@ -124,7 +124,9 @@ class RoboChessBleClient {
             total is! int ||
             payload is! String ||
             index < 0 ||
-            index >= total) return;
+            index >= total) {
+          return;
+        }
         final chunks = _chunks.putIfAbsent(
             id, () => List<List<int>>.filled(total, const []));
         _chunkExpiry.putIfAbsent(
@@ -199,8 +201,9 @@ class RoboChessBleClient {
 
   Future<void> _writeChunksNow(BluetoothCharacteristic? characteristic,
       Map<String, dynamic> value) async {
-    if (characteristic == null)
+    if (characteristic == null) {
       throw StateError('BLE characteristic is unavailable');
+    }
     // BlueZ can expose the RoboChess secure-write characteristic as either
     // WRITE or WRITE WITHOUT RESPONSE, depending on the Android Bluetooth
     // stack.  Requesting a response unconditionally makes
@@ -239,6 +242,22 @@ class RoboChessBleClient {
         // Without-response writes are not flow-controlled by the platform.
         await Future<void>.delayed(const Duration(milliseconds: 15));
       }
+    }
+  }
+
+  /// Read the F011 status characteristic directly.
+  ///
+  /// BLE reads are synchronous request/response — no notification subscription
+  /// or timing issues. Returns null if not connected or on decode error.
+  Future<Map<String, dynamic>?> readStatus() async {
+    if (_status == null) return null;
+    try {
+      final bytes = await _status!.read();
+      if (bytes.isEmpty) return null;
+      final decoded = jsonDecode(utf8.decode(bytes, allowMalformed: true));
+      return decoded is Map<String, dynamic> ? decoded : null;
+    } catch (_) {
+      return null;
     }
   }
 

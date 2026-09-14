@@ -63,124 +63,92 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
       });
     }
   }
-
   Future<void> _provision(RoboChessBleDevice candidate) async {
     setState(() {
       _working = true;
       _message = 'Connecting to ${candidate.name}...';
     });
     try {
-      // iOS may silently drop the GATT connection while the Pi is checking
-      // its network or while the app requests the cloud onboarding token.
-      // Always rebuild the connection before sending the next command.
+      // Always reconnect — iOS silently drops GATT during idle periods.
       await _ble.disconnect();
       final deviceId =
           await _ble.connectAndReadDeviceId(candidate.result.device);
       _selectedRemoteId = candidate.result.device.remoteId.str;
+
       if (_needsWifi != true) {
-        setState(() => _message = 'Checking the board network...');
-        final completer = Completer<Map<String, dynamic>?>();
-        late final StreamSubscription<Map<String, dynamic>> subscription;
-        subscription = _ble.messages.listen((message) {
-          if (message['type'] == 'control.result' &&
-              (message['data'] as Map?)?['status'] == 'network_status') {
-            if (!completer.isCompleted) {
-              completer.complete(message);
-            }
-            subscription.cancel();
-          }
-        });
+        // Read F011 status directly — BLE reads are reliable request/response,
+        // unlike notifications which depend on bluezero's D-Bus delivery.
+        setState(() => _message = 'Reading board status...');
+        final status = await _ble.readStatus();
+        final boardStatus =
+            (status?['data'] as Map<String, dynamic>?)?['status']?.toString() ??
+                '';
+        final boardIp =
+            (status?['data'] as Map<String, dynamic>?)?['ip_address']
+                ?.toString();
 
-        await _ble.sendControl({
-          'version': bleProtocolVersion,
-          'request_id': DateTime.now().microsecondsSinceEpoch.toString(),
-          'type': 'network.status',
-          'device_id': deviceId,
-          'data': const {},
-        });
-
-        // Null means the Pi didn't respond in time — treat as no internet.
-        final response = await completer.future.timeout(
-          const Duration(seconds: 20),
-          onTimeout: () {
-            subscription.cancel();
-            return null;
-          },
-        );
-
-        if (response == null) {
-          // Pi didn't respond — could be starting up or no internet.
-          // Prompt for Wi-Fi so the user can push credentials.
-          if (mounted) {
-            setState(() {
-              _needsWifi = true;
-              _message =
-                  'Could not read board network status. Enter Wi-Fi credentials to connect it.';
-            });
-          }
-          return;
+        if (boardIp != null && boardIp.isNotEmpty) {
+          // Update the local API URL if the Pi already has a known IP.
+          ref.read(localBoardProvider.notifier).applyNetworkStatus({
+            'wifi_connected': true,
+            'internet_available': false,
+            'ip_address': boardIp,
+          });
         }
 
-        final network = Map<String, dynamic>.from(
-          ((response['data'] as Map)['network'] as Map?) ?? const {},
-        );
-        ref.read(localBoardProvider.notifier).applyNetworkStatus(network);
-        if ((network['wifi_connected'] != true ||
-                network['internet_available'] != true) &&
-            mounted) {
+        if (boardStatus != 'wifi_connected') {
           setState(() {
             _needsWifi = true;
             _message =
-                'Board is not connected to Wi-Fi. Enter its Wi-Fi credentials to link it.';
+                'Board is not connected to Wi-Fi. Enter credentials to link it.';
           });
           return;
         }
       }
+
       if (_needsWifi == true &&
           (_ssid.text.trim().isEmpty || _password.text.isEmpty)) {
         setState(
             () => _message = 'Enter the Wi-Fi network and password first.');
         return;
       }
+
       if (_needsWifi == true) {
         setState(() => _message = 'Sending Wi-Fi credentials to the Pi...');
-        final completer = Completer<Map<String, dynamic>>();
-        late final StreamSubscription<Map<String, dynamic>> subscription;
-        subscription = _ble.messages.listen((message) {
-          if (message['type'] == 'wifi.result' &&
-              (message['data'] as Map?)?['status'] != null) {
-            if (!completer.isCompleted) {
-              completer.complete(message);
-            }
-            subscription.cancel();
-          }
-        });
-
         await _ble.sendWifi(deviceId, _ssid.text.trim(), _password.text);
 
-        final wifi = await completer.future.timeout(
-          const Duration(seconds: 45),
-          onTimeout: () {
-            subscription.cancel();
-            throw TimeoutException('Wi-Fi setup timed out.');
-          },
-        );
+        // Poll F011 until the Pi reports wifi_connected or error.
+        // BLE reads are reliable and avoid the bluezero notification issue.
+        setState(() => _message = 'Connecting Pi to Wi-Fi (up to 30s)...');
+        String wifiStatus = '';
+        String? wifiIp;
+        for (var i = 0; i < 30; i++) {
+          await Future<void>.delayed(const Duration(seconds: 1));
+          final polled = await _ble.readStatus();
+          final data = polled?['data'] as Map<String, dynamic>? ?? {};
+          wifiStatus = data['status']?.toString() ?? '';
+          wifiIp = data['ip_address']?.toString();
+          if (wifiStatus == 'wifi_connected' || wifiStatus == 'error') break;
+        }
 
-        final wifiData =
-            Map<String, dynamic>.from(wifi['data'] as Map? ?? const {});
-        final wifiNetwork = wifiData['network'];
-        if (wifiNetwork is Map) {
-          ref.read(localBoardProvider.notifier).applyNetworkStatus(
-                Map<String, dynamic>.from(wifiNetwork),
-              );
+        if (wifiStatus == 'error') {
+          throw StateError('Wi-Fi connection failed. Check credentials.');
         }
-        if (wifiData['status'] == 'error') {
-          throw StateError(
-              wifiData['error']?.toString() ?? 'Wi-Fi setup failed.');
+        if (wifiStatus != 'wifi_connected') {
+          throw TimeoutException(
+              'Wi-Fi connection timed out.', const Duration(seconds: 30));
         }
-        await Future<void>.delayed(const Duration(seconds: 2));
+
+        if (wifiIp != null && wifiIp.isNotEmpty) {
+          ref.read(localBoardProvider.notifier).applyNetworkStatus({
+            'wifi_connected': true,
+            'internet_available': true,
+            'ip_address': wifiIp,
+          });
+        }
       }
-      setState(() => _message = 'Connecting to the Pi local setup...');
+
+      setState(() => _message = 'Connecting to Pi local setup...');
       await ref.read(localBoardProvider.notifier).adoptBoard(
             remoteId: candidate.result.device.remoteId.str,
             deviceId: deviceId,
@@ -200,6 +168,7 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
       if (mounted) setState(() => _working = false);
     }
   }
+
 
   @override
   Widget build(BuildContext context) {

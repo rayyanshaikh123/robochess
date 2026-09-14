@@ -237,11 +237,13 @@ class GattServer:
 
         # Update the board status based on the provisioning result.
         if result.get("status") == "wifi_connected":
+            network = result.get("network") or {}
             self._status = envelope(
                 "status",
                 self.device_id,
                 status="wifi_connected",
                 ssid=result.get("ssid"),
+                ip_address=network.get("ip_address"),
             )
 
         elif result.get("status") == "error":
