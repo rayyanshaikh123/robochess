@@ -50,15 +50,16 @@ TIMEOUT_MOVE_S = 45.0     # MOVEXY / JOG
 TIMEOUT_HOME_S = 90.0     # HOME
 
 # Python-side settle after switching the coil. The firmware already blocks for
-# cfg.magDwellMs; zero additional python dwell avoids unnecessary delays.
-MAGNET_SETTLE_S = 0.0
+# cfg.magDwellMs; this settle guard gives ample time for the magnetic field
+# to firmly grip or release the piece before the carriage moves.
+MAGNET_SETTLE_S = 0.25
 
 # Speed profile pushed to the firmware after homing.
-# These override the EEPROM defaults (80 mm/s / 1000 mm/s² / 150 ms dwell) and
-# are saved to EEPROM, so they persist across power cycles.
-FIRMWARE_MAX_SPEED  = 160.0   # mm/s  — well below stall; raise if motion is confident
-FIRMWARE_MAX_ACCEL  = 2500.0  # mm/s² — snappy ramp; lower if steps skip on start
-FIRMWARE_MAG_DWELL  = 50      # ms    — snappy coil dwell; ample for MOSFET coil pickup/release
+# Restores safe, reliable defaults (80 mm/s / 1000 mm/s² / 150 ms dwell) and
+# saves them to EEPROM.
+FIRMWARE_MAX_SPEED  = 80.0    # mm/s  — smooth, safe verified speed
+FIRMWARE_MAX_ACCEL  = 1000.0  # mm/s² — gentle acceleration; avoids step skipping
+FIRMWARE_MAG_DWELL  = 150     # ms    — ample dwell for piece pickup/release
 
 STATUS_RE = re.compile(
     r"X=(-?\d+(?:\.\d+)?)\s+Y=(-?\d+(?:\.\d+)?)"
@@ -381,8 +382,11 @@ class UnoController:
                     )
                 else:
                     raise UnoError(f"Unknown motion op {kind!r}")
-            # Park away from the board after the move finishes
-            self.park()
+            # Re-home against the limit switches after every move.  This zeroes
+            # any belt-slip that accumulated during the drag and makes the next
+            # move start from a known-true coordinate instead of a drifting
+            # estimate.
+            self.home()
         except UnoError:
             self._release_quietly()
             raise

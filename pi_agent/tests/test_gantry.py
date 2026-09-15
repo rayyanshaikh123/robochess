@@ -126,8 +126,9 @@ class UnoControllerTests(unittest.TestCase):
         first_movexy = next(i for i, v in enumerate(verbs) if v == "MOVEXY")
         first_mag_on = next(i for i, c in enumerate(transport.commands) if c == "MAG ON")
         self.assertLess(first_movexy, first_mag_on)
-        # MOVEXY parks the gantry away from the pieces at the end of the move
-        self.assertEqual(verbs[-1], "MOVEXY")
+        # HOME is called to re-datum the gantry against the limit switches after the move
+        self.assertIn("HOME", verbs)
+        self.assertEqual(verbs[-1], "STATUS")
 
     def test_capture_removes_the_taken_piece_before_moving(self):
         uno, transport = self._controller()
