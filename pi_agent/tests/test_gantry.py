@@ -120,11 +120,18 @@ class UnoControllerTests(unittest.TestCase):
         uno.execute(motion_plan(board, chess.Move.from_uci("e2e4")))
         verbs = [c.split()[0] for c in transport.commands]
         self.assertEqual(verbs.count("MAG"), 2)
-        # Magnet on only after arriving at the source square.
+        # STATUS is sent first (ensure_homed), then SET commands, then motion.
         self.assertEqual(verbs[0], "STATUS")
-        self.assertEqual(transport.commands[1].split()[0], "MOVEXY")
-        self.assertEqual(transport.commands[2], "MAG ON")
-        self.assertEqual(verbs[-1], "MOVEXY")  # parked at the end
+        # First MOVEXY must come before first MAG ON.
+        first_movexy = next(i for i, v in enumerate(verbs) if v == "MOVEXY")
+        first_mag_on = next(i for i, c in enumerate(transport.commands) if c == "MAG ON")
+        self.assertLess(first_movexy, first_mag_on)
+        # After every move the gantry re-homes (touches limit switches).
+        # home() sends HOME then STATUS (to verify position), so HOME is
+        # second-to-last and STATUS closes the sequence.
+        self.assertIn("HOME", verbs)
+        home_idx = max(i for i, v in enumerate(verbs) if v == "HOME")
+        self.assertEqual(verbs[home_idx + 1], "STATUS")
 
     def test_capture_removes_the_taken_piece_before_moving(self):
         uno, transport = self._controller()
@@ -154,7 +161,10 @@ class UnoControllerTests(unittest.TestCase):
             """Succeeds until the carriage is holding a piece, then faults."""
 
             def send(self, command, timeout):
-                if len(self.commands) >= 3 and command.split()[0].upper() == "MOVEXY":
+                # Fail on MOVEXY only once the magnet has been engaged,
+                # i.e. after 'MAG ON' appears in the command history.
+                mag_on_sent = any(c.upper() == "MAG ON" for c in self.commands)
+                if mag_on_sent and command.split()[0].upper() == "MOVEXY":
                     self.commands.append(command)
                     return False, ["ERR LIMIT_X"]
                 return super().send(command, timeout)

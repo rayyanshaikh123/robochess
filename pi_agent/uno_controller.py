@@ -49,9 +49,17 @@ TIMEOUT_SHORT_S = 5.0     # PING / STATUS / MAG / STOP
 TIMEOUT_MOVE_S = 45.0     # MOVEXY / JOG
 TIMEOUT_HOME_S = 90.0     # HOME
 
-# Dwell after switching the coil so the piece is actually held (or released)
-# before the carriage starts moving.
-MAGNET_SETTLE_S = 0.25
+# Python-side settle after switching the coil. The firmware already blocks for
+# cfg.magDwellMs (default 150 ms); this adds only a tiny extra guard.
+# Reduced from 0.25 s — the firmware dwell is sufficient for piece pickup/release.
+MAGNET_SETTLE_S = 0.05
+
+# Speed profile pushed to the firmware after the first successful homing.
+# These override the EEPROM defaults (80 mm/s / 1000 mm/s² / 150 ms dwell) and
+# are saved to EEPROM, so they persist across power cycles.
+FIRMWARE_MAX_SPEED  = 160.0   # mm/s  — well below stall; raise if motion is confident
+FIRMWARE_MAX_ACCEL  = 2500.0  # mm/s² — snappy ramp; lower if steps skip on start
+FIRMWARE_MAG_DWELL  = 80      # ms    — replaces 150 ms; still enough for most coils
 
 STATUS_RE = re.compile(
     r"X=(-?\d+(?:\.\d+)?)\s+Y=(-?\d+(?:\.\d+)?)"
@@ -251,6 +259,9 @@ class UnoController:
         try:
             status = self.read_status()
             if status.homed is True:
+                if not self._homed:
+                    # First time we confirm homing — push the fast speed profile.
+                    self._apply_speed_config()
                 self._homed = True
                 return status.as_dict()
         except Exception:
@@ -258,6 +269,26 @@ class UnoController:
         if self._homed:
             return {"homed": True}
         raise UnoError("Gantry is not homed; send gantry.home before moving")
+
+    def _apply_speed_config(self) -> None:
+        """Push the preferred speed profile to firmware and persist it to EEPROM.
+
+        Uses the firmware's SET command, which validates, saves, and applies the
+        value immediately.  Failures are logged but not fatal — the machine still
+        runs on its existing EEPROM defaults.
+        """
+        settings = [
+            ("max.speed", f"{FIRMWARE_MAX_SPEED:.1f}"),
+            ("max.accel", f"{FIRMWARE_MAX_ACCEL:.1f}"),
+            ("mag.dwell", str(FIRMWARE_MAG_DWELL)),
+        ]
+        for key, val in settings:
+            try:
+                self.command(f"SET {key} {val}", TIMEOUT_SHORT_S)
+            except UnoError as exc:
+                # Non-fatal: log and continue; defaults are safe.
+                import sys
+                print(f"[warn] uno_controller: SET {key} {val} failed: {exc}", file=sys.stderr)
 
     # -- protocol primitives --------------------------------------------------
 
@@ -348,7 +379,11 @@ class UnoController:
                     )
                 else:
                     raise UnoError(f"Unknown motion op {kind!r}")
-            self.park()
+            # Re-home against the limit switches after every move.  This zeroes
+            # any belt-slip that accumulated during the drag and makes the next
+            # move start from a known-true coordinate instead of a drifting
+            # estimate.  The two-second homing cost is worth the reliability.
+            self.home()
         except UnoError:
             self._release_quietly()
             raise

@@ -132,6 +132,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   bool _inGameValidated = false;
   String? _inGameValidationNote;
   Timer? _autoDetectTimer;
+  Timer? _piSyncTimer;  // periodic Pi game-state sync when using board
 
   @override
   void initState() {
@@ -210,6 +211,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     _clockTimer?.cancel();
     _botMoveTimer?.cancel();
     _autoDetectTimer?.cancel();
+    _piSyncTimer?.cancel();
     _gameSub?.close();
     _statusSub?.cancel();
     _resultSub?.cancel();
@@ -382,6 +384,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       _snapshotNote = null;
     });
     _autoDetectTimer?.cancel();
+    _piSyncTimer?.cancel();
     try {
       if (_setupSide == 'random') {
         _setupSide = Random().nextBool() ? 'white' : 'black';
@@ -410,10 +413,12 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
             });
           }
           _autoDetectTimer?.cancel();
+          _piSyncTimer?.cancel();
         }
       } else {
         _clearSnapshot();
         _autoDetectTimer?.cancel();
+        _piSyncTimer?.cancel();
       }
     } catch (err) {
       if (mounted) {
@@ -472,6 +477,29 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           _syncing ||
           !_inGameValidated) return;
       _checkAutoDetectReady();
+    });
+    _startPiSync();
+  }
+
+  /// Periodically fetch the Pi's authoritative game state and sync the local
+  /// Flutter board.  This catches engine moves executed on the Pi that were not
+  /// reflected via auto-detect (e.g. when the Pi ran the engine turn but the
+  /// Flutter client missed the result).
+  void _startPiSync() {
+    if (_piSyncTimer != null) return;
+    _piSyncTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      if (!_gameUsesBoard || _piBaseUrl.isEmpty || !mounted) return;
+      try {
+        final raw = await PiLocalApi(baseUrl: _piBaseUrl).gameState();
+        final fen = raw['fen']?.toString() ?? '';
+        if (fen.isNotEmpty && fen != _game.fen && mounted) {
+          setState(() {
+            _resetBoardFromFen(fen);
+          });
+        }
+      } catch (_) {
+        // Silently ignore connectivity failures — the timer will retry.
+      }
     });
   }
 
@@ -1355,6 +1383,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     });
 
     _autoDetectTimer?.cancel();
+    _piSyncTimer?.cancel();
 
     try {
       if (_setupSide == 'random') {
@@ -1381,6 +1410,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       } else {
         _clearSnapshot();
         _autoDetectTimer?.cancel();
+        _piSyncTimer?.cancel();
       }
 
       _startClock();
