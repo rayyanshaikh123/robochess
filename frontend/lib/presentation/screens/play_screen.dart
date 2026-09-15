@@ -133,6 +133,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   String? _inGameValidationNote;
   Timer? _autoDetectTimer;
   Timer? _piSyncTimer;  // periodic Pi game-state sync when using board
+  bool _piSyncInFlight = false;
 
   @override
   void initState() {
@@ -488,19 +489,56 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   void _startPiSync() {
     if (_piSyncTimer != null) return;
     _piSyncTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
-      if (!_gameUsesBoard || _piBaseUrl.isEmpty || !mounted) return;
+      if (!_gameUsesBoard || _piBaseUrl.isEmpty || !mounted || _piSyncInFlight) return;
+      _piSyncInFlight = true;
       try {
         final raw = await PiLocalApi(baseUrl: _piBaseUrl).gameState();
-        final fen = raw['fen']?.toString() ?? '';
-        if (fen.isNotEmpty && fen != _game.fen && mounted) {
-          setState(() {
-            _resetBoardFromFen(fen);
-          });
+        final version = int.tryParse(raw['version']?.toString() ?? '');
+        if (version != null && version >= _linkedGameVersion && mounted) {
+          setState(() => _applyPiSnapshot(raw, version));
         }
       } catch (_) {
         // Silently ignore connectivity failures — the timer will retry.
+      } finally {
+        _piSyncInFlight = false;
       }
     });
+  }
+
+  void _applyPiSnapshot(Map<String, dynamic> snapshot, int version) {
+    if (version < _linkedGameVersion) return;
+
+    final moves = snapshot['moves'];
+    var applied = moves is List && moves.length == version;
+    if (applied) {
+      final currentPly = _game.history.length;
+      if (currentPly > moves.length) {
+        applied = false;
+      } else {
+        for (var index = currentPly; index < moves.length; index++) {
+          final uci = moves[index]?.toString() ?? '';
+          if (uci.isEmpty || !_applyUciMove(uci)) {
+            applied = false;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!applied) {
+      final fen = snapshot['fen']?.toString() ?? '';
+      if (fen.isNotEmpty && fen != _game.fen) {
+        _resetBoardFromFen(fen);
+      }
+    }
+
+    _linkedGameVersion = version;
+    final phase = snapshot['phase']?.toString();
+    if (phase == 'executing_engine_move') {
+      _snapshotNote = 'Engine moving the pieces...';
+    } else if (phase == 'recovery') {
+      _syncError = snapshot['last_error']?.toString() ?? 'Physical board needs recovery.';
+    }
   }
 
   Future<void> _checkAutoDetectReady() async {

@@ -32,11 +32,12 @@ sends motion plans to an Arduino Uno gantry controller.
   and recovery state.
 - BLE game-command protocol and optional BlueZ GATT server.
 - Acknowledged JSON-lines Uno protocol with a default simulator.
-- Shared OpenCV camera capture, saved four-corner calibration, and optional
-  Roboflow or local YOLO automatic move detection with stable legal-move
-  filtering.
+- Shared OpenCV camera capture, saved four-corner calibration, and local YOLO
+  automatic move detection with stable legal-move filtering. Cloud inference
+  remains available only when explicitly enabled.
 
-Automatic detection supports cloud-only Roboflow mode. Set
+Automatic detection uses the local model by default. To use cloud-only
+Roboflow mode, set
 `ROBOCHESS_VISION_MODE=cloud`, `ROBOCHESS_ROBOFLOW_MODEL_URL`, and
 `ROBOCHESS_ROBOFLOW_API_KEY`; no local `.pt` file is required. In `auto` mode,
 Roboflow is preferred and a local model is used as fallback.
@@ -96,13 +97,16 @@ board.
 | `ROBOCHESS_UNO_SIMULATOR` | Use fake Uno acknowledgements | `1` |
 | `ROBOCHESS_UNO_PORT` | Arduino USB device | `/dev/ttyACM0` |
 | `ROBOCHESS_UNO_BAUDRATE` | Arduino serial speed | `115200` |
+| `ROBOCHESS_GANTRY_HOME_MODE` | `interval`, `always`, or `never` | `interval` |
+| `ROBOCHESS_GANTRY_REHOME_INTERVAL` | Moves between limit-switch homing cycles | `8` |
+| `ROBOCHESS_MAGNET_SETTLE_SECONDS` | Coil settle time per toggle | `0.08` |
 | `ROBOCHESS_API_BASE` | Optional backend API | `http://localhost:8000` |
 | `ROBOCHESS_DEVICE_ID` / `ROBOCHESS_DEVICE_SECRET` | Device credentials | required for full agent |
-| `ROBOCHESS_VISION_MODE` | Pi vision provider; currently `cloud` for direct Roboflow calls | `cloud` |
-| `ROBOCHESS_VISION_REQUIRE_INTERNET` | Require Pi internet before setup is ready | `1` |
+| `ROBOCHESS_VISION_MODE` | Pi vision provider; local is the offline default | `local` |
+| `ROBOCHESS_VISION_REQUIRE_INTERNET` | Require Pi internet before setup is ready | `0` |
 | `ROBOCHESS_ROBOFLOW_MODEL_URL` / `ROBOCHESS_ROBOFLOW_API_KEY` | Roboflow model endpoint and secret stored on the Pi | empty |
-| `ROBOCHESS_MODEL_PATH` | Reserved local model path for a future NCNN/local provider | empty |
-| `ROBOCHESS_AUTO_DETECT_ENABLED` | Run automatic move detection in the agent loop | `1` |
+| `ROBOCHESS_MODEL_PATH` | Local YOLO model path used on the Pi | empty |
+| `ROBOCHESS_AUTO_DETECT_ENABLED` | Enable hand-departure move detection | `1` |
 
 Always install Python packages inside `.venv`. Do not use `sudo pip` or
 `--break-system-packages`.
@@ -125,14 +129,15 @@ separate `/etc/robochess/pi-agent.env` file instead.
 
 The agent starts BLE/board control even when the backend is down. It reconnects
 and uploads the Pi-authoritative session snapshot when the network returns.
-The current detector sends JPEG frames directly from the Pi to Roboflow. The
-backend never receives camera frames and never performs move inference. Keep the
-Roboflow URL and API key only in the Pi environment. A local/NCNN provider can be
-added later behind the same Pi recognizer interface.
+The detector runs on the Pi and the backend never receives camera frames or
+performs move inference. During play, the hand-departure worker captures and
+infers one candidate move; the main agent loop does not run a second detector.
+Keep Roboflow credentials only in the Pi environment when cloud mode is
+explicitly enabled.
 
 The app must complete the Pi setup checklist before starting a physical game:
-Pi internet, camera, Roboflow readiness, calibration, starting-position validation,
-and gantry homing. Backend registration, device storage, heartbeats, and session
+camera, local model readiness, calibration, starting-position validation, and
+gantry homing. Backend registration, device storage, heartbeats, and session
 sync are optional. BLE connection, Wi-Fi provisioning, setup, and local gameplay
 work without a backend account or device secret.
 

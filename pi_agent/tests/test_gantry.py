@@ -112,7 +112,19 @@ class StatusParsingTests(unittest.TestCase):
 class UnoControllerTests(unittest.TestCase):
     def _controller(self, **kwargs):
         transport = SimulatedTransport(**kwargs)
-        return UnoController(transport, retries=0), transport
+        return UnoController(transport, retries=0, home_mode="always"), transport
+
+    def test_fast_home_policy_skips_home_until_interval(self):
+        transport = SimulatedTransport()
+        uno = UnoController(transport, retries=0, home_mode="interval", rehome_interval=2)
+        board = chess.Board()
+        uno.execute(motion_plan(board, chess.Move.from_uci("e2e4")))
+        self.assertNotIn("HOME", [command.split()[0] for command in transport.commands])
+        board = chess.Board(
+            "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
+        )
+        uno.execute(motion_plan(board, chess.Move.from_uci("e7e5")))
+        self.assertIn("HOME", [command.split()[0] for command in transport.commands])
 
     def test_quiet_move_sequence_toggles_magnet_around_the_drag(self):
         uno, transport = self._controller()

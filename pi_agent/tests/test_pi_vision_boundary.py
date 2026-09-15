@@ -4,6 +4,8 @@ import unittest
 import chess
 
 from pi_agent.vision_recognizer import BoardRecognizer, normalize_class_name
+from pi_agent.game_session import GameSession, SessionPhase
+from pi_agent.camera_detector import PiCameraDetector
 
 
 class PiVisionBoundaryTests(unittest.TestCase):
@@ -61,6 +63,16 @@ class PiVisionBoundaryTests(unittest.TestCase):
         self.assertEqual(move.uci(), "e2e4")
         self.assertGreaterEqual(score, 64)
         self.assertGreaterEqual(gap, 1)
+
+    def test_detector_ignores_non_player_turns(self):
+        detector = PiCameraDetector.__new__(PiCameraDetector)
+        detector.recognizer = None
+        session = GameSession()
+        session.confirm_setup()
+        session.accept_player_move("e2e4")
+        session.begin_engine_move()
+        self.assertEqual(session.phase, SessionPhase.EXECUTING_ENGINE_MOVE)
+        self.assertEqual(detector.detect_candidates(session), [])
 
 
 if __name__ == "__main__":

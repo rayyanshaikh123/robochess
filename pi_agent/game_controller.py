@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import chess
 import json
+import threading
 from pathlib import Path
 
 from pi_agent.engine import StockfishEngine
@@ -19,27 +20,30 @@ class GameController:
         self.session: GameSession | None = store.load() if store else None
         self._last_seq = -1
         self._cached_results: dict[int, dict] = {}
+        self._state_lock = threading.RLock()
+        self._engine_thread: threading.Thread | None = None
+        self._engine_generation = 0
         self.calibration_path = Path(__file__).with_name(".state") / "camera_calibration.json"
 
     def handle(self, message: dict) -> dict:
         data = message.get("data", {})
         sequence = data.get("client_seq")
-        if isinstance(sequence, int) and sequence in self._cached_results:
-            return self._cached_results[sequence]
-        if isinstance(sequence, int) and sequence <= self._last_seq:
-            return self._result("error", error="Out-of-order client_seq")
-        try:
-            result = self._dispatch(message["type"], data)
-        except Exception as exc:
-            if self.session and message["type"] == "move.propose":
-                self.session.recover(str(exc))
-            result = self._result("error", error=str(exc))
-        if isinstance(sequence, int):
-            self._last_seq = sequence
-            self._cached_results[sequence] = result
-        if self.store:
-            self.store.save(self.session)
-        return result
+        with self._state_lock:
+            if isinstance(sequence, int) and sequence in self._cached_results:
+                return self._cached_results[sequence]
+            if isinstance(sequence, int) and sequence <= self._last_seq:
+                return self._result("error", error="Out-of-order client_seq")
+            try:
+                result = self._dispatch(message["type"], data)
+            except Exception as exc:
+                if self.session and message["type"] == "move.propose":
+                    self.session.recover(str(exc))
+                result = self._result("error", error=str(exc))
+            if isinstance(sequence, int):
+                self._last_seq = sequence
+                self._cached_results[sequence] = result
+            self._save_session()
+            return result
 
     def _dispatch(self, kind: str, data: dict) -> dict:
         if kind == "camera.status":
@@ -57,6 +61,7 @@ class GameController:
             print(f"Camera calibration saved: {calibration}", flush=True)
             return self._result("camera_calibrated", calibration=calibration)
         if kind == "session.start":
+            self._cancel_engine_work()
             fen = data.get("initial_fen", chess.STARTING_FEN)
             color = chess.WHITE if data.get("human_color", "white") == "white" else chess.BLACK
             self.session = GameSession(initial_fen=fen, human_color=color)
@@ -70,9 +75,11 @@ class GameController:
         if not self.session:
             raise SessionError("Start a session first")
         if kind == "session.reset":
+            self._cancel_engine_work()
             self.session.reset(data.get("initial_fen", chess.STARTING_FEN)); self.session.confirm_setup()
             return self._result("state")
         if kind == "session.undo":
+            self._cancel_engine_work()
             self.session.undo_last_turn()
             return self._result("state")
         if kind == "session.resume":
@@ -82,11 +89,64 @@ class GameController:
             return self._result("state")
         if kind == "move.propose":
             self.session.accept_player_move(data["uci"], data.get("expected_version"))
-            state_before_engine = self._result("player_move_accepted")
-            self._run_engine_turn()
-            state_before_engine["engine_state"] = self.session.snapshot()
-            return state_before_engine
+            player_state = self.session.snapshot()
+            self._start_engine_work()
+            return {
+                "status": "player_move_accepted",
+                "state": player_state,
+                "engine_pending": self.session.phase.value == "awaiting_engine",
+            }
         raise ValueError("Unsupported game message")
+
+    def _save_session(self) -> None:
+        if self.store:
+            self.store.save(self.session)
+
+    def _cancel_engine_work(self) -> None:
+        self._engine_generation += 1
+
+    def _start_engine_work(self) -> None:
+        if not self.session or self.session.phase.value != "awaiting_engine":
+            return
+        generation = self._engine_generation
+        if self._engine_thread and self._engine_thread.is_alive():
+            return
+        self._engine_thread = threading.Thread(
+            target=self._run_engine_work,
+            args=(generation,),
+            name="robochess-engine-turn",
+            daemon=True,
+        )
+        self._engine_thread.start()
+
+    def _run_engine_work(self, generation: int) -> None:
+        try:
+            with self._state_lock:
+                if generation != self._engine_generation or not self.session:
+                    return
+                self.session.begin_engine_move()
+                self._save_session()
+                board = self.session.board.copy()
+
+            self.uno.ensure_homed()
+            uci = self.engine.best_move(board)
+            with self._state_lock:
+                if generation != self._engine_generation or not self.session:
+                    return
+                move = self.session.parse_legal_move(uci)
+
+            self.uno.execute(motion_plan(board, move))
+
+            with self._state_lock:
+                if generation != self._engine_generation or not self.session:
+                    return
+                self.session.accept_engine_move(uci)
+                self._save_session()
+        except Exception as exc:
+            with self._state_lock:
+                if self.session and generation == self._engine_generation:
+                    self.session.recover(str(exc))
+                    self._save_session()
 
     def _load_calibration(self) -> dict:
         try:

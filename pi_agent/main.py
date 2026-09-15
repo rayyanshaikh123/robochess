@@ -34,7 +34,6 @@ from pi_agent.config import (
     VISION_REQUIRE_INTERNET,
 )
 from pi_agent.heartbeat import HeartbeatWorker
-from pi_agent.vision_adapter import VisionAdapter
 from pi_agent.camera_detector import PiCameraDetector
 from pi_agent.config import (
     ENGINE_SKILL_LEVEL, ENGINE_TIME_SECONDS, STOCKFISH_PATH, UNO_BAUDRATE,
@@ -216,22 +215,13 @@ def main() -> None:
     )
     heartbeat.start()
 
-    vision = VisionAdapter(game.session, stability_frames=STABLE_LABEL_COUNT)
-
     print("Pi agent running. Waiting for moves...")
     try:
         while True:
-            vision.session = game.session
-            if AUTO_DETECT_ENABLED and game.session and game.session.phase.value == "player_turn":
-                candidates = detector.detect_candidates(game.session)
-                uci, expected_version = vision.observe_candidates(candidates)
-                if uci:
-                    result = game.handle({"type": "move.propose", "data": {"uci": uci, "expected_version": expected_version}})
-                    if result.get("status") == "error":
-                        print(f"Automatic move rejected: {result.get('error')}", flush=True)
-                time.sleep(DETECT_INTERVAL_SECONDS)
-            else:
-                time.sleep(0.5)
+            # Detection is owned by PiCameraDetector's hand-departure worker.
+            # Keeping a second polling/inference loop here doubles camera reads
+            # and YOLO work, and can race the pending move consumed by the API.
+            time.sleep(0.5)
     except KeyboardInterrupt:
         if heartbeat:
             heartbeat.stop()

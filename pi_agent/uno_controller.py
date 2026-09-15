@@ -21,6 +21,7 @@ path planning live here on the host (see :mod:`pi_agent.geometry`).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 import re
 import threading
 import time
@@ -52,7 +53,25 @@ TIMEOUT_HOME_S = 90.0     # HOME
 # Python-side settle after switching the coil. The firmware already blocks for
 # cfg.magDwellMs; this settle guard gives ample time for the magnetic field
 # to firmly grip or release the piece before the carriage moves.
-MAGNET_SETTLE_S = 0.25
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+MAGNET_SETTLE_S = max(0.0, _env_float("ROBOCHESS_MAGNET_SETTLE_SECONDS", 0.08))
+GANTRY_HOME_MODE = os.getenv("ROBOCHESS_GANTRY_HOME_MODE", "interval").strip().lower()
+if GANTRY_HOME_MODE not in {"always", "interval", "never"}:
+    GANTRY_HOME_MODE = "interval"
+GANTRY_REHOME_INTERVAL = max(1, _env_int("ROBOCHESS_GANTRY_REHOME_INTERVAL", 8))
 
 # Speed profile pushed to the firmware after homing.
 # Restores safe, reliable defaults (80 mm/s / 1000 mm/s² / 150 ms dwell) and
@@ -254,6 +273,9 @@ class UnoController:
     _graveyard_used: int = 0
     _magnet_engaged: bool = False
     _homed: bool = False
+    home_mode: str = GANTRY_HOME_MODE
+    rehome_interval: int = GANTRY_REHOME_INTERVAL
+    _moves_since_home: int = 0
 
     def ensure_homed(self) -> dict:
         """Verify the Uno has homed before any coordinate motion."""
@@ -328,6 +350,7 @@ class UnoController:
     def home(self) -> None:
         self.command("HOME", TIMEOUT_HOME_S)
         self._homed = True
+        self._moves_since_home = 0
         self._apply_speed_config()
         try:
             status = self.read_status()
@@ -382,11 +405,16 @@ class UnoController:
                     )
                 else:
                     raise UnoError(f"Unknown motion op {kind!r}")
-            # Re-home against the limit switches after every move.  This zeroes
-            # any belt-slip that accumulated during the drag and makes the next
-            # move start from a known-true coordinate instead of a drifting
-            # estimate.
-            self.home()
+            self._moves_since_home += 1
+            should_home = (
+                self.home_mode == "always"
+                or (
+                    self.home_mode == "interval"
+                    and self._moves_since_home >= max(1, self.rehome_interval)
+                )
+            )
+            if should_home:
+                self.home()
         except UnoError:
             self._release_quietly()
             raise

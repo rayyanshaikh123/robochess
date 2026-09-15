@@ -495,6 +495,17 @@ class LocalApiHost:
         def auto_detect_ready():
             setup = self._setup_status()
             hand_present = bool(self.detector and self.detector.hand_present)
+            session = self.game.session
+            phase = getattr(getattr(session, "phase", None), "value", None)
+            if session and phase != "player_turn":
+                return {"status": "ok", "data": {
+                    "ready": False,
+                    "reason": "engine_move" if phase in {
+                        "awaiting_engine", "executing_engine_move"
+                    } else phase or "no_session",
+                    "hand_present": hand_present,
+                    "state": session.snapshot(),
+                }}
             pending_move = self.detector.pending_auto_move if self.detector else None
             pending_san = self.detector.pending_auto_san if self.detector else None
 
@@ -508,21 +519,14 @@ class LocalApiHost:
                     "type": "move.propose",
                     "data": {"uci": pending_move, "expected_version": self.game.session.version},
                 })
-                # Check for engine reply
-                engine_uci = None
-                if self.game.session and self.game.session.history:
-                    last_move = self.game.session.history[-1]
-                    if last_move.get("uci") != pending_move:
-                        engine_uci = last_move.get("uci")
-
                 return {"status": "ok", "data": {
                     "ready": True,
                     "uci": pending_move,
                     "san": pending_san or pending_move,
                     "fen": self.game.session.board.fen() if self.game.session else None,
-                    "engine_move": {"uci": engine_uci} if engine_uci else None,
                     "reason": "hand_left",
                     "hand_present": False,
+                    "engine_pending": bool(result.get("engine_pending")),
                     **result,
                 }}
 
@@ -608,16 +612,12 @@ class LocalApiHost:
         if not apply_move:
             return {"status": "move_detected", "data": {"candidates": candidates, "vision": self.detector.status()}}
         result = self.game.handle({"type": "move.propose", "data": {"uci": move_uci, "expected_version": self.game.session.version}})
-        engine_data = None
-        if self.game.session and self.game.session.history:
-            last_move = self.game.session.history[-1]
-            if last_move.get("uci") != move_uci:
-                engine_data = {"uci": last_move.get("uci")}
         return {
             "status": "ok",
             "data": {
                 "human_move": {"uci": move_uci, "analysis_status": "success"},
-                "engine_move": engine_data,
+                "engine_move": None,
+                "engine_pending": bool(result.get("engine_pending")),
                 "fen": self.game.session.board.fen() if self.game.session else None,
                 **result,
             },

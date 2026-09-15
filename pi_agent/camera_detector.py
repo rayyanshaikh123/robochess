@@ -48,17 +48,6 @@ class PiCameraDetector:
             os.getenv("ROBOCHESS_VISION_MODE", "").strip().lower() == "cloud"
             or os.getenv("ROBOCHESS_ROBOFLOW_ENABLED", "0").strip().lower()
             in {"1", "true", "yes", "on"}
-            or (
-                (
-                    os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip()
-                    or os.getenv("ROBOFLOW_API_KEY", "").strip()
-                )
-                and (
-                    os.getenv("ROBOCHESS_ROBOFLOW_MODEL_URL", "").strip()
-                    or os.getenv("ROBOFLOW_MODEL_URL", "").strip()
-                    or "/" in self.model_path
-                )
-            )
         )
         cloud_url = os.getenv("ROBOCHESS_ROBOFLOW_MODEL_URL", "").strip() or os.getenv(
             "ROBOFLOW_MODEL_URL", ""
@@ -318,7 +307,9 @@ class PiCameraDetector:
         }
 
     def detect_candidates(self, session) -> list[str]:
-        if not session or not self.model_available:
+        if not session or getattr(session.phase, "value", session.phase) != "player_turn":
+            return []
+        if not self.model_available:
             return []
         if not self.calibrated:
             self.last_error = "Board is not calibrated"
@@ -386,7 +377,8 @@ class PiCameraDetector:
         while not self._hand_stop_event.is_set():
             session = self.active_session
             session_is_over = bool(getattr(session, "is_over", False)) if session else True
-            if session is None or session_is_over:
+            session_phase = getattr(getattr(session, "phase", None), "value", None)
+            if session is None or session_is_over or session_phase != "player_turn":
                 time.sleep(0.2)
                 continue
             if not self.calibrated or not self.model_available:
@@ -448,7 +440,8 @@ class PiCameraDetector:
         import time
         session = self.active_session
         session_is_over = bool(getattr(session, "is_over", False)) if session else True
-        if session is None or session_is_over:
+        session_phase = getattr(getattr(session, "phase", None), "value", None)
+        if session is None or session_is_over or session_phase != "player_turn":
             return
         # Brief pause to let camera exposure stabilize after hand leaves
         time.sleep(0.2)
