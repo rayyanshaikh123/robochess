@@ -23,8 +23,11 @@ class SessionStore:
     def save(self, session: GameSession | None) -> None:
         if session is None:
             return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(session.snapshot(), separators=(",", ":")))
-        os.chmod(temporary, 0o600)
-        temporary.replace(self.path)
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(session.snapshot(), separators=(",", ":")))
+            os.chmod(temporary, 0o600)
+            temporary.replace(self.path)
+        except OSError as exc:
+            print(f"Warning: Failed to persist session: {exc}", flush=True)

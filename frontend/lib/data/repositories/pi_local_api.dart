@@ -78,6 +78,7 @@ class PiLocalApi {
     return _data(response, 'Pi gantry homing failed');
   }
 
+
   Future<Map<String, dynamic>> gantryStatus() async {
     final response =
         await client.get(_uri('/local/gantry/status')).timeout(_requestTimeout);
@@ -157,9 +158,12 @@ class PiLocalApi {
     } catch (_) {}
     if (response.statusCode >= 400 || payload['status'] == 'error') {
       final rawDetail = payload['detail'];
-      final detail = rawDetail is Map
-          ? rawDetail['message']?.toString() ?? fallback
-          : rawDetail?.toString() ?? payload['message']?.toString() ?? fallback;
+      var detail = rawDetail is Map
+          ? rawDetail['message']?.toString() ?? payload['error']?.toString() ?? fallback
+          : rawDetail?.toString() ?? payload['message']?.toString() ?? payload['error']?.toString() ?? fallback;
+      if (detail == fallback) {
+        detail = '$fallback (Code: ${response.statusCode}, Body: ${response.body})';
+      }
       throw Exception(detail);
     }
     return Map<String, dynamic>.from((payload['data'] as Map?) ?? const {});

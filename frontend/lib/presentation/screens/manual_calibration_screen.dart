@@ -64,6 +64,7 @@ class _ManualCalibrationScreenState
 
   /// Points stored in **image pixel** coordinates (not display coords).
   final List<Offset> _imagePoints = [];
+  int? _activePointIndex;
 
   static const _labels = ['TL', 'TR', 'BR', 'BL'];
 
@@ -86,6 +87,7 @@ class _ManualCalibrationScreenState
       _loading = true;
       _error = null;
       _imagePoints.clear();
+      _activePointIndex = null;
     });
     try {
       final frame = widget.localApi == null
@@ -99,6 +101,14 @@ class _ManualCalibrationScreenState
         setState(() {
           _frame = frame;
           _loading = false;
+          
+          final size = math.min(frame.width, frame.height) * 0.6;
+          final cx = frame.width / 2.0;
+          final cy = frame.height / 2.0;
+          _imagePoints.add(Offset(cx - size/2, cy - size/2)); // TL
+          _imagePoints.add(Offset(cx + size/2, cy - size/2)); // TR
+          _imagePoints.add(Offset(cx + size/2, cy + size/2)); // BR
+          _imagePoints.add(Offset(cx - size/2, cy + size/2)); // BL
         });
       }
     } catch (err) {
@@ -163,19 +173,53 @@ class _ManualCalibrationScreenState
     }
   }
 
-  void _addPoint(Offset localPos, Size displaySize) {
+  void _onPanStart(DragStartDetails details, Size displaySize) {
     final frame = _frame;
-    if (frame == null || _imagePoints.length >= 4) return;
-    final imgPt =
-        _displayToImage(localPos, displaySize, frame.width, frame.height);
-    setState(() => _imagePoints.add(imgPt));
+    if (frame == null || _imagePoints.length != 4) return;
+    
+    final imgPt = _displayToImage(details.localPosition, displaySize, frame.width, frame.height);
+    
+    double minDistance = double.infinity;
+    int minIndex = -1;
+    for (int i = 0; i < 4; i++) {
+      final dist = (imgPt - _imagePoints[i]).distance;
+      if (dist < minDistance) {
+        minDistance = dist;
+        minIndex = i;
+      }
+    }
+    
+    // Allow grabbing if within reasonable distance (e.g. 100 pixels in image space)
+    if (minIndex != -1 && minDistance < 150) {
+      setState(() {
+        _activePointIndex = minIndex;
+      });
+    }
+  }
+
+  void _onPanUpdate(DragUpdateDetails details, Size displaySize) {
+    final frame = _frame;
+    final activeIndex = _activePointIndex;
+    if (frame == null || activeIndex == null) return;
+    
+    final imgPt = _displayToImage(details.localPosition, displaySize, frame.width, frame.height);
+    setState(() {
+      _imagePoints[activeIndex] = Offset(
+        imgPt.dx.clamp(0.0, frame.width.toDouble()),
+        imgPt.dy.clamp(0.0, frame.height.toDouble()),
+      );
+    });
+  }
+
+  void _onPanEnd(DragEndDetails details) {
+    setState(() {
+      _activePointIndex = null;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final frame = _frame;
-    final pointCount = _imagePoints.length;
-    final nextLabel = pointCount < 4 ? _labels[pointCount] : null;
 
     return Scaffold(
       backgroundColor: kBackground,
@@ -233,8 +277,9 @@ class _ManualCalibrationScreenState
                           );
                           return GestureDetector(
                             behavior: HitTestBehavior.opaque,
-                            onTapDown: (details) =>
-                                _addPoint(details.localPosition, displaySize),
+                            onPanStart: (details) => _onPanStart(details, displaySize),
+                            onPanUpdate: (details) => _onPanUpdate(details, displaySize),
+                            onPanEnd: (details) => _onPanEnd(details),
                             child: Stack(
                               children: [
                                 // Full-screen image (cover)
@@ -246,40 +291,8 @@ class _ManualCalibrationScreenState
                                   ),
                                 ),
 
-                                // Grid overlay
-                                Positioned.fill(
-                                  child: CustomPaint(
-                                    painter: _GridOverlayPainter(
-                                      imgW: frame.width,
-                                      imgH: frame.height,
-                                      displaySize: displaySize,
-                                    ),
-                                  ),
-                                ),
 
-                                // Corner dots
-                                ..._imagePoints.asMap().entries.map((e) {
-                                  final index = e.key;
-                                  final imgPt = e.value;
-                                  final dp = _imageToDisplay(imgPt, displaySize,
-                                      frame.width, frame.height);
-                                  return Positioned(
-                                    left: dp.dx - 14,
-                                    top: dp.dy - 14,
-                                    child: _CornerDot(
-                                      label: _labels[index],
-                                      color: index == 0
-                                          ? kPrimary
-                                          : index == 1
-                                              ? kSecondary
-                                              : index == 2
-                                                  ? const Color(0xFFFFD080)
-                                                  : const Color(0xFFFF8AB4),
-                                    ),
-                                  );
-                                }),
-
-                                // Board outline once all 4 points are set
+                                // Board outline and drag handles (only when 4 points exist)
                                 if (_imagePoints.length == 4)
                                   Positioned.fill(
                                     child: CustomPaint(
@@ -291,6 +304,36 @@ class _ManualCalibrationScreenState
                                       ),
                                     ),
                                   ),
+
+                                // Corner dots
+                                ..._imagePoints.asMap().entries.map((e) {
+                                  final index = e.key;
+                                  final imgPt = e.value;
+                                  final dp = _imageToDisplay(imgPt, displaySize,
+                                      frame.width, frame.height);
+                                  
+                                  // Make the active point larger
+                                  final bool isActive = _activePointIndex == index;
+                                  final double size = isActive ? 40.0 : 28.0;
+                                  
+                                  return Positioned(
+                                    left: dp.dx - size / 2,
+                                    top: dp.dy - size / 2,
+                                    child: _CornerDot(
+                                      label: _labels[index],
+                                      color: isActive 
+                                          ? Colors.white 
+                                          : (index == 0
+                                              ? kPrimary
+                                              : index == 1
+                                                  ? kSecondary
+                                                  : index == 2
+                                                      ? const Color(0xFFFFD080)
+                                                      : const Color(0xFFFF8AB4)),
+                                      size: size,
+                                    ),
+                                  );
+                                }),
                               ],
                             ),
                           );
@@ -334,9 +377,7 @@ class _ManualCalibrationScreenState
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            nextLabel != null
-                                ? 'Tap corner ${pointCount + 1}/4 — $nextLabel  (${4 - pointCount} remaining)'
-                                : 'All 4 corners selected. Tap SAVE CALIBRATION.',
+                            'Drag the 4 corners to perfectly match the corners of the physical board.',
                             style: GoogleFonts.inter(
                                 fontSize: 12, color: kOnSurfaceVariant),
                           ),
@@ -394,7 +435,7 @@ class _ManualCalibrationScreenState
                         child: OutlinedButton.icon(
                           onPressed: _loading
                               ? null
-                              : () => setState(() => _imagePoints.clear()),
+                              : _loadFrame,
                           icon: const Icon(Icons.refresh_rounded, size: 16),
                           label: Text('RESET',
                               style: GoogleFonts.cinzel(
@@ -443,13 +484,14 @@ class _ManualCalibrationScreenState
 class _CornerDot extends StatelessWidget {
   final String label;
   final Color color;
-  const _CornerDot({required this.label, required this.color});
+  final double size;
+  const _CornerDot({required this.label, required this.color, this.size = 28.0});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 28,
-      height: 28,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         color: color.withOpacity(0.90),
         shape: BoxShape.circle,
@@ -463,11 +505,14 @@ class _CornerDot extends StatelessWidget {
         ],
       ),
       child: Center(
-        child: Text(label,
-            style: GoogleFonts.inter(
-                fontSize: 8,
-                fontWeight: FontWeight.w800,
-                color: Colors.black87)),
+        child: Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: size > 30 ? 12 : 10,
+            fontWeight: FontWeight.w800,
+            color: Colors.black87,
+          ),
+        ),
       ),
     );
   }

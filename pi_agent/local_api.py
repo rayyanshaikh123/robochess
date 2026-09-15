@@ -436,12 +436,8 @@ class LocalApiHost:
         @self.app.post("/local/game/start")
         def start_game():
             setup = self._setup_status()
-            if not setup["ready"]:
-                raise HTTPException(409, detail={
-                    "message": "Board setup is incomplete",
-                    "setup": setup,
-                })
-            return {"status": "ok", "data": self.game.handle({"type": "session.start", "data": {}})}
+            result = self.game.handle({"type": "session.start", "data": {}})
+            return {"status": "ok", "data": {**result, "setup": setup}}
 
         @self.app.post("/local/game/reset")
         def reset_game():

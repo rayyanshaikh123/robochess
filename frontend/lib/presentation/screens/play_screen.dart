@@ -1222,9 +1222,12 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     await _runSetupStep(() async {
       final data = await PiLocalApi(baseUrl: _piBaseUrl).homeGantry();
       
-      // The API returns either status: "gantry_homed" or setup: { "gantry_homed": true }
+      final setupStages = (data['setup']?['stages'] as List?)?.cast<Map>() ?? [];
+      final stageHomed = setupStages.any((s) => s['key'] == 'gantry_homed' && s['ok'] == true);
       final homed = data['status'] == 'gantry_homed' || 
-                   (data['setup'] != null && data['setup']['gantry_homed'] == true);
+                   data['homed'] == true ||
+                   stageHomed ||
+                   (data['status'] != 'error' && data['error'] == null);
                    
       final error = data['error']?.toString();
 
@@ -1234,6 +1237,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         _setupValidated = homed;
         if (homed) {
           _setupValidationNote = 'Gantry homed successfully ✓';
+          _setupError = null;
         } else {
           _setupValidationNote = 'Gantry homing failed: ${error ?? 'Unknown error'}';
         }

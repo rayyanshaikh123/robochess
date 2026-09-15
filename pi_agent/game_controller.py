@@ -30,7 +30,7 @@ class GameController:
             return self._result("error", error="Out-of-order client_seq")
         try:
             result = self._dispatch(message["type"], data)
-        except (SessionError, UnoError, RuntimeError, ValueError, KeyError) as exc:
+        except Exception as exc:
             if self.session and message["type"] == "move.propose":
                 self.session.recover(str(exc))
             result = self._result("error", error=str(exc))

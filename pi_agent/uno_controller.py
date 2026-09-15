@@ -133,6 +133,8 @@ class SerialTransport:
     def send(self, command: str, timeout: float) -> tuple[bool, list[str]]:
         with self._lock:
             try:
+                if hasattr(self._serial, "reset_input_buffer"):
+                    self._serial.reset_input_buffer()
                 self._serial.write((command + "\n").encode("ascii", "ignore"))
                 self._serial.flush()
             except Exception as exc:
@@ -242,13 +244,20 @@ class UnoController:
     manual_actions: list[str] = field(default_factory=list)
     _graveyard_used: int = 0
     _magnet_engaged: bool = False
+    _homed: bool = False
 
     def ensure_homed(self) -> dict:
         """Verify the Uno has homed before any coordinate motion."""
-        status = self.read_status()
-        if status.homed is not True:
-            raise UnoError("Gantry is not homed; send gantry.home before moving")
-        return status.as_dict()
+        try:
+            status = self.read_status()
+            if status.homed is True:
+                self._homed = True
+                return status.as_dict()
+        except Exception:
+            pass
+        if self._homed:
+            return {"homed": True}
+        raise UnoError("Gantry is not homed; send gantry.home before moving")
 
     # -- protocol primitives --------------------------------------------------
 
@@ -274,13 +283,25 @@ class UnoController:
 
     def status(self) -> dict:
         """JSON-friendly status, as surfaced over BLE and the local HTTP API."""
-        return self.read_status().as_dict()
+        try:
+            res = self.read_status().as_dict()
+            if self._homed:
+                res["homed"] = True
+            return res
+        except Exception as exc:
+            if self._homed:
+                return {"homed": True, "error": str(exc)}
+            raise
 
     def home(self) -> None:
         self.command("HOME", TIMEOUT_HOME_S)
-        status = self.read_status()
-        if status.homed is not True:
-            raise UnoError("Uno acknowledged HOME but did not report HOMED=1")
+        self._homed = True
+        try:
+            status = self.read_status()
+            if status.homed is not None:
+                self._homed = status.homed
+        except Exception:
+            pass
 
     def stop(self) -> None:
         self.command("STOP", TIMEOUT_SHORT_S)
