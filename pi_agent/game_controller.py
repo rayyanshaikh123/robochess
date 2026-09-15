@@ -45,7 +45,13 @@ class GameController:
         if kind == "camera.status":
             return self._result("camera_status", calibration=self._load_calibration())
         if kind == "camera.calibrate":
-            calibration = {"camera_index": int(data.get("camera_index", 0)), "rotation": int(data.get("rotation", 0)), "board_orientation": str(data.get("board_orientation", "white_bottom"))}
+            calibration = {
+                "camera_index": int(data.get("camera_index", 0)),
+                "rotation": int(data.get("rotation", 0)),
+                "board_orientation": str(data.get("board_orientation", "white_bottom"))
+            }
+            if "corners" in data:
+                calibration["corners"] = data["corners"]
             self.calibration_path.parent.mkdir(parents=True, exist_ok=True)
             self.calibration_path.write_text(json.dumps(calibration))
             print(f"Camera calibration saved: {calibration}", flush=True)

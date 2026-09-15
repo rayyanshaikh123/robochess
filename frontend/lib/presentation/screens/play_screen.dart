@@ -1241,6 +1241,44 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     });
   }
 
+  Future<void> _setupValidateBoard() async {
+    if (_setupBusy) return;
+    await _runSetupStep(() async {
+      final data = await PiLocalApi(baseUrl: _piBaseUrl).validateStart();
+      final valid = data['valid'] == true;
+      final summary = data['summary'] as Map?;
+      final vision = data['vision'] as Map?;
+      final detections = vision?['last_detections'] as List?;
+      final error = data['error']?.toString();
+
+      if (!mounted) return;
+
+      setState(() {
+        if (valid) {
+          _setupValidationNote = 'Board position verified ✓\n'
+              '${data['pieces_detected'] ?? 32} pieces detected.';
+          if (detections != null) {
+            final confs = detections
+                .map((d) => (d['confidence'] as num).toDouble())
+                .toList();
+            if (confs.isNotEmpty) {
+              final avgConf = (confs.reduce((a, b) => a + b) / confs.length);
+              _setupValidationNote = '$_setupValidationNote\n'
+                  'Avg Confidence: ${(avgConf * 100).toStringAsFixed(1)}%';
+            }
+          }
+        } else {
+          final missing = summary?['missing'] ?? 0;
+          final extra = summary?['extra'] ?? 0;
+          final wrong = summary?['wrong_color'] ?? 0;
+          _setupValidationNote = error ??
+              'Board position incorrect ❌\n'
+                  'Missing: $missing | Extra: $extra | Wrong Color: $wrong';
+        }
+      });
+    });
+  }
+
   Future<void> _startMatchFromSetup(DeviceModel? device) async {
     final mode = _setupOpponent == _OpponentType.bot
         ? 'human_vs_ai'
@@ -2162,6 +2200,29 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: FilledButton.icon(
+                        onPressed: _setupBusy ? null : _setupValidateBoard,
+                        icon: _setupBusy
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                    color: Colors.white, strokeWidth: 2))
+                            : const Icon(Icons.check_circle_outline,
+                                size: 16),
+                        label: Text('VALIDATE',
+                            style: GoogleFonts.inter(
+                                fontSize: 10, fontWeight: FontWeight.w700)),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: kSecondary,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          minimumSize: Size.zero,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton.icon(
                         onPressed: _setupBusy ? null : _setupHomeGantry,
                         icon: _setupBusy
                             ? const SizedBox(
@@ -2171,7 +2232,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                                     color: Colors.white, strokeWidth: 2))
                             : const Icon(Icons.home_rounded,
                                 size: 16),
-                        label: Text('HOME GANTRY',
+                        label: Text('HOME',
                             style: GoogleFonts.inter(
                                 fontSize: 10, fontWeight: FontWeight.w700)),
                         style: FilledButton.styleFrom(
