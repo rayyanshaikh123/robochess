@@ -328,7 +328,8 @@ class GantryController:
                 if self._abort.is_set():
                     break
                 try:
-                    chunk = self._ser.read(256)
+                    available = getattr(self._ser, "in_waiting", 0)
+                    chunk = self._ser.read(available if available > 0 else 1)
                 except Exception as exc:
                     self.link_lost("read", exc)
                     raise GantryError(self.last_error)

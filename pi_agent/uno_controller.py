@@ -50,16 +50,15 @@ TIMEOUT_MOVE_S = 45.0     # MOVEXY / JOG
 TIMEOUT_HOME_S = 90.0     # HOME
 
 # Python-side settle after switching the coil. The firmware already blocks for
-# cfg.magDwellMs (default 150 ms); this adds only a tiny extra guard.
-# Reduced from 0.25 s — the firmware dwell is sufficient for piece pickup/release.
-MAGNET_SETTLE_S = 0.05
+# cfg.magDwellMs; zero additional python dwell avoids unnecessary delays.
+MAGNET_SETTLE_S = 0.0
 
-# Speed profile pushed to the firmware after the first successful homing.
+# Speed profile pushed to the firmware after homing.
 # These override the EEPROM defaults (80 mm/s / 1000 mm/s² / 150 ms dwell) and
 # are saved to EEPROM, so they persist across power cycles.
 FIRMWARE_MAX_SPEED  = 160.0   # mm/s  — well below stall; raise if motion is confident
 FIRMWARE_MAX_ACCEL  = 2500.0  # mm/s² — snappy ramp; lower if steps skip on start
-FIRMWARE_MAG_DWELL  = 80      # ms    — replaces 150 ms; still enough for most coils
+FIRMWARE_MAG_DWELL  = 50      # ms    — snappy coil dwell; ample for MOSFET coil pickup/release
 
 STATUS_RE = re.compile(
     r"X=(-?\d+(?:\.\d+)?)\s+Y=(-?\d+(?:\.\d+)?)"
@@ -153,7 +152,8 @@ class SerialTransport:
             buffer = b""
             while time.monotonic() < deadline:
                 try:
-                    chunk = self._serial.read(256)
+                    available = getattr(self._serial, "in_waiting", 0)
+                    chunk = self._serial.read(available if available > 0 else 1)
                 except Exception as exc:
                     raise UnoError(f"Uno read failed ({command}): {exc}") from exc
                 if not chunk:
@@ -327,6 +327,7 @@ class UnoController:
     def home(self) -> None:
         self.command("HOME", TIMEOUT_HOME_S)
         self._homed = True
+        self._apply_speed_config()
         try:
             status = self.read_status()
             if status.homed is not None:
@@ -345,7 +346,8 @@ class UnoController:
         self.command(f"MAG {'ON' if on else 'OFF'}", TIMEOUT_SHORT_S)
         if not on:
             self._magnet_engaged = False
-        time.sleep(MAGNET_SETTLE_S)
+        if MAGNET_SETTLE_S > 0:
+            time.sleep(MAGNET_SETTLE_S)
 
     def move_to(self, x: float, y: float) -> None:
         if not self.geometry.within_limits(x, y):
@@ -379,11 +381,8 @@ class UnoController:
                     )
                 else:
                     raise UnoError(f"Unknown motion op {kind!r}")
-            # Re-home against the limit switches after every move.  This zeroes
-            # any belt-slip that accumulated during the drag and makes the next
-            # move start from a known-true coordinate instead of a drifting
-            # estimate.  The two-second homing cost is worth the reliability.
-            self.home()
+            # Park away from the board after the move finishes
+            self.park()
         except UnoError:
             self._release_quietly()
             raise

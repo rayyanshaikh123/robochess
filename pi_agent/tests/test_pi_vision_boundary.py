@@ -25,6 +25,32 @@ class PiVisionBoundaryTests(unittest.TestCase):
         self.assertEqual(normalize_class_name("r"), "black_rook")
         self.assertEqual(normalize_class_name("White Queen"), "white_queen")
 
+    def test_capture_move_detected_in_state_and_occupancy(self):
+        recognizer = BoardRecognizer.__new__(BoardRecognizer)
+        # 1. e4 d5, White to move, exd5 capture available
+        board = chess.Board("rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2")
+        move_capture = chess.Move.from_uci("e4d5")
+        board_after = board.copy()
+        board_after.push(move_capture)
+
+        # Perfect state match
+        state = recognizer.board_to_state_dict(board_after)
+        move, score, gap = recognizer.infer_move_from_state(board, state)
+        self.assertEqual(move, move_capture)
+        self.assertEqual(score, 64)
+
+        # Occupancy match (gap is 1 between capture and alternative quiet move e4e5)
+        occ = recognizer.board_to_occupancy_state(board_after)
+        move_occ, score_occ, gap_occ = recognizer.infer_move_from_occupancy(board, occ)
+        self.assertEqual(move_occ, move_capture)
+        self.assertEqual(score_occ, 64)
+
+        # Noisy state match (d5 detected as generic "pawn" without color prefix)
+        state_noisy = state.copy()
+        state_noisy["d5"] = "pawn"
+        move_noisy, _, _ = recognizer.infer_move_from_state(board, state_noisy)
+        self.assertEqual(move_noisy, move_capture)
+
     def test_legal_move_inference_stays_in_pi_runtime(self):
         recognizer = BoardRecognizer.__new__(BoardRecognizer)
         board = chess.Board()

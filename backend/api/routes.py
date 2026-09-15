@@ -856,6 +856,14 @@ async def analyze_move_snapshot(
             min_score=settings.move_match_min_score,
             min_gap=settings.move_match_min_gap,
         )
+        if move is None:
+            curr_occ = recognizer.to_occupancy_state(stable_state)
+            move, best_score, second_best = recognizer.infer_move_from_occupancy(
+                manager.board,
+                curr_occ,
+                min_score=settings.move_match_min_score,
+                min_gap=1,
+            )
 
     detections = int(meta.get("detections", 0))
     pieces_detected = sum(1 for v in stable_state.values() if v is not None)
@@ -1081,6 +1089,14 @@ async def check_auto_detect_ready(background_tasks: BackgroundTasks, db=Depends(
                 min_score=manager.settings.move_match_min_score,
                 min_gap=manager.settings.move_match_min_gap,
             )
+            if move is None:
+                curr_occ = recognizer.to_occupancy_state(stable_state)
+                move, best_score, second_best = recognizer.infer_move_from_occupancy(
+                    manager.board,
+                    curr_occ,
+                    min_score=manager.settings.move_match_min_score,
+                    min_gap=1,
+                )
         
         detections = int(meta.get("detections", 0))
         

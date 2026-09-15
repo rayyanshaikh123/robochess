@@ -139,9 +139,13 @@ def parse_piece_label(label: Optional[str]) -> tuple[Optional[str], Optional[str
         return None, None
     cleaned = normalize_class_name(str(label))
     parts = cleaned.split("_")
-    if len(parts) < 2:
-        return None, None
+    if len(parts) == 1:
+        return None, parts[0]
     color = parts[0]
+    if color in ("w", "white"):
+        color = "white"
+    elif color in ("b", "black"):
+        color = "black"
     type_name = "_".join(parts[1:])
     return color, type_name
 
@@ -783,7 +787,7 @@ class BoardRecognizer:
         detections: list[dict],
         frame_w: int,
         frame_h: int,
-        min_confidence: float = 0.60,
+        min_confidence: float = 0.10,
     ) -> dict[str, Optional[str]]:
         """Convert detections to a square->piece-name dict with confidence filtering."""
         state: dict[str, Optional[str]] = {sq: None for sq in ALL_SQUARES}
@@ -895,9 +899,9 @@ class BoardRecognizer:
             return False
         color_a, type_a = parse_piece_label(piece_a)
         color_b, type_b = parse_piece_label(piece_b)
-        if not color_a or not color_b or not type_a or not type_b:
+        if not type_a or not type_b:
             return False
-        if color_a != color_b:
+        if color_a and color_b and color_a != color_b:
             return False
         return type_a == type_b
 
@@ -950,7 +954,10 @@ class BoardRecognizer:
         if best_move is None:
             return None, best_score, second_best
 
-        if best_score < min_score or (best_score - second_best) < min_gap:
+        is_capture = prev_board.is_capture(best_move)
+        effective_min_gap = 1 if (is_capture or best_score >= 64) else min(min_gap, 2)
+
+        if best_score < min_score or (best_score - second_best) < effective_min_gap:
             return None, best_score, second_best
 
         return best_move, best_score, second_best
@@ -982,7 +989,13 @@ class BoardRecognizer:
         if best_move is None:
             return None, best_score, second_best
 
-        if best_score < min_score or (best_score - second_best) < min_gap:
+        # In occupancy matching, capture moves have a maximum theoretical gap of 1
+        # against alternative quiet moves from the same piece (since destination was
+        # already occupied). Require gap of 1 for captures and perfect matches.
+        is_capture = prev_board.is_capture(best_move)
+        effective_min_gap = 1 if (is_capture or best_score >= 64) else min(min_gap, 2)
+
+        if best_score < min_score or (best_score - second_best) < effective_min_gap:
             return None, best_score, second_best
 
         return best_move, best_score, second_best

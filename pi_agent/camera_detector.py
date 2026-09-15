@@ -332,13 +332,13 @@ class PiCameraDetector:
                 detections, warped.shape[1], warped.shape[0], self.confidence
             )
             move, score, gap = self.recognizer.infer_move_from_state(
-                session.board, state, min_score=45, min_gap=2
+                session.board, state, min_score=45, min_gap=1
             )
             if move is None:
                 # Fallback to occupancy matching
                 occupancy = self.recognizer.to_occupancy_state(state)
                 move, score, gap = self.recognizer.infer_move_from_occupancy(
-                    session.board, occupancy, min_score=45, min_gap=2
+                    session.board, occupancy, min_score=45, min_gap=1
                 )
             self.last_error = None
             return [move.uci()] if move is not None else []
@@ -385,7 +385,8 @@ class PiCameraDetector:
         prev_gray = None
         while not self._hand_stop_event.is_set():
             session = self.active_session
-            if session is None or session.is_over:
+            session_is_over = bool(getattr(session, "is_over", False)) if session else True
+            if session is None or session_is_over:
                 time.sleep(0.2)
                 continue
             if not self.calibrated or not self.model_available:
@@ -446,7 +447,8 @@ class PiCameraDetector:
         """Triggered when the hand departs after making a move."""
         import time
         session = self.active_session
-        if session is None or session.is_over:
+        session_is_over = bool(getattr(session, "is_over", False)) if session else True
+        if session is None or session_is_over:
             return
         # Brief pause to let camera exposure stabilize after hand leaves
         time.sleep(0.2)

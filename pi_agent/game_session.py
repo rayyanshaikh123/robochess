@@ -41,6 +41,10 @@ class GameSession:
         except ValueError as exc:
             raise SessionError(f"Invalid initial FEN: {exc}") from exc
 
+    @property
+    def is_over(self) -> bool:
+        return self.phase == SessionPhase.FINISHED or (self.board is not None and self.board.is_game_over())
+
     def confirm_setup(self) -> None:
         if self.phase not in {SessionPhase.IDLE, SessionPhase.RECOVERY}:
             raise SessionError("Setup can only be confirmed before a game starts or during recovery")
