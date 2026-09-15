@@ -33,6 +33,14 @@ class PiCameraDetector:
         self._lock = threading.Lock()
         self.recognizer: Any = None
         self.last_error: str | None = None
+        self.hand_present: bool = False
+        self.hand_last_seen: float = 0.0
+        self.last_trigger_time: float = 0.0
+        self.pending_auto_move: str | None = None
+        self.pending_auto_san: str | None = None
+        self.active_session: Any = None
+        self._hand_stop_event = threading.Event()
+        self._hand_thread: threading.Thread | None = None
         self._load_recognizer()
 
     def _load_recognizer(self) -> None:
@@ -99,7 +107,9 @@ class PiCameraDetector:
             self.recognizer.calibrate([(float(p[0]), float(p[1])) for p in corners])
             
         orientation = calibration.get("board_orientation", "white_bottom")
-        self.recognizer.is_flipped = (orientation == "black_bottom")
+        rotation_cw = self._rotation_cw()
+        # _warp applies rotation_cw. Only set is_flipped if unrotated and black_bottom.
+        self.recognizer.is_flipped = (orientation == "black_bottom" and rotation_cw == 0)
 
     def _video_nodes(self) -> list[str]:
         return sorted(glob.glob("/dev/video*"),
@@ -322,10 +332,135 @@ class PiCameraDetector:
                 detections, warped.shape[1], warped.shape[0], self.confidence
             )
             move, score, gap = self.recognizer.infer_move_from_state(
-                session.board, state, min_score=60, min_gap=4
+                session.board, state, min_score=45, min_gap=2
             )
+            if move is None:
+                # Fallback to occupancy matching
+                occupancy = self.recognizer.to_occupancy_state(state)
+                move, score, gap = self.recognizer.infer_move_from_occupancy(
+                    session.board, occupancy, min_score=45, min_gap=2
+                )
             self.last_error = None
             return [move.uci()] if move is not None else []
         except Exception as exc:
             self.last_error = str(exc)
             return []
+
+    def start_hand_monitoring(self, session=None) -> None:
+        """Start background hand motion monitoring loop."""
+        if session is not None:
+            self.active_session = session
+        if self._hand_thread is not None and self._hand_thread.is_alive():
+            return
+        self._hand_stop_event.clear()
+        self._hand_thread = threading.Thread(
+            target=self._hand_loop, daemon=True, name="pi-hand-monitor"
+        )
+        self._hand_thread.start()
+
+    def stop_hand_monitoring(self) -> None:
+        """Stop background hand motion monitoring loop."""
+        self._hand_stop_event.set()
+        if self._hand_thread is not None and self._hand_thread.is_alive():
+            self._hand_thread.join(timeout=1.0)
+        self._hand_thread = None
+
+    def _hand_loop(self) -> None:
+        """Continuously check for hand motion and trigger detection on hand departure.
+        Matches robochess_control.py / robochess_tk.py _hand_loop behavior.
+        """
+        import time
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            return
+
+        MOTION_DIFF_THRESHOLD = 20
+        MOTION_BLUR = 7
+        MOTION_RATIO_TRIGGER = 0.02
+        HAND_ABSENCE_SECONDS = 0.35
+        HAND_TRIGGER_COOLDOWN = 0.8
+
+        prev_gray = None
+        while not self._hand_stop_event.is_set():
+            session = self.active_session
+            if session is None or session.is_over:
+                time.sleep(0.2)
+                continue
+            if not self.calibrated or not self.model_available:
+                time.sleep(0.2)
+                continue
+
+            try:
+                frame = self.capture_frame()
+            except Exception:
+                time.sleep(0.2)
+                continue
+
+            if frame is None:
+                time.sleep(0.1)
+                continue
+
+            cal = self._read_calibration()
+            corners = cal.get("corners")
+            roi = frame
+            if corners and len(corners) == 4:
+                xs = [int(p[0]) for p in corners]
+                ys = [int(p[1]) for p in corners]
+                x1 = max(0, min(xs))
+                x2 = min(frame.shape[1], max(xs))
+                y1 = max(0, min(ys))
+                y2 = min(frame.shape[0], max(ys))
+                if x2 - x1 > 10 and y2 - y1 > 10:
+                    roi = frame[y1:y2, x1:x2]
+
+            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            if MOTION_BLUR > 0:
+                gray = cv2.GaussianBlur(gray, (MOTION_BLUR, MOTION_BLUR), 0)
+
+            if prev_gray is None or prev_gray.shape != gray.shape:
+                prev_gray = gray
+                time.sleep(0.1)
+                continue
+
+            diff = cv2.absdiff(prev_gray, gray)
+            _, thresh = cv2.threshold(diff, MOTION_DIFF_THRESHOLD, 255, cv2.THRESH_BINARY)
+            motion_ratio = float(np.count_nonzero(thresh)) / float(thresh.size)
+            prev_gray = gray
+            now = time.time()
+
+            if motion_ratio >= MOTION_RATIO_TRIGGER:
+                self.hand_present = True
+                self.hand_last_seen = now
+            else:
+                if self.hand_present and (now - self.hand_last_seen) >= HAND_ABSENCE_SECONDS:
+                    if (now - self.last_trigger_time) >= HAND_TRIGGER_COOLDOWN:
+                        self.last_trigger_time = now
+                        self._on_hand_left()
+                    self.hand_present = False
+
+            time.sleep(0.1)
+
+    def _on_hand_left(self) -> None:
+        """Triggered when the hand departs after making a move."""
+        import time
+        session = self.active_session
+        if session is None or session.is_over:
+            return
+        # Brief pause to let camera exposure stabilize after hand leaves
+        time.sleep(0.2)
+        candidates = self.detect_candidates(session)
+        if candidates:
+            move_uci = candidates[0]
+            san = move_uci
+            try:
+                import chess
+                m = chess.Move.from_uci(move_uci)
+                san = session.board.san(m)
+            except Exception:
+                pass
+            with self._lock:
+                self.pending_auto_move = move_uci
+                self.pending_auto_san = san
+

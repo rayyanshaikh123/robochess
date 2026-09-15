@@ -78,7 +78,7 @@ class SetupReadiness:
             SetupStage(
                 "starting_position_valid",
                 self._starting_position_valid,
-                False,
+                True,
                 "Starting position is valid" if self._starting_position_valid else "Validate the pieces in the starting position",
                 {},
             ),

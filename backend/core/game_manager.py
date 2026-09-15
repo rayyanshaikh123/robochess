@@ -54,17 +54,22 @@ class GameManager:
         return cls._instance
 
     def _open_camera(self, camera_index: int, width: int, height: int) -> Optional[cv2.VideoCapture]:
+        indices = [camera_index] + [i for i in [0, 1, 2] if i != camera_index]
         backends = [cv2.CAP_ANY]
         if os.name == "nt":
             backends = [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]
-        for backend in backends:
-            capture = cv2.VideoCapture(camera_index, backend)
-            if capture.isOpened():
-                capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-                capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-                capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                return capture
-            capture.release()
+        for idx in indices:
+            for backend in backends:
+                capture = cv2.VideoCapture(idx, backend)
+                if capture.isOpened():
+                    capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                    capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    ok, frame = capture.read()
+                    if ok and frame is not None and frame.size > 0:
+                        self.settings.camera_index = idx
+                        return capture
+                capture.release()
         return None
 
     def _load_engine(self, path: str) -> Optional[chess.engine.SimpleEngine]:
@@ -76,12 +81,23 @@ class GameManager:
             return None
 
     def capture_frame(self):
-        if self.camera is None or not self.camera.isOpened():
-            raise RuntimeError("Camera not ready")
-        ok, frame = self.camera.read()
-        if not ok or frame is None or frame.size == 0:
-            raise RuntimeError("Failed to capture frame")
-        return frame
+        with self.state_lock:
+            if self.camera is None or not self.camera.isOpened():
+                self.camera = self._open_camera(self.settings.camera_index, self.settings.capture_width, self.settings.capture_height)
+                if self.camera is None or not self.camera.isOpened():
+                    raise RuntimeError("Camera not ready")
+            ok, frame = self.camera.read()
+            if not ok or frame is None or frame.size == 0:
+                try:
+                    self.camera.release()
+                except Exception:
+                    pass
+                self.camera = self._open_camera(self.settings.camera_index, self.settings.capture_width, self.settings.capture_height)
+                if self.camera is not None and self.camera.isOpened():
+                    ok, frame = self.camera.read()
+                if not ok or frame is None or frame.size == 0:
+                    raise RuntimeError("Failed to capture frame")
+            return frame
 
     def reset_game(self, keep_calibration: bool = True) -> None:
         with self.state_lock:

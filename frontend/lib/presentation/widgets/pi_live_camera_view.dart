@@ -9,8 +9,14 @@ import '../../data/repositories/pi_local_api.dart';
 class PiLiveCameraView extends StatefulWidget {
   final String baseUrl;
   final VoidCallback? onCalibrate;
+  final VoidCallback? onFlip;
 
-  const PiLiveCameraView({super.key, required this.baseUrl, this.onCalibrate});
+  const PiLiveCameraView({
+    super.key,
+    required this.baseUrl,
+    this.onCalibrate,
+    this.onFlip,
+  });
 
   @override
   State<PiLiveCameraView> createState() => _PiLiveCameraViewState();
@@ -23,6 +29,7 @@ class _PiLiveCameraViewState extends State<PiLiveCameraView> {
   Uint8List? _frame;
   String? _error;
   bool _polling = false;
+  bool _flipping = false;
 
   @override
   void initState() {
@@ -95,6 +102,32 @@ class _PiLiveCameraViewState extends State<PiLiveCameraView> {
     }
   }
 
+  Future<void> _flipCamera() async {
+    if (_flipping) return;
+    setState(() => _flipping = true);
+    try {
+      await _api.flipCalibration();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Board camera flipped 180°'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+      widget.onFlip?.call();
+      _connect();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to flip: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _flipping = false);
+    }
+  }
+
   @override
   void dispose() {
     _subscription?.cancel();
@@ -132,9 +165,25 @@ class _PiLiveCameraViewState extends State<PiLiveCameraView> {
                   ],
                 ),
               ),
-              IconButton(onPressed: _connect, icon: const Icon(Icons.refresh)),
+              IconButton(
+                tooltip: 'Flip orientation (180°)',
+                onPressed: _flipping ? null : _flipCamera,
+                icon: _flipping
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.screen_rotation_rounded),
+              ),
+              IconButton(
+                tooltip: 'Refresh stream',
+                onPressed: _connect,
+                icon: const Icon(Icons.refresh),
+              ),
               if (widget.onCalibrate != null)
                 IconButton(
+                    tooltip: 'Calibrate corners',
                     onPressed: widget.onCalibrate,
                     icon: const Icon(Icons.crop_free)),
             ],

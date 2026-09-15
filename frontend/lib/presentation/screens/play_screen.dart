@@ -478,8 +478,13 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   Future<void> _checkAutoDetectReady() async {
     if (_snapshotDetecting) return;
     try {
-      final result = await ref.read(boardRepositoryProvider).checkAutoDetect();
-      final data = result['data'] as Map<String, dynamic>? ?? {};
+      final Map<String, dynamic> result;
+      if (_gameUsesBoard && _piBaseUrl.isNotEmpty) {
+        result = await PiLocalApi(baseUrl: _piBaseUrl).autoDetectReady();
+      } else {
+        result = await ref.read(boardRepositoryProvider).checkAutoDetect();
+      }
+      final data = result['data'] as Map<String, dynamic>? ?? result;
       final ready = data['ready'] == true;
       final reason = data['reason']?.toString() ?? '';
 
@@ -488,32 +493,50 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         final uci = data['uci']?.toString();
         final san = data['san']?.toString();
         if (uci != null && uci.isNotEmpty) {
+          final applied = _applyUciMove(uci);
           setState(() {
-            _snapshotNote = 'Auto-detected: $san ($uci)';
+            _snapshotNote = 'Auto-detected: ${san ?? uci} ($uci)';
           });
 
-          try {
-            final aiResult = await ref.read(boardRepositoryProvider).aiMove();
-            final aiData = aiResult['data'] as Map<String, dynamic>? ?? {};
-            final aiUci = aiData['uci']?.toString();
-            if (aiUci != null && aiUci.isNotEmpty && mounted) {
-              setState(() {
-                _snapshotNote = 'Auto-detected: $san ($uci). Engine: $aiUci';
-              });
-            }
-          } catch (_) {
+          // Check if engine move was provided by Pi or needs to be requested
+          final engineData = data['engine_move'] as Map<String, dynamic>?;
+          final aiUci = engineData?['uci']?.toString();
+          if (aiUci != null && aiUci.isNotEmpty) {
+            _applyUciMove(aiUci);
             if (mounted) {
               setState(() {
-                _snapshotNote =
-                    'Auto-detected: $san ($uci). Engine reply failed.';
+                _snapshotNote = 'Auto-detected: ${san ?? uci}. Engine: $aiUci';
               });
+            }
+          } else if (!_gameUsesBoard || _piBaseUrl.isEmpty) {
+            try {
+              final aiResult = await ref.read(boardRepositoryProvider).aiMove();
+              final aiData = aiResult['data'] as Map<String, dynamic>? ?? {};
+              final fetchedAiUci = aiData['uci']?.toString();
+              if (fetchedAiUci != null && fetchedAiUci.isNotEmpty && mounted) {
+                _applyUciMove(fetchedAiUci);
+                setState(() {
+                  _snapshotNote = 'Auto-detected: ${san ?? uci}. Engine: $fetchedAiUci';
+                });
+              }
+            } catch (_) {
+              if (mounted) {
+                setState(() {
+                  _snapshotNote =
+                      'Auto-detected: ${san ?? uci} ($uci). Engine reply failed.';
+                });
+              }
             }
           }
 
           await _fetchLiveFrame();
         }
       } else if (reason.isNotEmpty && mounted) {
-        setState(() => _snapshotNote = reason);
+        setState(() {
+          _snapshotNote = reason == 'hand_present'
+              ? 'Hand detected. Move away to detect.'
+              : reason;
+        });
       }
     } catch (err) {
       // Silently fail on auto-detect check errors
@@ -529,9 +552,14 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     try {
       const maxAttempts = 8;
       for (int attempt = 0; attempt < maxAttempts; attempt++) {
-        final result =
-            await ref.read(boardRepositoryProvider).analyzeAndReplySnapshot();
-        final data = result['data'] as Map<String, dynamic>? ?? {};
+        final Map<String, dynamic> result;
+        if (_gameUsesBoard && _piBaseUrl.isNotEmpty) {
+          result = await PiLocalApi(baseUrl: _piBaseUrl).analyzeAndReply();
+        } else {
+          result =
+              await ref.read(boardRepositoryProvider).analyzeAndReplySnapshot();
+        }
+        final data = result['data'] as Map<String, dynamic>? ?? result;
         final humanData = data['human_move'] as Map<String, dynamic>? ?? data;
         final engineData = data['engine_move'] as Map<String, dynamic>?;
         final status = humanData['analysis_status']?.toString() ?? 'unknown';
@@ -631,8 +659,13 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       _inGameValidationNote = null;
     });
     try {
-      final result = await ref.read(boardRepositoryProvider).validateStart();
-      final data = result['data'] as Map<String, dynamic>? ?? {};
+      final Map<String, dynamic> result;
+      if (_gameUsesBoard && _piBaseUrl.isNotEmpty) {
+        result = await PiLocalApi(baseUrl: _piBaseUrl).validateStart();
+      } else {
+        result = await ref.read(boardRepositoryProvider).validateStart();
+      }
+      final data = result['data'] as Map<String, dynamic>? ?? result;
       final valid = data['valid'] == true;
       final detected = data['pieces_detected'] as int? ?? 0;
       final summary = data['summary'] as Map<String, dynamic>? ?? {};
@@ -668,7 +701,11 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       _inGameValidationNote = null;
     });
     try {
-      await ref.read(boardRepositoryProvider).forceValidate();
+      if (_gameUsesBoard && _piBaseUrl.isNotEmpty) {
+        await PiLocalApi(baseUrl: _piBaseUrl).forceValidate();
+      } else {
+        await ref.read(boardRepositoryProvider).forceValidate();
+      }
       if (!mounted) return;
       setState(() {
         _inGameValidated = true;
@@ -3089,6 +3126,11 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           PiLiveCameraView(
             baseUrl: _piBaseUrl,
             onCalibrate: _manualPiCalibrate,
+            onFlip: () {
+              setState(() {
+                _boardFlipped = !_boardFlipped;
+              });
+            },
           ),
           const SizedBox(height: 12),
           Row(

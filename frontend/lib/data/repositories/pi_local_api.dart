@@ -271,4 +271,11 @@ class PiLocalApi {
     return Map<String, dynamic>.from(
         (jsonDecode(response.body) as Map)['data'] as Map);
   }
+
+  Future<Map<String, dynamic>> flipCalibration() async {
+    final response = await client
+        .post(_uri('/local/calibration/flip'))
+        .timeout(_requestTimeout);
+    return _data(response, 'Pi flip calibration failed');
+  }
 }

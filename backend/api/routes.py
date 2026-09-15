@@ -434,10 +434,29 @@ def calibrate_manual(payload: ManualCalibrationRequest) -> ApiResponse:
         return error("Exactly 4 corner points required")
     try:
         manager.recognizer.calibrate([(float(c[0]), float(c[1])) for c in corners])
+        rot = payload.rotation_cw or 0
+        if payload.board_orientation == "black_bottom" and rot == 0:
+            rot = 180
+        manager.recognizer.rotation_cw = rot
+        manager.recognizer.is_flipped = (payload.board_orientation == "black_bottom" and rot == 0)
         manager.calibrated = True
+        if manager.prev_state is None:
+            manager.prev_state = manager.recognizer.expected_initial_state()
     except Exception as exc:
         return error("Manual calibration failed", {"detail": str(exc)})
-    return ok("Manual calibration complete", {"corners": corners})
+    return ok("Manual calibration complete", {"corners": corners, "rotation_cw": getattr(manager.recognizer, "rotation_cw", 0)})
+
+
+@router.post("/calibrate/flip", response_model=ApiResponse)
+def calibrate_flip() -> ApiResponse:
+    manager = GameManager.get_instance()
+    if not manager.calibrated or manager.recognizer is None:
+        return error("Board not calibrated")
+    curr_rot = getattr(manager.recognizer, "rotation_cw", 0) or 0
+    new_rot = (curr_rot + 180) % 360
+    manager.recognizer.rotation_cw = new_rot
+    manager.recognizer.is_flipped = False
+    return ok(f"Board flipped to {new_rot}°", {"rotation_cw": new_rot})
 
 
 @router.get("/calibrate/frame", response_model=ApiResponse)
@@ -1306,12 +1325,14 @@ async def start_game(payload: GameStartRequest, background_tasks: BackgroundTask
 
     # Stop any existing auto-detect
     manager.stop_auto_detect()
+    if manager.prev_state is None and manager.recognizer is not None:
+        manager.prev_state = manager.recognizer.expected_initial_state()
     
     game = await create_game(db, manager.get_fen(), players=payload.players)
     manager.current_game_id = game.get("game_id")
     
-    # Start auto-detect if using a board (players list provided)
-    if payload.players and len(payload.players) > 0:
+    # Start auto-detect if using a board or if calibrated
+    if (payload.players and len(payload.players) > 0) or manager.calibrated:
         manager.start_auto_detect()
 
     # If playing vs AI and user is Black, AI needs to make the first move (White)

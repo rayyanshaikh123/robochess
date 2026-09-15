@@ -492,10 +492,18 @@ class BoardRecognizer:
     def warp_frame(self, frame: np.ndarray) -> np.ndarray:
         """Apply perspective transform to get a top-down board view."""
         if self.warp_matrix is not None:
-            return cv2.warpPerspective(frame, self.warp_matrix,
-                                       (self.BOARD_SIZE, self.BOARD_SIZE))
-        # Fall back to simple resize if not calibrated
-        return cv2.resize(frame, (self.BOARD_SIZE, self.BOARD_SIZE))
+            warped = cv2.warpPerspective(frame, self.warp_matrix,
+                                         (self.BOARD_SIZE, self.BOARD_SIZE))
+        else:
+            warped = cv2.resize(frame, (self.BOARD_SIZE, self.BOARD_SIZE))
+        rot = getattr(self, "rotation_cw", 0) or 0
+        if rot == 180 or (getattr(self, "is_flipped", False) and rot == 0):
+            warped = cv2.rotate(warped, cv2.ROTATE_180)
+        elif rot == 90:
+            warped = cv2.rotate(warped, cv2.ROTATE_90_CLOCKWISE)
+        elif rot == 270:
+            warped = cv2.rotate(warped, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        return warped
 
     # ─── Detection ────────────────────────────────────────────
 
@@ -723,7 +731,8 @@ class BoardRecognizer:
         sq_h = frame_h / 8.0
         file_idx = int(cx // sq_w)
         rank_idx = 7 - int(cy // sq_h)
-        if getattr(self, "is_flipped", False):
+        rot = getattr(self, "rotation_cw", 0) or 0
+        if getattr(self, "is_flipped", False) and rot == 0:
             file_idx = 7 - file_idx
             rank_idx = 7 - rank_idx
         if 0 <= file_idx <= 7 and 0 <= rank_idx <= 7:

@@ -109,6 +109,8 @@ class ModelLoadRequest(BaseModel):
 
 class ManualCalibrationRequest(BaseModel):
     corners: list[list[float]]
+    board_orientation: Optional[str] = "white_bottom"
+    rotation_cw: Optional[int] = 0
 
 
 class FriendRequestCreate(BaseModel):

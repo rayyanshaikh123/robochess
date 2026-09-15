@@ -20,6 +20,7 @@ from pi_agent.setup_state import SetupReadiness
 class CalibrationRequest(BaseModel):
     corners: list[list[float]] = Field(min_length=4, max_length=4)
     board_orientation: str = "white_bottom"
+    rotation_cw: int = 0
 
 
 class MoveRequest(BaseModel):
@@ -305,11 +306,34 @@ class LocalApiHost:
                 raise HTTPException(422, "Calibration corners must be unique")
             if payload.board_orientation not in {"white_bottom", "black_bottom"}:
                 raise HTTPException(422, "Invalid board orientation")
-            data = {"corners": corners, "board_orientation": payload.board_orientation}
+            rotation = payload.rotation_cw
+            if payload.board_orientation == "black_bottom" and rotation == 0:
+                rotation = 180
+            data = {
+                "corners": corners,
+                "board_orientation": payload.board_orientation,
+                "rotation_cw": rotation,
+                "method": "manual",
+            }
             self._save_calibration(data)
             if self.detector is not None:
                 self.detector.last_error = None
+                self.detector._apply_calibration()
             return {"status": "ok", "message": "Calibration saved", "data": data}
+
+        @self.app.post("/local/calibration/flip")
+        def flip_calibration():
+            data = self._read_calibration()
+            if not data or "corners" not in data:
+                raise HTTPException(404, "Board is not calibrated")
+            curr_rot = int(data.get("rotation_cw", 0) or 0)
+            new_rot = (curr_rot + 180) % 360
+            data["rotation_cw"] = new_rot
+            data["board_orientation"] = "black_bottom" if new_rot == 180 else "white_bottom"
+            self._save_calibration(data)
+            if self.detector is not None:
+                self.detector._apply_calibration()
+            return {"status": "ok", "message": f"Board flipped to {new_rot}°", "data": data}
 
         @self.app.post("/local/calibration/auto")
         def auto_calibration():
@@ -437,14 +461,24 @@ class LocalApiHost:
         def start_game():
             setup = self._setup_status()
             result = self.game.handle({"type": "session.start", "data": {}})
+            if self.detector is not None:
+                self.detector.pending_auto_move = None
+                self.detector.pending_auto_san = None
+                self.detector.start_hand_monitoring(self.game.session)
             return {"status": "ok", "data": {**result, "setup": setup}}
 
         @self.app.post("/local/game/reset")
         def reset_game():
+            if self.detector is not None:
+                self.detector.pending_auto_move = None
+                self.detector.pending_auto_san = None
             return {"status": "ok", "data": self.game.handle({"type": "session.reset", "data": {}})}
 
         @self.app.post("/local/game/move")
         def game_move(payload: MoveRequest):
+            if self.detector is not None:
+                self.detector.pending_auto_move = None
+                self.detector.pending_auto_san = None
             return {"status": "ok", "data": self.game.handle({
                 "type": "move.propose",
                 "data": {"uci": payload.uci, "expected_version": payload.expected_version},
@@ -452,13 +486,51 @@ class LocalApiHost:
 
         @self.app.post("/local/game/undo")
         def undo_game():
+            if self.detector is not None:
+                self.detector.pending_auto_move = None
+                self.detector.pending_auto_san = None
             return {"status": "ok", "data": self.game.handle({"type": "session.undo", "data": {}})}
 
         @self.app.get("/local/move/auto-detect-ready")
         def auto_detect_ready():
             setup = self._setup_status()
+            hand_present = bool(self.detector and self.detector.hand_present)
+            pending_move = self.detector.pending_auto_move if self.detector else None
+            pending_san = self.detector.pending_auto_san if self.detector else None
+
+            if pending_move is not None and self.game.session:
+                with self.detector._lock:
+                    self.detector.pending_auto_move = None
+                    self.detector.pending_auto_san = None
+
+                # Propose human move to game session
+                result = self.game.handle({
+                    "type": "move.propose",
+                    "data": {"uci": pending_move, "expected_version": self.game.session.version},
+                })
+                # Check for engine reply
+                engine_uci = None
+                if self.game.session and self.game.session.history:
+                    last_move = self.game.session.history[-1]
+                    if last_move.get("uci") != pending_move:
+                        engine_uci = last_move.get("uci")
+
+                return {"status": "ok", "data": {
+                    "ready": True,
+                    "uci": pending_move,
+                    "san": pending_san or pending_move,
+                    "fen": self.game.session.board.fen() if self.game.session else None,
+                    "engine_move": {"uci": engine_uci} if engine_uci else None,
+                    "reason": "hand_left",
+                    "hand_present": False,
+                    **result,
+                }}
+
+            reason = "hand_present" if hand_present else "waiting_for_hand"
             return {"status": "ok", "data": {
-                "ready": setup["ready"],
+                "ready": False,
+                "reason": reason,
+                "hand_present": hand_present,
                 "missing": setup["missing"],
                 "vision": self.detector.status() if self.detector else {},
             }}
@@ -473,6 +545,16 @@ class LocalApiHost:
 
         @self.app.post("/local/move/analyze-and-reply")
         def analyze_and_reply():
+            if self.detector and self.detector.hand_present:
+                return {
+                    "status": "waiting",
+                    "data": {
+                        "analysis_status": "waiting",
+                        "reason": "hand_present",
+                        "analysis_message": "Hand detected. Move away to detect.",
+                        "retry": True,
+                    },
+                }
             return self._detect_result(apply_move=True)
 
         @self.post_gantry("/local/gantry/home")
@@ -512,11 +594,34 @@ class LocalApiHost:
             raise HTTPException(409, "Start a local game session first")
         candidates = self.detector.detect_candidates(self.game.session)
         if not candidates:
-            return {"status": "no_move", "data": {"vision": self.detector.status()}}
+            return {
+                "status": "waiting",
+                "data": {
+                    "analysis_status": "waiting",
+                    "reason": "no_legal_move",
+                    "analysis_message": "No move detected yet. Try moving a piece and removing your hand.",
+                    "retry": False,
+                    "vision": self.detector.status(),
+                },
+            }
+        move_uci = candidates[0]
         if not apply_move:
             return {"status": "move_detected", "data": {"candidates": candidates, "vision": self.detector.status()}}
-        result = self.game.handle({"type": "move.propose", "data": {"uci": candidates[0], "expected_version": self.game.session.version}})
-        return {"status": "ok", "data": result}
+        result = self.game.handle({"type": "move.propose", "data": {"uci": move_uci, "expected_version": self.game.session.version}})
+        engine_data = None
+        if self.game.session and self.game.session.history:
+            last_move = self.game.session.history[-1]
+            if last_move.get("uci") != move_uci:
+                engine_data = {"uci": last_move.get("uci")}
+        return {
+            "status": "ok",
+            "data": {
+                "human_move": {"uci": move_uci, "analysis_status": "success"},
+                "engine_move": engine_data,
+                "fen": self.game.session.board.fen() if self.game.session else None,
+                **result,
+            },
+        }
 
     def _read_calibration(self) -> dict:
         try:
