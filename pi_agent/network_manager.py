@@ -116,6 +116,34 @@ class NetworkManager:
         self._run(["connection", "modify", self.connection_name, "connection.autoconnect", "yes"])
         return self.status()
 
+    def scan_wifi(self) -> list[dict[str, str | int]]:
+        """Return nearby Wi-Fi networks without exposing credentials."""
+        output = self._run([
+            "-t", "--escape", "no", "-f", "SSID,SIGNAL,SECURITY",
+            "device", "wifi", "list", "--rescan", "yes",
+        ])
+        networks: dict[str, dict[str, str | int]] = {}
+        for line in output.splitlines():
+            parts = line.split(":")
+            if len(parts) < 3:
+                continue
+            ssid, signal, security = (part.strip() for part in parts[:3])
+            if not ssid:
+                continue
+            try:
+                signal_value = max(0, min(100, int(signal)))
+            except ValueError:
+                signal_value = 0
+            networks[ssid] = {
+                "ssid": ssid,
+                "signal": signal_value,
+                "security": security or "open",
+            }
+        return sorted(
+            networks.values(),
+            key=lambda item: (-int(item["signal"]), str(item["ssid"]).lower()),
+        )
+
     def wait_until_connected(self, attempts: int = 12, delay_seconds: float = 2.0) -> NetworkStatus:
         import time
         last = NetworkStatus(False, error="Wi-Fi connection timed out")

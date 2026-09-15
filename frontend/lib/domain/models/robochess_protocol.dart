@@ -15,16 +15,32 @@ class RoboChessMessage {
   final String deviceId;
   final Map<String, dynamic> data;
 
-  const RoboChessMessage({required this.type, required this.requestId, required this.deviceId, this.data = const {}});
+  const RoboChessMessage(
+      {required this.type,
+      required this.requestId,
+      required this.deviceId,
+      this.data = const {}});
 
   factory RoboChessMessage.fromJson(Map<String, dynamic> json) {
-    if (json['version']?.toString() != supportedVersion || json['type'] is! String || json['data'] is! Map) {
+    if (json['version']?.toString() != supportedVersion ||
+        json['type'] is! String ||
+        json['data'] is! Map) {
       throw ProtocolException('Invalid RoboChess Pi envelope');
     }
-    return RoboChessMessage(type: json['type'] as String, requestId: json['request_id']?.toString() ?? '', deviceId: json['device_id']?.toString() ?? '', data: Map<String, dynamic>.from(json['data'] as Map));
+    return RoboChessMessage(
+        type: json['type'] as String,
+        requestId: json['request_id']?.toString() ?? '',
+        deviceId: json['device_id']?.toString() ?? '',
+        data: Map<String, dynamic>.from(json['data'] as Map));
   }
 
-  Map<String, dynamic> toJson() => {'version': supportedVersion, 'request_id': requestId, 'type': type, 'device_id': deviceId, 'data': data};
+  Map<String, dynamic> toJson() => {
+        'version': supportedVersion,
+        'request_id': requestId,
+        'type': type,
+        'device_id': deviceId,
+        'data': data
+      };
   String encode() => jsonEncode(toJson());
 }
 
@@ -38,17 +54,46 @@ class PiState {
   final bool gameOver;
   final String? result;
 
-  const PiState({required this.version, required this.state, this.fen, this.sessionId, this.moveHistory = const [], this.recoveryReason, this.gameOver = false, this.result});
+  const PiState(
+      {required this.version,
+      required this.state,
+      this.fen,
+      this.sessionId,
+      this.moveHistory = const [],
+      this.recoveryReason,
+      this.gameOver = false,
+      this.result});
 
   String? get lastMove => moveHistory.isEmpty ? null : moveHistory.last;
 
   factory PiState.fromMessage(RoboChessMessage message) {
     final nested = message.data['engine_state'] ?? message.data['state'];
-    final raw = nested is Map ? Map<String, dynamic>.from(nested) : message.data;
-    return PiState(version: (raw['version'] as num?)?.toInt() ?? 0, state: raw['phase']?.toString() ?? message.data['status']?.toString() ?? message.type, fen: raw['fen']?.toString(), sessionId: raw['session_id']?.toString(), moveHistory: (raw['moves'] as List? ?? const []).map((item) => '$item').toList(), recoveryReason: raw['last_error']?.toString(), gameOver: raw['game_over'] == true, result: raw['result']?.toString());
+    final raw =
+        nested is Map ? Map<String, dynamic>.from(nested) : message.data;
+    return PiState(
+        version: (raw['version'] as num?)?.toInt() ?? 0,
+        state: raw['phase']?.toString() ??
+            message.data['status']?.toString() ??
+            message.type,
+        fen: raw['fen']?.toString(),
+        sessionId: raw['session_id']?.toString(),
+        moveHistory:
+            (raw['moves'] as List? ?? const []).map((item) => '$item').toList(),
+        recoveryReason: raw['last_error']?.toString(),
+        gameOver: raw['game_over'] == true,
+        result: raw['result']?.toString());
   }
 
-  Map<String, dynamic> toJson() => {'version': version, 'state': state, if (fen != null) 'fen': fen, if (sessionId != null) 'session_id': sessionId, 'moves': moveHistory, if (recoveryReason != null) 'last_error': recoveryReason, 'game_over': gameOver, if (result != null) 'result': result};
+  Map<String, dynamic> toJson() => {
+        'version': version,
+        'state': state,
+        if (fen != null) 'fen': fen,
+        if (sessionId != null) 'session_id': sessionId,
+        'moves': moveHistory,
+        if (recoveryReason != null) 'last_error': recoveryReason,
+        'game_over': gameOver,
+        if (result != null) 'result': result
+      };
 }
 
 class PiNetworkStatus {
@@ -81,4 +126,22 @@ class PiNetworkStatus {
       state: data['state']?.toString() ?? 'unknown',
     );
   }
+}
+
+class PiWifiNetwork {
+  final String ssid;
+  final int signal;
+  final String security;
+
+  const PiWifiNetwork({
+    required this.ssid,
+    required this.signal,
+    required this.security,
+  });
+
+  factory PiWifiNetwork.fromMap(Map<String, dynamic> data) => PiWifiNetwork(
+        ssid: data['ssid']?.toString() ?? '',
+        signal: (data['signal'] as num?)?.toInt() ?? 0,
+        security: data['security']?.toString() ?? 'unknown',
+      );
 }

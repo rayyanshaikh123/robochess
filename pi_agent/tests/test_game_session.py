@@ -100,6 +100,21 @@ class BleProtocolTests(unittest.TestCase):
         status = decode_message(gatt.status_payload())
         self.assertEqual(status["data"]["status"], "wifi_connected")
 
+    def test_network_scan_is_a_valid_authenticated_control_command(self):
+        gatt = GattServer(
+            "board-001",
+            on_control=lambda message: {
+                "status": "network_scan",
+                "networks": [],
+            },
+        )
+        replies = gatt.handle_control(
+            json.dumps(envelope("network.scan", "board-001")).encode()
+        )
+        response = decode_message(replies[0])
+        self.assertEqual(response["data"]["status"], "network_scan")
+        self.assertEqual(response["data"]["networks"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

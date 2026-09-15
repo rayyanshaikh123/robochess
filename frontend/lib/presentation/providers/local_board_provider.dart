@@ -34,6 +34,7 @@ class LocalBoardState {
   final RoboChessDevice? selected;
   final PiState? piState;
   final PiNetworkStatus? network;
+  final List<PiWifiNetwork> wifiNetworks;
   final String? localApiBaseUrl;
   final PiSetupStatus? setup;
   final LocalConnectionState connection;
@@ -46,6 +47,7 @@ class LocalBoardState {
     this.selected,
     this.piState,
     this.network,
+    this.wifiNetworks = const [],
     this.localApiBaseUrl = AppConfig.piLocalApiBaseUrl,
     this.setup,
     this.connection = LocalConnectionState.disconnected,
@@ -59,6 +61,7 @@ class LocalBoardState {
     RoboChessDevice? selected,
     PiState? piState,
     PiNetworkStatus? network,
+    List<PiWifiNetwork>? wifiNetworks,
     String? localApiBaseUrl,
     PiSetupStatus? setup,
     LocalConnectionState? connection,
@@ -72,6 +75,7 @@ class LocalBoardState {
         selected: selected ?? this.selected,
         piState: piState ?? this.piState,
         network: network ?? this.network,
+        wifiNetworks: wifiNetworks ?? this.wifiNetworks,
         localApiBaseUrl: localApiBaseUrl ?? this.localApiBaseUrl,
         setup: setup ?? this.setup,
         connection: connection ?? this.connection,
@@ -133,6 +137,19 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
               : 'http://$usableIp:8765',
           clearError: true,
         );
+        return;
+      }
+      if (message.data['status'] == 'network_scan') {
+        final rawNetworks = message.data['networks'];
+        final networks = rawNetworks is List
+            ? rawNetworks
+                .whereType<Map>()
+                .map((item) =>
+                    PiWifiNetwork.fromMap(Map<String, dynamic>.from(item)))
+                .where((item) => item.ssid.isNotEmpty)
+                .toList()
+            : <PiWifiNetwork>[];
+        state = state.copyWith(wifiNetworks: networks, clearError: true);
         return;
       }
       if ((message.type == 'control.result' || message.type == 'game.state') &&
@@ -223,6 +240,8 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
         ),
         connection: LocalConnectionState.paired,
       );
+      await repository.requestState();
+      await repository.requestNetworkStatus();
       return id;
     } catch (error) {
       state = state.copyWith(
@@ -230,6 +249,22 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
         connection: LocalConnectionState.disconnected,
       );
       rethrow;
+    }
+  }
+
+  Future<void> refreshNetworkStatus() async {
+    try {
+      await repository.requestNetworkStatus();
+    } catch (error) {
+      state = state.copyWith(error: 'Pi network status failed: $error');
+    }
+  }
+
+  Future<void> scanWifiNetworks() async {
+    try {
+      await repository.scanWifiNetworks();
+    } catch (error) {
+      state = state.copyWith(error: 'Pi Wi-Fi scan failed: $error');
     }
   }
 

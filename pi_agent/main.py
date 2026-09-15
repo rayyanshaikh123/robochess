@@ -120,6 +120,11 @@ def main() -> None:
                 INTERNET_CHECK_URL,
                 INTERNET_CHECK_TIMEOUT_SECONDS,
             ).to_dict() | {"backend_available": api.device_token is not None}}
+        if message.get("type") == "network.scan":
+            try:
+                return {"status": "network_scan", "networks": network.scan_wifi()}
+            except NetworkManagerError as exc:
+                return {"status": "error", "error": str(exc)}
         return {"status": "ready"}
 
     def on_wifi(message: dict) -> dict:

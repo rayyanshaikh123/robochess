@@ -69,14 +69,13 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
       _message = 'Connecting to ${candidate.name}...';
     });
     try {
-      await ref
+      final id = await ref
           .read(localBoardProvider.notifier)
           .connectBluetoothDevice(candidate);
       _selectedRemoteId = candidate.result.device.remoteId.str;
       if (mounted) {
-        setState(
-            () => _message = 'Board connected. It is now in Linked Boards.');
-        context.go('/connect');
+        setState(() => _message = 'Board connected. Loading Pi diagnostics...');
+        context.go('/connect/setup/${Uri.encodeComponent(id)}');
       }
     } catch (error) {
       if (mounted) {

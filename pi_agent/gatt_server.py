@@ -128,6 +128,16 @@ class GattServer:
                 "data": result,
             }
 
+        elif message.get("type") == "network.scan":
+            try:
+                validate_game_message(message)
+                result = (
+                    self.on_control(message)
+                    if self.on_control
+                    else {"status": "unsupported"}
+                )
+            except ValueError as exc:
+                result = {"status": "error", "error": str(exc)}
         else:
             result = (
                 self.on_control(message)

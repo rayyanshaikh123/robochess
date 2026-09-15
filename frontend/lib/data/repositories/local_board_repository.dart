@@ -11,7 +11,10 @@ class LocalBoardRepository {
   LocalBoardRepository(this.ble);
 
   Stream<Map<String, dynamic>> get notifications => ble.messages;
-  Stream<RoboChessBleDevice> scan() => ble.scan().expand((items) => items.map(RoboChessBleDevice.new)).map((device) {
+  Stream<RoboChessBleDevice> scan() => ble
+          .scan()
+          .expand((items) => items.map(RoboChessBleDevice.new))
+          .map((device) {
         _scanned[device.result.device.remoteId.str] = device;
         return device;
       });
@@ -24,13 +27,15 @@ class LocalBoardRepository {
 
   Future<String> connectRemote(String remoteId) {
     final device = _scanned[remoteId];
-    if (device == null) throw StateError('Board is no longer in scan results; scan again.');
+    if (device == null)
+      throw StateError('Board is no longer in scan results; scan again.');
     return connect(device);
   }
 
   Future<void> send(String type, [Map<String, dynamic> data = const {}]) async {
     final id = _deviceId;
-    if (id == null) throw StateError('Connect to a board before sending commands');
+    if (id == null)
+      throw StateError('Connect to a board before sending commands');
     await ble.sendControl(RoboChessMessage(
       type: type,
       requestId: '${DateTime.now().microsecondsSinceEpoch}-${++_sequence}',
@@ -39,7 +44,8 @@ class LocalBoardRepository {
     ).toJson());
   }
 
-  RoboChessMessage parse(Map<String, dynamic> value) => RoboChessMessage.fromJson(value);
+  RoboChessMessage parse(Map<String, dynamic> value) =>
+      RoboChessMessage.fromJson(value);
 
   bool acceptState(PiState state) {
     if (state.version < _lastPiVersion) return false;
@@ -50,17 +56,28 @@ class LocalBoardRepository {
   Future<void> startSession() => send('session.start');
   Future<void> requestState() => send('state.request');
   Future<void> requestNetworkStatus() => send('network.status');
+  Future<void> scanWifiNetworks() => send('network.scan');
   Future<void> resumeSession() => send('session.resume');
   Future<void> resetSession() => send('session.reset');
   Future<void> undoSession() => send('session.undo');
   Future<void> homeGantry() => send('gantry.home');
   Future<void> gantryStatus() => send('gantry.status');
-  Future<void> proposeMove(String move, int expectedVersion) => send('move.propose', {'uci': move, 'expected_version': expectedVersion});
+  Future<void> proposeMove(String move, int expectedVersion) =>
+      send('move.propose', {'uci': move, 'expected_version': expectedVersion});
   Future<void> provisionWifi(String ssid, String password) async {
     final id = _deviceId;
-    if (id == null) throw StateError('Connect to a board before provisioning Wi-Fi');
+    if (id == null)
+      throw StateError('Connect to a board before provisioning Wi-Fi');
     await ble.sendWifi(id, ssid, password);
   }
-  Future<void> saveCameraCalibration({required int cameraIndex, required int rotation, required String boardOrientation}) =>
-      send('camera.calibrate', {'camera_index': cameraIndex, 'rotation': rotation, 'board_orientation': boardOrientation});
+
+  Future<void> saveCameraCalibration(
+          {required int cameraIndex,
+          required int rotation,
+          required String boardOrientation}) =>
+      send('camera.calibrate', {
+        'camera_index': cameraIndex,
+        'rotation': rotation,
+        'board_orientation': boardOrientation
+      });
 }

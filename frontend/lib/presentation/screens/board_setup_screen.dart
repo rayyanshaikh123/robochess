@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../domain/models/pi_setup.dart';
+import '../../domain/models/robochess_device.dart';
+import '../../domain/models/robochess_protocol.dart';
 import '../providers/local_board_provider.dart';
 import '../widgets/pi_live_camera_view.dart';
 
@@ -25,9 +27,13 @@ class _BoardSetupScreenState extends ConsumerState<BoardSetupScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(localBoardProvider.notifier).refreshSetup();
+      ref.read(localBoardProvider.notifier).refreshNetworkStatus();
       _poller = Timer.periodic(
         const Duration(seconds: 4),
-        (_) => ref.read(localBoardProvider.notifier).refreshSetup(),
+        (_) {
+          ref.read(localBoardProvider.notifier).refreshSetup();
+          ref.read(localBoardProvider.notifier).refreshNetworkStatus();
+        },
       );
     });
   }
@@ -68,12 +74,22 @@ class _BoardSetupScreenState extends ConsumerState<BoardSetupScreen> {
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 16),
+          _PiDiagnostics(
+            network: state.network,
+            setup: setup,
+            connection: state.connection,
+          ),
+          const SizedBox(height: 16),
           if (baseUrl != null) PiLiveCameraView(baseUrl: baseUrl),
           const SizedBox(height: 16),
           if (setup == null)
             const Card(child: ListTile(title: Text('Checking Pi setup…')))
           else
             ...setup.stages.map((stage) => _StageTile(stage: stage)),
+          if (state.network == null || !state.network!.internetAvailable) ...[
+            const SizedBox(height: 12),
+            _WifiProvisioningPanel(networks: state.wifiNetworks),
+          ],
           const SizedBox(height: 12),
           _ActionButton(
             label: 'LOAD ROBOFLOW DETECTOR',
@@ -212,6 +228,186 @@ class _BoardSetupScreenState extends ConsumerState<BoardSetupScreen> {
       }
     }
   }
+}
+
+class _PiDiagnostics extends StatelessWidget {
+  final PiNetworkStatus? network;
+  final PiSetupStatus? setup;
+  final LocalConnectionState connection;
+
+  const _PiDiagnostics({
+    required this.network,
+    required this.setup,
+    required this.connection,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = <Widget>[
+      _DiagnosticRow('Bluetooth',
+          connection != LocalConnectionState.disconnected, connection.name),
+      _DiagnosticRow('Wi-Fi', network?.wifiConnected == true,
+          network?.ssid ?? 'Not connected'),
+      _DiagnosticRow('Internet', network?.internetAvailable == true,
+          network?.state ?? 'Checking'),
+      _DiagnosticRow('Backend', network?.backendAvailable == true,
+          network?.backendAvailable == true ? 'Connected' : 'Offline'),
+      _DiagnosticRow('Pi local API', network?.localServiceAvailable != false,
+          network?.ipAddress ?? 'Waiting for Pi address'),
+      _DiagnosticRow(
+          'Board setup',
+          setup?.ready == true,
+          setup == null
+              ? 'Checking'
+              : (setup?.ready == true ? 'Ready' : 'Incomplete')),
+    ];
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('PI STATUS', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            ...rows,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DiagnosticRow extends StatelessWidget {
+  final String label;
+  final bool ok;
+  final String detail;
+
+  const _DiagnosticRow(this.label, this.ok, this.detail);
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(ok ? Icons.check_circle : Icons.cancel,
+            color: ok ? Colors.green : Colors.orange),
+        title: Text(label),
+        trailing: Text(detail, textAlign: TextAlign.right),
+      );
+}
+
+class _WifiProvisioningPanel extends ConsumerStatefulWidget {
+  final List<PiWifiNetwork> networks;
+
+  const _WifiProvisioningPanel({required this.networks});
+
+  @override
+  ConsumerState<_WifiProvisioningPanel> createState() =>
+      _WifiProvisioningPanelState();
+}
+
+class _WifiProvisioningPanelState
+    extends ConsumerState<_WifiProvisioningPanel> {
+  final _ssid = TextEditingController();
+  final _password = TextEditingController();
+  bool _sending = false;
+  bool _scanning = false;
+  String? _selectedSsid;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scan());
+  }
+
+  @override
+  void dispose() {
+    _ssid.dispose();
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    final ssid = _selectedSsid ?? _ssid.text.trim();
+    if (ssid.isEmpty || _password.text.isEmpty) return;
+    setState(() => _sending = true);
+    await ref.read(localBoardProvider.notifier).provisionWifi(
+          ssid,
+          _password.text,
+        );
+    if (mounted) setState(() => _sending = false);
+  }
+
+  Future<void> _scan() async {
+    if (_scanning) return;
+    setState(() => _scanning = true);
+    await ref.read(localBoardProvider.notifier).scanWifiNetworks();
+    if (mounted) setState(() => _scanning = false);
+  }
+
+  @override
+  Widget build(BuildContext context) => Card(
+        color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.35),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('PI INTERNET UNAVAILABLE',
+                  style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 4),
+              const Text('Send Wi-Fi credentials securely over Bluetooth.'),
+              Row(
+                children: [
+                  Expanded(
+                    child: widget.networks.isEmpty
+                        ? TextField(
+                            controller: _ssid,
+                            decoration:
+                                const InputDecoration(labelText: 'Wi-Fi name'),
+                          )
+                        : DropdownButtonFormField<String>(
+                            value: _selectedSsid,
+                            decoration:
+                                const InputDecoration(labelText: 'Wi-Fi name'),
+                            items: widget.networks
+                                .map((network) => DropdownMenuItem(
+                                      value: network.ssid,
+                                      child: Text(
+                                          '${network.ssid} (${network.signal}%)'),
+                                    ))
+                                .toList(),
+                            onChanged: (value) =>
+                                setState(() => _selectedSsid = value),
+                          ),
+                  ),
+                  IconButton(
+                    tooltip: 'Scan nearby networks',
+                    onPressed: _scanning ? null : _scan,
+                    icon: _scanning
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh),
+                  ),
+                ],
+              ),
+              TextField(
+                controller: _password,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'Wi-Fi password'),
+              ),
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: _sending ? null : _send,
+                icon: const Icon(Icons.wifi),
+                label: Text(_sending ? 'SENDING...' : 'PROVISION PI WI-FI'),
+              ),
+            ],
+          ),
+        ),
+      );
 }
 
 class _StageTile extends StatelessWidget {
