@@ -1175,10 +1175,10 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     });
     try {
       await action();
-    } on ApiException catch (err) {
-      setState(() => _setupError = err.message);
-    } catch (_) {
-      setState(() => _setupError = 'Step failed. Check board connection.');
+    } catch (e) {
+      setState(() {
+        _setupError = e.toString().replaceAll('Exception: ', '');
+      });
     } finally {
       if (mounted) setState(() => _setupBusy = false);
     }
@@ -1329,10 +1329,10 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       if (useBoard) {
         try {
           await PiLocalApi(baseUrl: _piBaseUrl).startGame();
-        } catch (_) {
+        } catch (e) {
           if (mounted) {
             setState(
-                () => _syncError = 'Pi game session could not be started.');
+                () => _syncError = 'Pi game session could not be started: $e');
           }
         }
         _fetchLiveFrame();

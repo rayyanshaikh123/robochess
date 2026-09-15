@@ -159,6 +159,8 @@ class SerialTransport:
                     if upper.startswith(ACK_TOKENS_ERR):
                         return False, lines
                     if upper.startswith(ACK_TOKENS_OK):
+                        if upper.startswith("OK HOMING"):
+                            continue
                         return True, lines
             return False, lines
 
