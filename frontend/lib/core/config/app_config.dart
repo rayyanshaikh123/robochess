@@ -8,7 +8,7 @@ class AppConfig {
     'API_BASE_URL',
     // Current RoboChess hotspot/LAN backend address. Override with
     // --dart-define=API_BASE_URL=http://<host-ip>:8000 when the network changes.
-    defaultValue: 'http://172.20.10.3:8000',
+    defaultValue: 'http://172.20.10.4:8000',
   );
 
   static const wsBaseUrl = String.fromEnvironment(
