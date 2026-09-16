@@ -513,26 +513,36 @@ class _LocalLinkedBoardCardState
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(widget.deviceId,
-                    style: GoogleFonts.inter(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: kOnSurface)),
-                const SizedBox(height: 4),
+                Text(
+                  widget.deviceId,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: kOnSurface,
+                  ),
+                ),
+                const SizedBox(height: 3),
                 Row(
                   children: [
                     _PulsingDot(color: isConnected ? kPrimary : kSecondary),
                     const SizedBox(width: 6),
-                    Text(
-                      isConnected
-                          ? 'ONLINE (WI-FI)'
-                          : (_connecting ? 'CONNECTING...' : 'OFFLINE'),
-                      style: GoogleFonts.inter(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: isConnected ? kPrimary : kSecondary,
-                        letterSpacing: 0.8,
+                    Expanded(
+                      child: Text(
+                        isConnected
+                            ? 'ONLINE (WI-FI)'
+                            : (_connecting ? 'CONNECTING...' : 'OFFLINE'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: isConnected ? kPrimary : kSecondary,
+                          letterSpacing: 0.8,
+                        ),
                       ),
                     ),
                   ],
@@ -540,52 +550,83 @@ class _LocalLinkedBoardCardState
               ],
             ),
           ),
+          const SizedBox(width: 8),
           if (isConnected) ...[
             FilledButton.tonal(
               onPressed: widget.onPlay,
               style: FilledButton.styleFrom(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                minimumSize: const Size(60, 34),
               ),
               child: const Text('PLAY',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
             ),
-            const SizedBox(width: 4),
             IconButton(
               icon: const Icon(Icons.tune, size: 18, color: kSecondary),
               tooltip: 'Board Settings & Calibration',
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              padding: const EdgeInsets.all(6),
               onPressed: () =>
                   context.go('/connect/setup/${widget.deviceId}'),
             ),
           ] else ...[
             if (_connecting)
               const SizedBox(
-                width: 24,
-                height: 24,
+                width: 20,
+                height: 20,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            else ...[
+            else
               FilledButton(
                 onPressed: _handleConnect,
                 style: FilledButton.styleFrom(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  minimumSize: const Size(70, 34),
                 ),
-                child: const Text('CONNECT'),
+                child: const Text('CONNECT',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
               ),
-              IconButton(
-                icon: const Icon(Icons.wifi_find, size: 18, color: kSecondary),
-                tooltip: 'Set up Wi-Fi on Board',
-                onPressed: () => context.push('/connect/link'),
-              ),
-            ],
-            if (widget.onForget != null)
-              IconButton(
-                icon:
-                    const Icon(Icons.close, size: 16, color: kOnSurfaceVariant),
-                tooltip: 'Forget saved board',
-                onPressed: widget.onForget,
-              ),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert,
+                  size: 18, color: kOnSurfaceVariant),
+              tooltip: 'Board options',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              onSelected: (value) {
+                if (value == 'wifi') {
+                  context.push('/connect/link');
+                } else if (value == 'forget' && widget.onForget != null) {
+                  widget.onForget!();
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'wifi',
+                  child: Row(
+                    children: [
+                      Icon(Icons.wifi, size: 16),
+                      SizedBox(width: 8),
+                      Text('Set up Wi-Fi on Board'),
+                    ],
+                  ),
+                ),
+                if (widget.onForget != null)
+                  const PopupMenuItem(
+                    value: 'forget',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_outline,
+                            size: 16, color: Colors.redAccent),
+                        SizedBox(width: 8),
+                        Text('Forget Board',
+                            style: TextStyle(color: Colors.redAccent)),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
           ],
         ],
       ),

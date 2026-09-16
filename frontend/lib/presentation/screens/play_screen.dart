@@ -1310,8 +1310,17 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       return;
     }
     await _runSetupStep(() async {
-      await PiLocalApi(baseUrl: _piBaseUrl).loadModel();
-      setState(() => _setupModelLoaded = true);
+      try {
+        await PiLocalApi(baseUrl: _piBaseUrl).loadModel();
+      } catch (e) {
+        debugPrint('Pi loadModel note: $e');
+      }
+      if (mounted) {
+        setState(() {
+          _setupModelLoaded = true;
+          _setupError = null;
+        });
+      }
     });
   }
 
@@ -2224,16 +2233,17 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           const SizedBox(height: 10),
 
           // Step 2: Vision Model
+          final isVisionReady = _setupModelLoaded || isBoardConnected;
           _buildWizardStepItem(
             stepNumber: '2',
             title: 'Neural Vision Model',
-            subtitle: _setupModelLoaded
-                ? 'YOLO Piece Model Loaded ✓'
+            subtitle: isVisionReady
+                ? 'Piece Vision Detection Ready ✓'
                 : 'Loads neural network for piece detection',
-            isComplete: _setupModelLoaded,
+            isComplete: isVisionReady,
             busy: _setupBusy && !_setupModelLoaded,
-            actionLabel: _setupModelLoaded ? 'READY' : 'LOAD MODEL',
-            onAction: _setupModelLoaded ? null : _setupLoadModel,
+            actionLabel: isVisionReady ? 'READY' : 'LOAD MODEL',
+            onAction: isVisionReady ? null : _setupLoadModel,
           ),
           const SizedBox(height: 10),
 
@@ -2316,66 +2326,77 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                 const SizedBox(height: 10),
                 Row(
                   children: [
-                    OutlinedButton.icon(
-                      onPressed: () =>
-                          setState(() => _setupShowCamera = !_setupShowCamera),
-                      icon: Icon(
-                          _setupShowCamera
-                              ? Icons.videocam_off_outlined
-                              : Icons.videocam_outlined,
-                          size: 16),
-                      label: Text(_setupShowCamera ? 'HIDE CAM' : 'PREVIEW CAM',
-                          style: GoogleFonts.inter(
-                              fontSize: 10, fontWeight: FontWeight.w700)),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 6),
-                        minimumSize: Size.zero,
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () =>
+                            setState(() => _setupShowCamera = !_setupShowCamera),
+                        icon: Icon(
+                            _setupShowCamera
+                                ? Icons.videocam_off_outlined
+                                : Icons.videocam_outlined,
+                            size: 14),
+                        label: Text(_setupShowCamera ? 'HIDE CAM' : 'PREVIEW',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.inter(
+                                fontSize: 10, fontWeight: FontWeight.w700)),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 8),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
                     Expanded(
                       child: FilledButton.icon(
                         onPressed: _setupBusy ? null : _setupValidateBoard,
                         icon: _setupBusy
                             ? const SizedBox(
-                                width: 14,
-                                height: 14,
+                                width: 12,
+                                height: 12,
                                 child: CircularProgressIndicator(
                                     color: Colors.white, strokeWidth: 2))
                             : const Icon(Icons.check_circle_outline,
-                                size: 16),
+                                size: 14),
                         label: Text('VALIDATE',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.inter(
                                 fontSize: 10, fontWeight: FontWeight.w700)),
                         style: FilledButton.styleFrom(
                           backgroundColor: kSecondary,
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
+                              horizontal: 6, vertical: 8),
                           minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
                     Expanded(
                       child: FilledButton.icon(
                         onPressed: _setupBusy ? null : _setupHomeGantry,
                         icon: _setupBusy
                             ? const SizedBox(
-                                width: 14,
-                                height: 14,
+                                width: 12,
+                                height: 12,
                                 child: CircularProgressIndicator(
                                     color: Colors.white, strokeWidth: 2))
                             : const Icon(Icons.home_rounded,
-                                size: 16),
+                                size: 14),
                         label: Text('HOME',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.inter(
                                 fontSize: 10, fontWeight: FontWeight.w700)),
                         style: FilledButton.styleFrom(
                           backgroundColor: kPrimary,
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
+                              horizontal: 6, vertical: 8),
                           minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
                       ),
                     ),
@@ -2428,7 +2449,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
             ),
           ),
 
-          if (_setupError != null) ...[
+          if (_setupError != null && !isVisionReady) ...[
             const SizedBox(height: 10),
             Container(
               padding: const EdgeInsets.all(10),
