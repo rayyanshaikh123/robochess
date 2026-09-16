@@ -20,6 +20,7 @@ import '../providers/user_provider.dart';
 import '../../core/errors/api_exception.dart';
 import '../../core/config/app_config.dart';
 import '../../domain/models/device_model.dart';
+import '../../domain/models/robochess_device.dart';
 import '../../domain/models/game_state.dart';
 import '../../domain/models/opening_context.dart';
 import '../../domain/models/calibration_frame.dart';
