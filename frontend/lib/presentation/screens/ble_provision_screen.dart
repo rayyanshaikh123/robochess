@@ -5,6 +5,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/config/app_config.dart';
 import '../../core/ble/robochess_ble.dart';
 import '../providers/local_board_provider.dart';
 
@@ -21,7 +22,7 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
   final _password = TextEditingController();
   StreamSubscription<List<ScanResult>>? _scanSubscription;
   final _devices = <String, RoboChessBleDevice>{};
-  String _message = 'Scan for nearby RoboChess boards.';
+  String _message = 'Scan for nearby RoboChess boards or connect via Wi-Fi.';
   bool _scanning = false;
   bool _working = false;
   bool? _needsWifi;
@@ -34,6 +35,28 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
     _ssid.dispose();
     _password.dispose();
     super.dispose();
+  }
+
+  Future<void> _connectLan() async {
+    setState(() {
+      _working = true;
+      _message = 'Connecting to Pi via local Wi-Fi...';
+    });
+    try {
+      final id = await ref
+          .read(localBoardProvider.notifier)
+          .connectLocalApi();
+      if (mounted) {
+        setState(() => _message = 'Board connected over Wi-Fi!');
+        context.go('/connect/setup/${Uri.encodeComponent(id)}');
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _message = 'Wi-Fi connection failed: $error');
+      }
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
   }
 
   Future<void> _scan() async {
@@ -96,6 +119,20 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
         children: [
           Text(_message),
           const SizedBox(height: 16),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.wifi, color: Colors.teal),
+              title: const Text('Connect via Local Wi-Fi',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: const Text(
+                  'Direct link to Pi at ${AppConfig.piLocalApiBaseUrl}'),
+              trailing: FilledButton.tonal(
+                onPressed: _working ? null : _connectLan,
+                child: const Text('CONNECT'),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
           if (_needsWifi == true) ...[
             TextField(
                 controller: _ssid,

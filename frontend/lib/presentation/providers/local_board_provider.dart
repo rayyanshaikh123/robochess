@@ -238,6 +238,45 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
     }
   }
 
+  Future<String> connectLocalApi({
+    String? baseUrl,
+    String defaultDeviceId = 'robochess-pi-001',
+  }) async {
+    state = state.copyWith(
+      connection: LocalConnectionState.connecting,
+      clearError: true,
+    );
+    final targetUrl = baseUrl ?? state.localApiBaseUrl ?? AppConfig.piLocalApiBaseUrl;
+    try {
+      final api = PiLocalApi(baseUrl: targetUrl);
+      final setup = await api.setupStatus();
+      final id = defaultDeviceId;
+      await store.saveDevice(id);
+      state = state.copyWith(
+        selected: RoboChessDevice(
+          remoteId: id,
+          displayName: 'RoboChess Pi (Wi-Fi)',
+          deviceId: id,
+          rssi: 0,
+          state: LocalConnectionState.connected,
+        ),
+        localApiBaseUrl: targetUrl,
+        setup: setup,
+        connection: setup.ready
+            ? LocalConnectionState.ready
+            : LocalConnectionState.connected,
+        clearError: true,
+      );
+      return id;
+    } catch (error) {
+      state = state.copyWith(
+        error: 'LAN connection failed: $error',
+        connection: LocalConnectionState.disconnected,
+      );
+      rethrow;
+    }
+  }
+
   Future<String> connectBluetoothDevice(RoboChessBleDevice device) async {
     state = state.copyWith(
       connection: LocalConnectionState.connecting,
@@ -269,6 +308,32 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
       await repository.requestNetworkStatus();
       return id;
     } catch (error) {
+      // Automatic LAN fallback: If BLE connection or service discovery fails but the Pi
+      // is already reachable on the local Wi-Fi, fall back to LAN connection seamlessly!
+      try {
+        final targetUrl = state.localApiBaseUrl ?? AppConfig.piLocalApiBaseUrl;
+        final api = PiLocalApi(baseUrl: targetUrl);
+        final setup = await api.setupStatus();
+        const id = 'robochess-pi-001';
+        await store.saveDevice(id);
+        state = state.copyWith(
+          selected: const RoboChessDevice(
+            remoteId: id,
+            displayName: 'RoboChess Pi (Wi-Fi Fallback)',
+            deviceId: id,
+            rssi: 0,
+            state: LocalConnectionState.connected,
+          ),
+          localApiBaseUrl: targetUrl,
+          setup: setup,
+          connection: setup.ready
+              ? LocalConnectionState.ready
+              : LocalConnectionState.connected,
+          clearError: true,
+        );
+        return id;
+      } catch (_) {}
+
       state = state.copyWith(
         error: 'Board connection failed: $error',
         connection: LocalConnectionState.disconnected,

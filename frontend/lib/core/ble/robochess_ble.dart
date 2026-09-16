@@ -89,6 +89,9 @@ class RoboChessBleClient {
   Future<String> connectAndReadDeviceId(BluetoothDevice device) async {
     await disconnect();
     try {
+      if (FlutterBluePlus.isScanningNow) {
+        await FlutterBluePlus.stopScan();
+      }
       await device.connect(
           timeout: const Duration(seconds: 15), autoConnect: false);
       // Only request MTU on Android: iOS CoreBluetooth manages MTU automatically
@@ -104,23 +107,22 @@ class RoboChessBleClient {
       // CoreBluetooth needs a brief moment after connect for peripheral GATT to settle.
       await Future<void>.delayed(const Duration(milliseconds: 350));
 
-      List<BluetoothService> services = device.servicesList;
       final targetUuid = Guid(roboChessServiceUuid);
+      List<BluetoothService> services = device.servicesList;
       if (!services.any((item) => item.uuid == targetUuid)) {
         try {
-          services = await device.discoverServices().timeout(const Duration(seconds: 8));
+          services = await device.discoverServices(timeout: 15);
         } catch (_) {
-          await Future<void>.delayed(const Duration(milliseconds: 500));
           services = device.servicesList;
-          if (!services.any((item) => item.uuid == targetUuid)) {
-            services = await device.discoverServices().timeout(const Duration(seconds: 8));
-          }
         }
       }
-      final service = services.firstWhere(
-        (item) => item.uuid == targetUuid,
-        orElse: () => throw StateError('RoboChess BLE service not found'),
-      );
+      final matching = services.where((item) => item.uuid == targetUuid);
+      if (matching.isEmpty) {
+        throw StateError(
+            'RoboChess BLE service ($roboChessServiceUuid) not found on ${device.platformName}. '
+            'Ensure the RoboChess agent is running on the Pi.');
+      }
+      final service = matching.first;
       BluetoothCharacteristic find(String uuid) =>
           service.characteristics.firstWhere(
             (item) => item.uuid == Guid(uuid),
