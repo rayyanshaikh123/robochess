@@ -396,7 +396,8 @@ class BoardRecognizer:
             try:
                 self._load_local_model()
             except Exception as exc:
-                self.last_error = str(exc)
+                if self.cloud_model is None:
+                    self.last_error = str(exc)
                 print(f"[WARN] Local model unavailable: {exc}")
         if not self.is_ready:
             if self.cloud_only:
@@ -422,6 +423,8 @@ class BoardRecognizer:
             "base_url": self.cloud_base_url,
         }
         self.model_names = {i: name for i, name in enumerate(CLASS_NAMES)}
+        self.active_detector = "roboflow"
+        self.last_error = None
         print(f"[OK] Roboflow cloud model configured: {self.cloud_model_id}")
 
     def _load_local_model(self) -> None:
@@ -484,7 +487,7 @@ class BoardRecognizer:
             "local_model_configured": self.model_path is not None,
             "local_model_available": self.model is not None,
             "model_path": str(self.model_path) if self.model_path else None,
-            "last_error": self.last_error,
+            "last_error": self.last_error if not self.is_ready else None,
         }
 
     @property

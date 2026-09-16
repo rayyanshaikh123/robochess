@@ -1348,25 +1348,37 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   Future<void> _setupLoadModel() async {
     final localState = ref.read(localBoardProvider);
-    final isConnected = localState.connection == LocalConnectionState.connected ||
+    final isConnected = _gameUsesBoard ||
+        _piBaseUrl.isNotEmpty ||
+        localState.connection == LocalConnectionState.connected ||
         localState.connection == LocalConnectionState.ready;
     if (!isConnected) {
       setState(() {
-        _setupError = 'Please connect your RoboChess board in Step 1 first.';
+        _setupError = 'Please connect your RoboChess board first.';
       });
       return;
     }
     await _runSetupStep(() async {
       try {
-        await PiLocalApi(baseUrl: _piBaseUrl).loadModel();
+        final res = await PiLocalApi(baseUrl: _piBaseUrl).loadModel();
+        final data = res['data'] as Map<String, dynamic>? ?? res;
+        final isReady = data['ready'] == true || data['model_available'] == true;
+        if (mounted) {
+          setState(() {
+            _setupModelLoaded = isReady;
+            _setupError = isReady ? null : 'Vision model failed to load';
+            if (isReady) {
+              _snapshotNote = 'Vision model loaded successfully!';
+            }
+          });
+        }
       } catch (e) {
         debugPrint('Pi loadModel note: $e');
-      }
-      if (mounted) {
-        setState(() {
-          _setupModelLoaded = true;
-          _setupError = null;
-        });
+        if (mounted) {
+          setState(() {
+            _snapshotNote = 'Vision load error: $e';
+          });
+        }
       }
     });
   }

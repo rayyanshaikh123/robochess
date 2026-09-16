@@ -66,13 +66,16 @@ class PiCameraDetector:
             or "1OyUTcW3mg1dcln38uRg"
         )
 
-        # If a local model path was given but does not exist on disk, fallback to cloud if key exists
-        local_exists = bool(self.model_path and Path(self.model_path).is_file())
-        if not local_exists and cloud_key:
+        if cloud_key:
             cloud_enabled = True
-            os.environ["ROBOCHESS_VISION_MODE"] = "cloud"
             os.environ["ROBOCHESS_ROBOFLOW_ENABLED"] = "1"
+            if "ROBOCHESS_ROBOFLOW_MODEL_URL" not in os.environ:
+                os.environ["ROBOCHESS_ROBOFLOW_MODEL_URL"] = cloud_url
+            if "ROBOCHESS_ROBOFLOW_API_KEY" not in os.environ:
+                os.environ["ROBOCHESS_ROBOFLOW_API_KEY"] = cloud_key
 
+        # Check if local model path exists on disk
+        local_exists = bool(self.model_path and Path(self.model_path).is_file())
         if not local_exists and not (cloud_enabled and cloud_key):
             # Check standard fallback locations before giving up
             for candidate in [
@@ -86,22 +89,37 @@ class PiCameraDetector:
                     local_exists = True
                     break
 
-        if not local_exists and not (cloud_enabled and cloud_key):
-            self.last_error = (
-                f"No local model found at '{self.model_path or 'not specified'}' "
-                "and Roboflow API key is not configured."
-            )
-            return
+        vision_mode = os.getenv("ROBOCHESS_VISION_MODE", "auto").strip().lower()
+
+        # Decide primary model to initialize
+        if vision_mode == "cloud" or not local_exists:
+            primary_model = "cloud"
+        else:
+            primary_model = self.model_path
 
         try:
-            effective_model = self.model_path if local_exists else "cloud"
-            self.recognizer = BoardRecognizer(effective_model, self.confidence)
-            if not self.recognizer.is_ready:
-                self.last_error = getattr(self.recognizer, "last_error", None) or "Vision model could not be initialized"
-            else:
+            self.recognizer = BoardRecognizer(primary_model, self.confidence)
+            # If primary local model failed to load (e.g. ultralytics not installed), fallback to cloud!
+            if not self.recognizer.is_ready and primary_model != "cloud" and (cloud_enabled and cloud_key):
+                print("[vision] Local model unavailable, falling back to Roboflow cloud...", flush=True)
+                self.recognizer = BoardRecognizer("cloud", self.confidence)
+
+            if self.recognizer.is_ready:
                 self.last_error = None
+            else:
+                self.last_error = getattr(self.recognizer, "last_error", None) or "Vision model could not be initialized"
         except Exception as exc:
-            self.last_error = str(exc)
+            if primary_model != "cloud" and (cloud_enabled and cloud_key):
+                try:
+                    self.recognizer = BoardRecognizer("cloud", self.confidence)
+                    if self.recognizer.is_ready:
+                        self.last_error = None
+                    else:
+                        self.last_error = getattr(self.recognizer, "last_error", None) or str(exc)
+                except Exception as cloud_exc:
+                    self.last_error = f"Local: {exc}; Cloud: {cloud_exc}"
+            else:
+                self.last_error = str(exc)
 
     def load_model(self) -> None:
         with self._lock:
@@ -322,10 +340,12 @@ class PiCameraDetector:
 
     def status(self) -> dict:
         recognizer_status = self.recognizer.status() if self.recognizer else {}
+        is_ready = bool(self.model_available)
         return {
             "configured": True,
             "calibrated": self.calibrated,
-            "ready": self.model_available,
+            "ready": is_ready,
+            "model_available": is_ready,
             "hand_present": self.hand_present,
             "pending_auto_move": self.pending_auto_move,
             "camera_index": self.camera_index,

@@ -282,7 +282,8 @@ class LocalApiHost:
             except Exception as exc:
                 raise HTTPException(503, str(exc)) from exc
             data = self.detector.status()
-            if not data.get("model_available"):
+            is_ready = bool(data.get("ready") or data.get("model_available"))
+            if not is_ready:
                 raise HTTPException(
                     503, data.get("last_error") or "Vision model is not ready"
                 )
