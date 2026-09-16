@@ -41,7 +41,7 @@ from pi_agent.config import (
 )
 from pi_agent.engine import StockfishEngine
 from pi_agent.game_controller import GameController
-from pi_agent.uno_controller import SerialTransport, SimulatedTransport, UnoController
+from pi_agent.uno_controller import SerialTransport, SimulatedTransport, UnoController, find_uno_port
 from pi_agent.session_store import SessionStore
 
 
@@ -150,7 +150,25 @@ def main() -> None:
                     pass
             return {"status": "error", "error": str(exc)}
 
-    transport = SimulatedTransport() if UNO_SIMULATOR else SerialTransport(UNO_PORT, UNO_BAUDRATE)
+    force_sim = _get_env_bool("ROBOCHESS_FORCE_SIMULATOR", "0")
+    candidate_port = find_uno_port(UNO_PORT)
+    transport: TextLineTransport
+
+    if not force_sim and candidate_port:
+        try:
+            print(f"[gantry] Connecting to Arduino Uno on {candidate_port} (baud {UNO_BAUDRATE})...", flush=True)
+            transport = SerialTransport(candidate_port, UNO_BAUDRATE)
+            print(f"[gantry] Successfully connected to Arduino Uno on {candidate_port}!", flush=True)
+        except Exception as exc:
+            print(f"[warn] Cannot open serial port {candidate_port}: {exc}. Falling back to SimulatedTransport.", flush=True)
+            transport = SimulatedTransport()
+    elif not force_sim and not UNO_SIMULATOR:
+        print("[warn] No serial port detected for Arduino Uno. Running in SimulatedTransport mode.", flush=True)
+        transport = SimulatedTransport()
+    else:
+        print("[gantry] Running in SimulatedTransport mode by configuration.", flush=True)
+        transport = SimulatedTransport()
+
     uno = UnoController(transport, UNO_TIMEOUT_SECONDS)
     engine = StockfishEngine(STOCKFISH_PATH, ENGINE_TIME_SECONDS, ENGINE_SKILL_LEVEL)
     game = GameController(engine, uno, SessionStore())

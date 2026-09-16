@@ -21,7 +21,9 @@ path planning live here on the host (see :mod:`pi_agent.geometry`).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import glob
 import os
+from pathlib import Path
 import re
 import threading
 import time
@@ -132,6 +134,51 @@ class GantryStatus:
         }
 
 
+def find_uno_port(preferred: str = "") -> str | None:
+    """Find the serial device for the Arduino Uno.
+
+    Checks in order:
+    1. preferred path if given and exists
+    2. /dev/serial/by-id/* symlinks
+    3. /dev/ttyACM* devices (standard Arduino Uno)
+    4. /dev/ttyUSB* devices (CH340/FTDI Arduino clones)
+    5. pyserial list_ports enumeration
+    """
+    if preferred:
+        p = Path(preferred)
+        if p.exists():
+            return str(p)
+
+    by_id = Path("/dev/serial/by-id")
+    if by_id.is_dir():
+        for item in sorted(by_id.iterdir()):
+            target = str(item.resolve())
+            if Path(target).exists():
+                return target
+
+    for p in sorted(glob.glob("/dev/ttyACM*")):
+        if Path(p).exists():
+            return p
+
+    for p in sorted(glob.glob("/dev/ttyUSB*")):
+        if Path(p).exists():
+            return p
+
+    try:
+        import serial.tools.list_ports
+        ports = list(serial.tools.list_ports.comports())
+        for p in ports:
+            desc = f"{p.description} {p.manufacturer or ''} {p.hwid}".lower()
+            if any(k in desc for k in ["arduino", "ch340", "cp210", "ftdi", "usb serial", "cdc"]):
+                return p.device
+        if ports:
+            return ports[0].device
+    except Exception:
+        pass
+
+    return None
+
+
 class TextLineTransport(Protocol):
     def send(self, command: str, timeout: float) -> tuple[bool, list[str]]: ...
     def close(self) -> None: ...
@@ -142,6 +189,8 @@ class SerialTransport:
 
     def __init__(self, port: str, baudrate: int = BAUD_DEFAULT,
                  boot_wait: float = 2.0) -> None:
+        self.port = str(port)
+        self.baudrate = int(baudrate)
         try:
             import serial
         except ImportError as exc:
@@ -337,15 +386,53 @@ class UnoController:
 
     def status(self) -> dict:
         """JSON-friendly status, as surfaced over BLE and the local HTTP API."""
+        is_sim = isinstance(self.transport, SimulatedTransport)
+        port_name = getattr(self.transport, "port", None)
         try:
             res = self.read_status().as_dict()
             if self._homed:
                 res["homed"] = True
+            res["simulated"] = is_sim
+            res["port"] = port_name
             return res
         except Exception as exc:
-            if self._homed:
-                return {"homed": True, "error": str(exc)}
-            raise
+            return {
+                "homed": self._homed,
+                "simulated": is_sim,
+                "port": port_name,
+                "error": str(exc),
+            }
+
+    def reconnect(self, preferred_port: str = "", baudrate: int = BAUD_DEFAULT) -> dict:
+        """Attempt to reconnect or switch to physical serial transport."""
+        port = find_uno_port(preferred_port)
+        if not port:
+            return {
+                "ok": False,
+                "simulated": isinstance(self.transport, SimulatedTransport),
+                "message": "No serial port found for Arduino Uno",
+            }
+        try:
+            new_trans = SerialTransport(port, baudrate)
+            old_trans = self.transport
+            self.transport = new_trans
+            try:
+                old_trans.close()
+            except Exception:
+                pass
+            self._homed = False
+            return {
+                "ok": True,
+                "simulated": False,
+                "port": port,
+                "message": f"Connected to Arduino Uno on {port}",
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "simulated": isinstance(self.transport, SimulatedTransport),
+                "error": str(exc),
+            }
 
     def home(self) -> None:
         self.command("HOME", TIMEOUT_HOME_S)

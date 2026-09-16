@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from pi_agent.calibration import CalibrationError, calibrate_from_rooks
 from pi_agent.network_manager import NetworkManager
 from pi_agent.setup_state import SetupReadiness
+from pi_agent.uno_controller import SimulatedTransport, find_uno_port
 
 
 class CalibrationRequest(BaseModel):
@@ -595,8 +596,31 @@ class LocalApiHost:
 
         @self.post_gantry("/local/gantry/home")
         def gantry_home():
+            # If currently simulated, check if physical Uno is available and auto-reconnect
+            if isinstance(self.game.uno.transport, SimulatedTransport):
+                port = find_uno_port()
+                if port:
+                    try:
+                        self.game.uno.reconnect(port)
+                    except Exception:
+                        pass
             result = self.game.handle({"type": "gantry.home", "data": {}})
-            return {"status": "ok", "data": {**result, "setup": self._setup_status()}}
+            is_sim = isinstance(self.game.uno.transport, SimulatedTransport)
+            port_used = getattr(self.game.uno.transport, "port", None)
+            return {
+                "status": "ok",
+                "data": {
+                    **result,
+                    "simulated": is_sim,
+                    "port": port_used,
+                    "setup": self._setup_status(),
+                },
+            }
+
+        @self.post_gantry("/local/gantry/reconnect")
+        def gantry_reconnect():
+            result = self.game.uno.reconnect()
+            return {"status": "ok", "data": result}
 
         @self.app.get("/local/gantry/status")
         def gantry_status():

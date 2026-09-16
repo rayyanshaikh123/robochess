@@ -82,7 +82,7 @@ ENGINE_SKILL_LEVEL = int(_get_env("ROBOCHESS_ENGINE_SKILL_LEVEL", "10"))
 UNO_PORT = _get_env("ROBOCHESS_UNO_PORT", "")
 UNO_BAUDRATE = int(_get_env("ROBOCHESS_UNO_BAUDRATE", "115200"))
 UNO_TIMEOUT_SECONDS = float(_get_env("ROBOCHESS_UNO_TIMEOUT_SECONDS", "8"))
-UNO_SIMULATOR = _get_env_bool("ROBOCHESS_UNO_SIMULATOR", "1")
+UNO_SIMULATOR = _get_env_bool("ROBOCHESS_UNO_SIMULATOR", "0")
 LOCAL_API_HOST = _get_env("ROBOCHESS_LOCAL_API_HOST", "0.0.0.0")
 LOCAL_API_PORT = int(_get_env("ROBOCHESS_LOCAL_API_PORT", "8765"))
 def _resolve_state_path(preferred: str) -> str:

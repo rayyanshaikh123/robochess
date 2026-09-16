@@ -1353,7 +1353,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   Future<void> _setupHomeGantry() async {
     if (_setupBusy) return;
     await _runSetupStep(() async {
-      final data = await PiLocalApi(baseUrl: _piBaseUrl).homeGantry();
+      final res = await PiLocalApi(baseUrl: _piBaseUrl).homeGantry();
+      final data = res['data'] as Map<String, dynamic>? ?? res;
       
       final setupStages = (data['setup']?['stages'] as List?)?.cast<Map>() ?? [];
       final stageHomed = setupStages.any((s) => s['key'] == 'gantry_homed' && s['ok'] == true);
@@ -1362,6 +1363,9 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                    stageHomed ||
                    (data['status'] != 'error' && data['error'] == null);
                    
+      final isSimulated = data['simulated'] == true ||
+          (data['gantry'] is Map && data['gantry']['simulated'] == true);
+      final port = data['port']?.toString();
       final error = data['error']?.toString();
 
       if (!mounted) return;
@@ -1369,7 +1373,13 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       setState(() {
         _setupValidated = homed;
         if (homed) {
-          _setupValidationNote = 'Gantry homed successfully ✓';
+          if (isSimulated) {
+            _setupValidationNote =
+                'Gantry homed in SIMULATOR mode (No physical Arduino Uno detected on Pi USB serial port)';
+          } else {
+            _setupValidationNote =
+                'Gantry homed on physical hardware (${port ?? 'serial'}) ✓';
+          }
           _setupError = null;
         } else {
           _setupValidationNote = 'Gantry homing failed: ${error ?? 'Unknown error'}';

@@ -93,6 +93,13 @@ class PiLocalApi {
     return _data(response, 'Pi gantry homing failed');
   }
 
+  Future<Map<String, dynamic>> reconnectGantry() async {
+    final response = await client
+        .post(_uri('/local/gantry/reconnect'))
+        .timeout(_requestTimeout);
+    return _data(response, 'Pi gantry reconnect failed');
+  }
+
 
   Future<Map<String, dynamic>> gantryStatus() async {
     final response =
