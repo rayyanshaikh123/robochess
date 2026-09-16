@@ -7,6 +7,7 @@ import '../widgets/robo_app_bar.dart';
 import '../providers/device_provider.dart';
 import '../providers/local_board_provider.dart';
 import '../../domain/models/device_model.dart';
+import '../../domain/models/robochess_device.dart';
 import '../theme/app_colors.dart';
 
 class CrossConnect extends ConsumerWidget {
@@ -250,7 +251,13 @@ class _LinkedBoards extends ConsumerWidget {
                   if (hasLocalDevice)
                     _LocalLinkedBoardCard(
                       deviceId: localDevice!.deviceId!,
+                      isConnected: localState.connection == LocalConnectionState.connected ||
+                          localState.connection == LocalConnectionState.ready,
                       onPlay: () => context.go('/play'),
+                      onConnect: () => context.push('/connect/link'),
+                      onForget: () async {
+                        await ref.read(localBoardProvider.notifier).forgetDevice();
+                      },
                     ),
                   ...items.map((device) {
                     final isSelected = device.deviceId == selectedId;
@@ -359,11 +366,17 @@ class _LinkedBoards extends ConsumerWidget {
 // ── Tournament Arena Launch Section ─────────────────────────────────────────────
 class _LocalLinkedBoardCard extends StatelessWidget {
   final String deviceId;
+  final bool isConnected;
   final VoidCallback onPlay;
+  final VoidCallback onConnect;
+  final VoidCallback? onForget;
 
   const _LocalLinkedBoardCard({
     required this.deviceId,
+    required this.isConnected,
     required this.onPlay,
+    required this.onConnect,
+    this.onForget,
   });
 
   @override
@@ -375,11 +388,17 @@ class _LocalLinkedBoardCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: kSurfaceContHighest,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: kPrimary),
+        border: Border.all(
+          color: isConnected ? kPrimary : kOutlineVariant.withValues(alpha: 0.2),
+        ),
       ),
       child: Row(
         children: [
-          const Icon(Icons.bluetooth_connected, color: kPrimary, size: 20),
+          Icon(
+            isConnected ? Icons.bluetooth_connected : Icons.bluetooth,
+            color: isConnected ? kPrimary : kOnSurfaceVariant,
+            size: 20,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -391,24 +410,36 @@ class _LocalLinkedBoardCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         color: kOnSurface)),
                 const SizedBox(height: 4),
-                Text('CONNECTED LOCALLY',
-                    style: GoogleFonts.inter(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        color: kPrimary,
-                        letterSpacing: 1)),
+                Text(
+                  isConnected ? 'CONNECTED LOCALLY' : 'SAVED BOARD (OFFLINE)',
+                  style: GoogleFonts.inter(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                    color: isConnected ? kPrimary : kOnSurfaceVariant,
+                    letterSpacing: 1,
+                  ),
+                ),
               ],
             ),
           ),
           TextButton(
-            onPressed: onPlay,
-            child: Text('PLAY',
-                style: GoogleFonts.inter(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: kPrimary,
-                    letterSpacing: 1)),
+            onPressed: isConnected ? onPlay : onConnect,
+            child: Text(
+              isConnected ? 'PLAY' : 'CONNECT',
+              style: GoogleFonts.inter(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: isConnected ? kPrimary : kSecondary,
+                letterSpacing: 1,
+              ),
+            ),
           ),
+          if (!isConnected && onForget != null)
+            IconButton(
+              icon: const Icon(Icons.close, size: 16, color: kOnSurfaceVariant),
+              tooltip: 'Forget saved board',
+              onPressed: onForget,
+            ),
         ],
       ),
     );

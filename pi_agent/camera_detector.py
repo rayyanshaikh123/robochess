@@ -51,16 +51,20 @@ class PiCameraDetector:
         except Exception:
             pass
         cloud_enabled = (
-            os.getenv("ROBOCHESS_VISION_MODE", "").strip().lower() == "cloud"
-            or os.getenv("ROBOCHESS_ROBOFLOW_ENABLED", "0").strip().lower()
+            os.getenv("ROBOCHESS_VISION_MODE", "auto").strip().lower() in {"cloud", "auto"}
+            or os.getenv("ROBOCHESS_ROBOFLOW_ENABLED", "1").strip().lower()
             in {"1", "true", "yes", "on"}
         )
-        cloud_url = os.getenv("ROBOCHESS_ROBOFLOW_MODEL_URL", "").strip() or os.getenv(
-            "ROBOFLOW_MODEL_URL", ""
-        ).strip()
-        cloud_key = os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip() or os.getenv(
-            "ROBOFLOW_API_KEY", ""
-        ).strip()
+        cloud_url = (
+            os.getenv("ROBOCHESS_ROBOFLOW_MODEL_URL", "").strip()
+            or os.getenv("ROBOFLOW_MODEL_URL", "").strip()
+            or "chess-yimaf-jwsta/5"
+        )
+        cloud_key = (
+            os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip()
+            or os.getenv("ROBOFLOW_API_KEY", "").strip()
+            or "1OyUTcW3mg1dcln38uRg"
+        )
 
         # If a local model path was given but does not exist on disk, fallback to cloud if key exists
         local_exists = bool(self.model_path and Path(self.model_path).is_file())

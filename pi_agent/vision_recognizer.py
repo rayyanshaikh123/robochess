@@ -325,17 +325,20 @@ class BoardRecognizer:
         self.roboflow_model_url = (
             os.getenv("ROBOCHESS_ROBOFLOW_MODEL_URL", "").strip()
             or os.getenv("ROBOFLOW_MODEL_URL", "").strip()
+            or "chess-yimaf-jwsta/5"
         )
         self.cloud_api_key = (
             os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip()
             or os.getenv("ROBOFLOW_API_KEY", "").strip()
+            or "1OyUTcW3mg1dcln38uRg"
         )
-        configured_cloud = os.getenv("ROBOCHESS_ROBOFLOW_ENABLED", "0").strip().lower() in {
+        configured_cloud = os.getenv("ROBOCHESS_ROBOFLOW_ENABLED", "1").strip().lower() in {
             "1", "true", "yes", "on"
         }
         model_id = (
             parse_cloud_model_id(self.roboflow_model_url)
             or parse_cloud_model_id(self.model_ref)
+            or "chess-yimaf-jwsta/5"
         )
         self.roboflow_enabled = (
             self.cloud_only

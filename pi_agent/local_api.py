@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -255,7 +255,7 @@ class LocalApiHost:
             return {"status": "ok", "data": self.detector.status()}
 
         @self.app.post("/local/model/load")
-        def load_model(payload: ModelLoadRequest | None = None):
+        def load_model(payload: ModelLoadRequest | None = Body(default=None)):
             if self.detector is None:
                 raise HTTPException(503, "Camera detector is not configured")
             if payload is not None:
@@ -272,6 +272,10 @@ class LocalApiHost:
                     self.detector.model_path = payload.model_path
                 if payload.confidence is not None:
                     self.detector.confidence = payload.confidence
+            if not os.getenv("ROBOCHESS_ROBOFLOW_MODEL_URL") and not os.getenv("ROBOFLOW_MODEL_URL"):
+                os.environ["ROBOCHESS_ROBOFLOW_MODEL_URL"] = "chess-yimaf-jwsta/5"
+            if not os.getenv("ROBOCHESS_ROBOFLOW_API_KEY") and not os.getenv("ROBOFLOW_API_KEY"):
+                os.environ["ROBOCHESS_ROBOFLOW_API_KEY"] = "1OyUTcW3mg1dcln38uRg"
             try:
                 self.detector.load_model()
             except Exception as exc:

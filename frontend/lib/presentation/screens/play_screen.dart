@@ -1209,13 +1209,15 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     
     final localState = ref.watch(localBoardProvider);
     final localDevice = localState.selected;
+    final isLocalConnected = localState.connection == LocalConnectionState.connected ||
+        localState.connection == LocalConnectionState.ready;
     if (localDevice?.deviceId != null &&
         devices.every((d) => d.deviceId != localDevice!.deviceId)) {
       devices.insert(
           0,
           DeviceModel(
             deviceId: localDevice!.deviceId!,
-            status: 'online',
+            status: isLocalConnected ? 'online' : 'offline',
             lastSeen: DateTime.now(),
           ));
     }
@@ -1297,6 +1299,15 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   }
 
   Future<void> _setupLoadModel() async {
+    final localState = ref.read(localBoardProvider);
+    final isConnected = localState.connection == LocalConnectionState.connected ||
+        localState.connection == LocalConnectionState.ready;
+    if (!isConnected) {
+      setState(() {
+        _setupError = 'Please connect your RoboChess board in Step 1 first.';
+      });
+      return;
+    }
     await _runSetupStep(() async {
       await PiLocalApi(baseUrl: _piBaseUrl).loadModel();
       setState(() => _setupModelLoaded = true);
@@ -2142,7 +2153,11 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   Widget _buildBoardSetupWizard(
       BuildContext context, DeviceModel? activeDevice) {
-    final isLinked = activeDevice != null;
+    final localState = ref.watch(localBoardProvider);
+    final isLocalConnected = localState.connection == LocalConnectionState.connected ||
+        localState.connection == LocalConnectionState.ready;
+    final isBoardConnected = activeDevice != null &&
+        (isLocalConnected || activeDevice.status.toLowerCase() == 'online');
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -2195,12 +2210,14 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           _buildWizardStepItem(
             stepNumber: '1',
             title: 'Link RoboChess Board',
-            subtitle: isLinked
+            subtitle: isBoardConnected
                 ? 'Connected: ${activeDevice.deviceId}'
-                : 'No board linked. Connect via Wi-Fi/Bluetooth.',
-            isComplete: isLinked,
+                : (activeDevice != null
+                    ? 'Saved board offline: ${activeDevice.deviceId} (Tap to connect)'
+                    : 'No board linked. Connect via Wi-Fi/Bluetooth.'),
+            isComplete: isBoardConnected,
             busy: false,
-            actionLabel: isLinked ? 'CHANGE' : 'LINK BOARD',
+            actionLabel: isBoardConnected ? 'CHANGE' : 'CONNECT',
             onAction: () => context.push('/connect'),
           ),
           const SizedBox(height: 10),

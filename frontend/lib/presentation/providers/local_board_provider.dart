@@ -186,9 +186,9 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
           displayName: 'RoboChess Pi',
           deviceId: savedDeviceId,
           rssi: 0,
-          state: LocalConnectionState.connected,
+          state: LocalConnectionState.disconnected,
         ),
-        connection: LocalConnectionState.paired,
+        connection: LocalConnectionState.disconnected,
       );
     }
     final cached = await store.loadState();
@@ -275,6 +275,23 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
       );
       rethrow;
     }
+  }
+
+  Future<void> disconnect() async {
+    try {
+      await repository.ble.disconnect();
+    } catch (_) {}
+    state = state.copyWith(
+      connection: LocalConnectionState.disconnected,
+    );
+  }
+
+  Future<void> forgetDevice() async {
+    try {
+      await repository.ble.disconnect();
+    } catch (_) {}
+    await store.saveDevice('');
+    state = const LocalBoardState();
   }
 
   Future<void> refreshNetworkStatus() async {
