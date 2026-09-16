@@ -4,19 +4,38 @@ from pathlib import Path
 
 
 def _load_local_env() -> None:
-    """Load pi_agent/.env for direct local runs without overriding systemd env."""
-    path = Path(__file__).with_name(".env")
-    try:
-        for raw_line in path.read_text().splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
+    """Load env from systemd EnvironmentFile or local .env paths without overriding existing vars."""
+    candidates = [
+        Path("/etc/robochess/pi-agent.env"),
+        Path("/etc/robochess/.env"),
+        Path(__file__).resolve().parent / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+        Path("/opt/robochess/pi_agent/.env"),
+        Path("/opt/robochess/.env"),
+        Path.cwd() / "pi_agent" / ".env",
+        Path.cwd() / ".env",
+    ]
+    for path in candidates:
+        try:
+            if not path.is_file():
                 continue
-            key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
-    except FileNotFoundError:
-        pass
+            for raw_line in path.read_text().splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                clean_key = key.strip()
+                clean_val = value.strip().strip('"').strip("'")
+                current = os.environ.get(clean_key)
+                if (current is None or not current.strip()) and clean_val:
+                    os.environ[clean_key] = clean_val
+                elif clean_key not in os.environ:
+                    os.environ[clean_key] = clean_val
+        except (OSError, PermissionError):
+            pass
 
 
+load_local_env = _load_local_env
 _load_local_env()
 
 

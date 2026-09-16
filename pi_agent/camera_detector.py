@@ -39,11 +39,17 @@ class PiCameraDetector:
         self.pending_auto_move: str | None = None
         self.pending_auto_san: str | None = None
         self.active_session: Any = None
+        self.session_getter: Any = None
         self._hand_stop_event = threading.Event()
         self._hand_thread: threading.Thread | None = None
         self._load_recognizer()
 
     def _load_recognizer(self) -> None:
+        try:
+            from pi_agent.config import load_local_env
+            load_local_env()
+        except Exception:
+            pass
         cloud_enabled = (
             os.getenv("ROBOCHESS_VISION_MODE", "").strip().lower() == "cloud"
             or os.getenv("ROBOCHESS_ROBOFLOW_ENABLED", "0").strip().lower()
@@ -55,13 +61,39 @@ class PiCameraDetector:
         cloud_key = os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip() or os.getenv(
             "ROBOFLOW_API_KEY", ""
         ).strip()
-        if not self.model_path and not (cloud_enabled and cloud_key):
-            self.last_error = "Configure a local model path or Roboflow model/key"
+
+        # If a local model path was given but does not exist on disk, fallback to cloud if key exists
+        local_exists = bool(self.model_path and Path(self.model_path).is_file())
+        if not local_exists and cloud_key:
+            cloud_enabled = True
+            os.environ["ROBOCHESS_VISION_MODE"] = "cloud"
+            os.environ["ROBOCHESS_ROBOFLOW_ENABLED"] = "1"
+
+        if not local_exists and not (cloud_enabled and cloud_key):
+            # Check standard fallback locations before giving up
+            for candidate in [
+                Path("/var/lib/robochess/models/best.pt"),
+                Path("/opt/robochess/models/best.pt"),
+                Path(__file__).resolve().parent / "models" / "best.pt",
+                Path.cwd() / "models" / "best.pt",
+            ]:
+                if candidate.is_file():
+                    self.model_path = str(candidate)
+                    local_exists = True
+                    break
+
+        if not local_exists and not (cloud_enabled and cloud_key):
+            self.last_error = (
+                f"No local model found at '{self.model_path or 'not specified'}' "
+                "and Roboflow API key is not configured."
+            )
             return
+
         try:
-            self.recognizer = BoardRecognizer(self.model_path, self.confidence)
+            effective_model = self.model_path if local_exists else "cloud"
+            self.recognizer = BoardRecognizer(effective_model, self.confidence)
             if not self.recognizer.is_ready:
-                self.last_error = "Vision model could not be loaded"
+                self.last_error = getattr(self.recognizer, "last_error", None) or "Vision model could not be initialized"
             else:
                 self.last_error = None
         except Exception as exc:
@@ -375,7 +407,7 @@ class PiCameraDetector:
 
         prev_gray = None
         while not self._hand_stop_event.is_set():
-            session = self.active_session
+            session = (self.session_getter() if self.session_getter else None) or self.active_session
             session_is_over = bool(getattr(session, "is_over", False)) if session else True
             session_phase = getattr(getattr(session, "phase", None), "value", None)
             if session is None or session_is_over or session_phase != "player_turn":
@@ -438,7 +470,7 @@ class PiCameraDetector:
     def _on_hand_left(self) -> None:
         """Triggered when the hand departs after making a move."""
         import time
-        session = self.active_session
+        session = (self.session_getter() if self.session_getter else None) or self.active_session
         session_is_over = bool(getattr(session, "is_over", False)) if session else True
         session_phase = getattr(getattr(session, "phase", None), "value", None)
         if session is None or session_is_over or session_phase != "player_turn":

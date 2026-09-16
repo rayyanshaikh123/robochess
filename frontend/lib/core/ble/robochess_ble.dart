@@ -91,18 +91,34 @@ class RoboChessBleClient {
     try {
       await device.connect(
           timeout: const Duration(seconds: 15), autoConnect: false);
-      // Request larger MTU for faster chunk transfers if supported.
-      try {
-        await device.requestMtu(517);
-      } catch (_) {
-        // Ignore if MTU request fails; fallback to default.
+      // Only request MTU on Android: iOS CoreBluetooth manages MTU automatically
+      // and calling requestMtu on iOS stalls discoverServices causing 15s timeout.
+      if (Platform.isAndroid) {
+        try {
+          await device.requestMtu(517).timeout(const Duration(seconds: 2));
+        } catch (_) {
+          // Ignore if MTU request fails; fallback to default.
+        }
       }
-      // iOS owns the pairing UI; Android also bonds automatically on the first
-      // authenticated write. Do not force a platform-specific bond dialog here.
       _device = device;
-      final services = await device.discoverServices();
+      // CoreBluetooth needs a brief moment after connect for peripheral GATT to settle.
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+
+      List<BluetoothService> services = device.servicesList;
+      final targetUuid = Guid(roboChessServiceUuid);
+      if (!services.any((item) => item.uuid == targetUuid)) {
+        try {
+          services = await device.discoverServices().timeout(const Duration(seconds: 8));
+        } catch (_) {
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+          services = device.servicesList;
+          if (!services.any((item) => item.uuid == targetUuid)) {
+            services = await device.discoverServices().timeout(const Duration(seconds: 8));
+          }
+        }
+      }
       final service = services.firstWhere(
-        (item) => item.uuid == Guid(roboChessServiceUuid),
+        (item) => item.uuid == targetUuid,
         orElse: () => throw StateError('RoboChess BLE service not found'),
       );
       BluetoothCharacteristic find(String uuid) =>

@@ -28,6 +28,15 @@ class MoveRequest(BaseModel):
     expected_version: int | None = None
 
 
+class ModelLoadRequest(BaseModel):
+    vision_mode: str | None = None
+    roboflow_enabled: bool | None = None
+    roboflow_model_url: str | None = None
+    roboflow_api_key: str | None = None
+    model_path: str | None = None
+    confidence: float | None = None
+
+
 def _order_corners(points):
     import numpy as np
 
@@ -88,8 +97,9 @@ class LocalApiHost:
     def __init__(self, game, network: NetworkManager, config: dict[str, Any], detector=None) -> None:
         self.game = game
         self.network = network
-        self.config = config
         self.detector = detector
+        if self.detector is not None:
+            self.detector.session_getter = lambda: self.game.session
         self.state_path = Path(config["state_path"])
         self.calibration_path = self.state_path / "camera_calibration.json"
         self._camera = None
@@ -245,9 +255,23 @@ class LocalApiHost:
             return {"status": "ok", "data": self.detector.status()}
 
         @self.app.post("/local/model/load")
-        def load_model():
+        def load_model(payload: ModelLoadRequest | None = None):
             if self.detector is None:
                 raise HTTPException(503, "Camera detector is not configured")
+            if payload is not None:
+                if payload.vision_mode:
+                    os.environ["ROBOCHESS_VISION_MODE"] = payload.vision_mode
+                if payload.roboflow_enabled is not None:
+                    os.environ["ROBOCHESS_ROBOFLOW_ENABLED"] = "1" if payload.roboflow_enabled else "0"
+                if payload.roboflow_model_url:
+                    os.environ["ROBOCHESS_ROBOFLOW_MODEL_URL"] = payload.roboflow_model_url
+                if payload.roboflow_api_key:
+                    os.environ["ROBOCHESS_ROBOFLOW_API_KEY"] = payload.roboflow_api_key
+                if payload.model_path:
+                    os.environ["ROBOCHESS_MODEL_PATH"] = payload.model_path
+                    self.detector.model_path = payload.model_path
+                if payload.confidence is not None:
+                    self.detector.confidence = payload.confidence
             try:
                 self.detector.load_model()
             except Exception as exc:
@@ -497,6 +521,7 @@ class LocalApiHost:
             hand_present = bool(self.detector and self.detector.hand_present)
             session = self.game.session
             phase = getattr(getattr(session, "phase", None), "value", None)
+            snapshot = session.snapshot() if session else None
             if session and phase != "player_turn":
                 return {"status": "ok", "data": {
                     "ready": False,
@@ -504,7 +529,7 @@ class LocalApiHost:
                         "awaiting_engine", "executing_engine_move"
                     } else phase or "no_session",
                     "hand_present": hand_present,
-                    "state": session.snapshot(),
+                    "state": snapshot,
                 }}
             pending_move = self.detector.pending_auto_move if self.detector else None
             pending_san = self.detector.pending_auto_san if self.detector else None
@@ -519,6 +544,7 @@ class LocalApiHost:
                     "type": "move.propose",
                     "data": {"uci": pending_move, "expected_version": self.game.session.version},
                 })
+                current_snapshot = self.game.session.snapshot() if self.game.session else None
                 return {"status": "ok", "data": {
                     "ready": True,
                     "uci": pending_move,
@@ -527,6 +553,7 @@ class LocalApiHost:
                     "reason": "hand_left",
                     "hand_present": False,
                     "engine_pending": bool(result.get("engine_pending")),
+                    "state": current_snapshot,
                     **result,
                 }}
 
@@ -537,6 +564,7 @@ class LocalApiHost:
                 "hand_present": hand_present,
                 "missing": setup["missing"],
                 "vision": self.detector.status() if self.detector else {},
+                "state": snapshot,
             }}
 
         @self.app.post("/local/move/detect-if-clear")

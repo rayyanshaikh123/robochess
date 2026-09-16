@@ -554,6 +554,15 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       final ready = data['ready'] == true;
       final reason = data['reason']?.toString() ?? '';
 
+      // Immediately sync Pi state if returned (e.g. engine move completed or board updated)
+      if (data['state'] is Map) {
+        final state = Map<String, dynamic>.from(data['state'] as Map);
+        final version = int.tryParse(state['version']?.toString() ?? '');
+        if (version != null && version >= _linkedGameVersion && mounted) {
+          setState(() => _applyPiSnapshot(state, version));
+        }
+      }
+
       if (ready) {
         // Auto-detect triggered successfully!
         final uci = data['uci']?.toString();

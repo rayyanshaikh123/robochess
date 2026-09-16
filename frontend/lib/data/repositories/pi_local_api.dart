@@ -44,9 +44,24 @@ class PiLocalApi {
     return _data(response, 'Pi model status failed');
   }
 
-  Future<Map<String, dynamic>> loadModel() async {
-    final response =
-        await client.post(_uri('/local/model/load')).timeout(_requestTimeout);
+  Future<Map<String, dynamic>> loadModel({
+    String? roboflowModelUrl,
+    String? roboflowApiKey,
+    String? visionMode,
+  }) async {
+    final body = <String, dynamic>{
+      'roboflow_model_url': roboflowModelUrl ?? 'chess-yimaf-jwsta/5',
+      'roboflow_api_key': roboflowApiKey ?? '1OyUTcW3mg1dcln38uRg',
+      'vision_mode': visionMode ?? 'cloud',
+      'roboflow_enabled': true,
+    };
+    final response = await client
+        .post(
+          _uri('/local/model/load'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 30));
     return _data(response, 'Pi model load failed');
   }
 

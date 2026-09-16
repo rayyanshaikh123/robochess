@@ -314,6 +314,11 @@ class BoardRecognizer:
             model_path: Path to trained YOLO .pt weights.
             confidence: Minimum detection confidence threshold.
         """
+        try:
+            from pi_agent.config import load_local_env
+            load_local_env()
+        except Exception:
+            pass
         self.model_ref = str(model_path).strip()
         self.vision_mode = os.getenv("ROBOCHESS_VISION_MODE", "auto").strip().lower()
         self.cloud_only = self.vision_mode == "cloud"
@@ -338,9 +343,22 @@ class BoardRecognizer:
             or bool(model_id and self.cloud_api_key)
         )
         self.cloud_model_id = model_id if self.roboflow_enabled else None
-        self.model_path: Optional[Path] = (
-            None if self.cloud_only else (Path(self.model_ref) if self.model_ref else None)
-        )
+        resolved_path = None
+        if not self.cloud_only and self.model_ref:
+            p = Path(self.model_ref)
+            if p.is_file():
+                resolved_path = p
+        if not self.cloud_only and resolved_path is None:
+            for fallback_candidate in [
+                Path("/var/lib/robochess/models/best.pt"),
+                Path("/opt/robochess/models/best.pt"),
+                Path(__file__).resolve().parent / "models" / "best.pt",
+                Path.cwd() / "models" / "best.pt",
+            ]:
+                if fallback_candidate.is_file():
+                    resolved_path = fallback_candidate
+                    break
+        self.model_path: Optional[Path] = resolved_path
         self.confidence = confidence
         self.infer_iou = 0.45
         self.infer_max_det = 96
@@ -359,6 +377,7 @@ class BoardRecognizer:
         self.model_names: dict[int, str] = {}
         self.last_error: Optional[str] = None
         self.active_detector = "none"
+        self._http_session = requests.Session()
 
         # Keep both candidates loaded when possible. Cloud is preferred at
         # inference time; local YOLO remains available for offline fallback.
@@ -627,15 +646,16 @@ class BoardRecognizer:
             for params in param_options:
                 for send_mode in ("multipart", "raw"):
                     try:
+                        session_client = getattr(self, "_http_session", requests)
                         if send_mode == "multipart":
-                            http_resp = requests.post(
+                            http_resp = session_client.post(
                                 url,
                                 params=params,
                                 files={"file": ("frame.jpg", encoded.tobytes(), "image/jpeg")},
                                 timeout=timeout_sec,
                             )
                         else:
-                            http_resp = requests.post(
+                            http_resp = session_client.post(
                                 url,
                                 params=params,
                                 data=encoded.tobytes(),
