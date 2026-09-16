@@ -645,7 +645,7 @@ class BoardRecognizer:
         # Try multipart first, then raw bytes fallback for compatibility.
         response = None
         last_error = None
-        timeout_sec = float(os.getenv("ROBOCHESS_ROBOFLOW_TIMEOUT_SECONDS", os.getenv("ROBOFLOW_TIMEOUT", "20")))
+        timeout_sec = float(os.getenv("ROBOCHESS_ROBOFLOW_TIMEOUT_SECONDS", os.getenv("ROBOFLOW_TIMEOUT", "5")))
         max_retries = max(0, int(os.getenv("ROBOCHESS_ROBOFLOW_RETRIES", os.getenv("ROBOFLOW_RETRIES", "0"))))
         for attempt in range(max_retries + 1):
             for params in param_options:

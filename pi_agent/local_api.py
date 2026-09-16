@@ -539,10 +539,25 @@ class LocalApiHost:
             pending_move = self.detector.pending_auto_move if self.detector else None
             pending_san = self.detector.pending_auto_san if self.detector else None
 
+            # If no pending move yet and hand is not on board, do a quick opportunistic check
+            if pending_move is None and not hand_present and self.detector and self.detector.model_available and self.detector.calibrated and session:
+                try:
+                    candidates = self.detector.detect_candidates(session)
+                    if candidates:
+                        pending_move = candidates[0]
+                        try:
+                            import chess
+                            pending_san = session.board.san(chess.Move.from_uci(pending_move))
+                        except Exception:
+                            pending_san = pending_move
+                except Exception:
+                    pass
+
             if pending_move is not None and self.game.session:
-                with self.detector._lock:
-                    self.detector.pending_auto_move = None
-                    self.detector.pending_auto_san = None
+                if self.detector:
+                    with self.detector._lock:
+                        self.detector.pending_auto_move = None
+                        self.detector.pending_auto_san = None
 
                 # Propose human move to game session
                 result = self.game.handle({
@@ -555,14 +570,22 @@ class LocalApiHost:
                     "uci": pending_move,
                     "san": pending_san or pending_move,
                     "fen": self.game.session.board.fen() if self.game.session else None,
-                    "reason": "hand_left",
+                    "reason": "move_detected",
                     "hand_present": False,
                     "engine_pending": bool(result.get("engine_pending")),
                     "state": current_snapshot,
                     **result,
                 }}
 
-            reason = "hand_present" if hand_present else "waiting_for_hand"
+            if not self.detector or not self.detector.model_available:
+                reason = "vision_model_not_ready"
+            elif not self.detector.calibrated:
+                reason = "board_not_calibrated"
+            elif hand_present:
+                reason = "hand_present"
+            else:
+                reason = "waiting_for_move"
+
             return {"status": "ok", "data": {
                 "ready": False,
                 "reason": reason,
@@ -574,24 +597,22 @@ class LocalApiHost:
 
         @self.app.post("/local/move/detect-if-clear")
         def detect_move_if_clear():
+            if self.detector:
+                self.detector.hand_present = False
             return self._detect_result()
 
         @self.app.post("/local/move/analyze")
         def analyze_move():
+            if self.detector:
+                self.detector.hand_present = False
             return self._detect_result()
 
         @self.app.post("/local/move/analyze-and-reply")
         def analyze_and_reply():
-            if self.detector and self.detector.hand_present:
-                return {
-                    "status": "waiting",
-                    "data": {
-                        "analysis_status": "waiting",
-                        "reason": "hand_present",
-                        "analysis_message": "Hand detected. Move away to detect.",
-                        "retry": True,
-                    },
-                }
+            # Manual snapshot detection requested by user.
+            # Never block on hand_present! Clear it and detect current frame.
+            if self.detector is not None:
+                self.detector.hand_present = False
             return self._detect_result(apply_move=True)
 
         @self.post_gantry("/local/gantry/home")
@@ -644,6 +665,13 @@ class LocalApiHost:
         def game_state():
             return {"status": "ok", "data": self.game.session.snapshot() if self.game.session else None}
 
+        @self.app.get("/local/game/session")
+        def game_session():
+            session = self.game.session
+            if session is None:
+                return {"status": "ok", "data": None}
+            return {"status": "ok", "data": session.snapshot()}
+
     def post_gantry(self, path: str):
         return self.app.post(path)
 
@@ -652,14 +680,43 @@ class LocalApiHost:
             raise HTTPException(503, "Camera detector is not configured")
         if not self.game.session:
             raise HTTPException(409, "Start a local game session first")
+        if not self.detector.model_available:
+            err = self.detector.last_error or "Vision model is not loaded or configured"
+            return {
+                "status": "error",
+                "data": {
+                    "analysis_status": "error",
+                    "reason": "vision_model_not_ready",
+                    "analysis_message": f"Vision model not ready: {err}. You can tap your move on screen.",
+                    "retry": False,
+                    "vision": self.detector.status(),
+                },
+            }
+        if not self.detector.calibrated:
+            return {
+                "status": "error",
+                "data": {
+                    "analysis_status": "error",
+                    "reason": "board_not_calibrated",
+                    "analysis_message": "Board is not calibrated. Calibrate the board first, or tap your move on screen.",
+                    "retry": False,
+                    "vision": self.detector.status(),
+                },
+            }
         candidates = self.detector.detect_candidates(self.game.session)
         if not candidates:
+            if self.detector.last_error:
+                msg = f"Vision error: {self.detector.last_error}. You can also tap your move on screen."
+                reason = "vision_error"
+            else:
+                msg = "No move detected yet. Try moving a piece and removing your hand, or tap your move on screen."
+                reason = "no_legal_move"
             return {
                 "status": "waiting",
                 "data": {
                     "analysis_status": "waiting",
-                    "reason": "no_legal_move",
-                    "analysis_message": "No move detected yet. Try moving a piece and removing your hand.",
+                    "reason": reason,
+                    "analysis_message": msg,
                     "retry": False,
                     "vision": self.detector.status(),
                 },

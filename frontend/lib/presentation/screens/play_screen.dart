@@ -247,7 +247,6 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   // ── Tap on a board square ──
   void _onSquareTap(int row, int col) {
-    if (_gameUsesBoard) return;
     if (_isBotTurn()) return;
     final square = _squareName(row, col);
     final piece = _game.get(square);
@@ -293,7 +292,19 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     final uci = '${from}${to}${promotion ?? ''}';
     final applied = _applyUciMove(uci);
     if (applied) {
-      setState(() {});
+      setState(() {
+        if (_gameUsesBoard) {
+          _snapshotNote = 'Move sent: $uci. Engine thinking...';
+        }
+      });
+
+      // If playing with the physical board, also forward the move to the Pi agent
+      if (_gameUsesBoard && _piBaseUrl.isNotEmpty) {
+        PiLocalApi(baseUrl: _piBaseUrl)
+            .gameMove(uci, _linkedGameVersion)
+            .catchError((_) => <String, dynamic>{});
+      }
+
       _submitRemoteMove(uci);
 
       if (_gameMode == 'human_vs_ai' && !_game.game_over && _isBotTurn()) {
@@ -473,7 +484,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
   void _startAutoDetect() {
     if (_autoDetectTimer != null) return;
-    _autoDetectTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+    _autoDetectTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (!_gameUsesBoard ||
           _snapshotDetecting ||
           _syncing ||
@@ -484,12 +495,10 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   }
 
   /// Periodically fetch the Pi's authoritative game state and sync the local
-  /// Flutter board.  This catches engine moves executed on the Pi that were not
-  /// reflected via auto-detect (e.g. when the Pi ran the engine turn but the
-  /// Flutter client missed the result).
+  /// Flutter board. This catches engine moves executed on the Pi.
   void _startPiSync() {
     if (_piSyncTimer != null) return;
-    _piSyncTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+    _piSyncTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
       if (!_gameUsesBoard || _piBaseUrl.isEmpty || !mounted || _piSyncInFlight) return;
       _piSyncInFlight = true;
       try {
@@ -535,7 +544,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
 
     _linkedGameVersion = version;
     final phase = snapshot['phase']?.toString();
-    if (phase == 'executing_engine_move') {
+    if (phase == 'executing_engine_move' || phase == 'awaiting_engine') {
       _snapshotNote = 'Engine moving the pieces...';
     } else if (phase == 'recovery') {
       _syncError = snapshot['last_error']?.toString() ?? 'Physical board needs recovery.';
@@ -554,6 +563,17 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       final data = result['data'] as Map<String, dynamic>? ?? result;
       final ready = data['ready'] == true;
       final reason = data['reason']?.toString() ?? '';
+
+      // Keep model readiness in sync with Pi detector state
+      if (data['vision'] is Map) {
+        final vision = Map<String, dynamic>.from(data['vision'] as Map);
+        final isModelReady = vision['ready'] == true;
+        if (mounted && _setupModelLoaded != isModelReady) {
+          setState(() {
+            _setupModelLoaded = isModelReady;
+          });
+        }
+      }
 
       // Immediately sync Pi state if returned (e.g. engine move completed or board updated)
       if (data['state'] is Map) {
@@ -608,10 +628,25 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           await _fetchLiveFrame();
         }
       } else if (reason.isNotEmpty && mounted) {
+        String friendly;
+        if (reason == 'hand_present') {
+          friendly = 'Hand detected on board...';
+        } else if (reason == 'vision_model_not_ready') {
+          friendly = 'Vision inactive — tap move on screen';
+        } else if (reason == 'board_not_calibrated') {
+          friendly = 'Board not calibrated — tap move on screen';
+        } else if (reason == 'waiting_for_move' || reason == 'waiting_for_hand') {
+          friendly = 'Your turn — move on board or tap screen';
+        } else if (reason == 'engine_move' ||
+            reason == 'engine_turn' ||
+            reason == 'executing_engine_move' ||
+            reason == 'awaiting_engine') {
+          friendly = 'Engine is moving pieces...';
+        } else {
+          friendly = reason;
+        }
         setState(() {
-          _snapshotNote = reason == 'hand_present'
-              ? 'Hand detected. Move away to detect.'
-              : reason;
+          _snapshotNote = friendly;
         });
       }
     } catch (err) {
@@ -623,10 +658,10 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     if (_snapshotDetecting) return;
     setState(() {
       _snapshotDetecting = true;
-      _snapshotNote = 'Waiting for clear board...';
+      _snapshotNote = 'Analyzing board move...';
     });
     try {
-      const maxAttempts = 8;
+      const maxAttempts = 3;
       for (int attempt = 0; attempt < maxAttempts; attempt++) {
         final Map<String, dynamic> result;
         if (_gameUsesBoard && _piBaseUrl.isNotEmpty) {
@@ -652,12 +687,12 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
             setState(() {
               _snapshotNote = message ??
                   (reason == 'hand_present'
-                      ? 'Hand detected. Move away to detect.'
+                      ? 'Hand on board. Move hand away and retry.'
                       : 'Hold steady and try again.');
             });
           }
           if (retry && attempt < maxAttempts - 1) {
-            await Future.delayed(const Duration(milliseconds: 400));
+            await Future.delayed(const Duration(milliseconds: 250));
             continue;
           }
           break;
@@ -666,12 +701,24 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         if (status == 'red') {
           if (mounted) {
             setState(() {
-              _snapshotNote = message ?? 'No legal move matched. Try again.';
+              _snapshotNote = message ?? 'No legal move matched. Try again or tap screen.';
             });
           }
           if (retry && attempt < maxAttempts - 1) {
-            await Future.delayed(const Duration(milliseconds: 400));
+            await Future.delayed(const Duration(milliseconds: 250));
             continue;
+          }
+          break;
+        }
+
+        if (status == 'error') {
+          if (mounted) {
+            setState(() {
+              _snapshotNote = message ??
+                  (reason == 'vision_model_not_ready'
+                      ? 'Vision model inactive. Tap your move on screen.'
+                      : 'Detection error. Tap your move on screen.');
+            });
           }
           break;
         }
@@ -718,7 +765,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       }
     } catch (err) {
       if (mounted) {
-        setState(() => _snapshotNote = 'Snapshot detection failed.');
+        setState(() => _snapshotNote = 'Snapshot detection failed. Tap on screen to move.');
       }
     } finally {
       if (mounted) {
@@ -2814,6 +2861,12 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                 isWhitePieceColor: !bottomIsWhite,
               ),
 
+              // ── Dedicated Board Play Control Bar ──
+              if (_gameUsesBoard) ...[
+                const SizedBox(height: 8),
+                _buildBoardPlayControlBar(),
+              ],
+
               const SizedBox(height: 10),
 
               // ── SAN Move History Ribbon (Chess.com layout) ──
@@ -2825,7 +2878,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
               _buildChessComToolbar(),
 
               // ── Live Camera or Board Validation if board used ──
-              if (_gameUsesBoard && _linkedGameId != null) ...[
+              if (_gameUsesBoard) ...[
                 const SizedBox(height: 12),
                 _buildLiveBoardPreview(),
                 const SizedBox(height: 10),
@@ -3429,11 +3482,201 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     );
   }
 
+  Widget _buildBoardPlayControlBar() {
+    if (!_gameUsesBoard) return const SizedBox.shrink();
+    final isHumanTurn =
+        _gameMode != 'human_vs_ai' || _game.turn == _humanColor();
+
+    String displayStatus;
+    Color statusColor;
+    IconData statusIcon;
+
+    if (_snapshotDetecting) {
+      displayStatus = 'ANALYZING MOVE...';
+      statusColor = kPrimary;
+      statusIcon = Icons.search_rounded;
+    } else if (!isHumanTurn) {
+      displayStatus = 'ENGINE MOVING...';
+      statusColor = Colors.amberAccent;
+      statusIcon = Icons.precision_manufacturing_rounded;
+    } else if (_snapshotNote != null && _snapshotNote!.isNotEmpty) {
+      displayStatus = _snapshotNote!;
+      statusColor = _snapshotNote!.contains('Auto-detected') || _snapshotNote!.contains('Move')
+          ? Colors.greenAccent
+          : kOnSurfaceVariant;
+      statusIcon = Icons.radio_button_checked;
+    } else {
+      displayStatus = 'YOUR TURN: Move on board or tap screen';
+      statusColor = Colors.greenAccent;
+      statusIcon = Icons.touch_app_rounded;
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 8, bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: kSurfaceContLow,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isHumanTurn
+              ? kPrimary.withValues(alpha: 0.35)
+              : kOutlineVariant.withValues(alpha: 0.15),
+          width: 1.2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(statusIcon, size: 14, color: statusColor),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  displayStatus,
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: isHumanTurn ? kOnSurface : kOnSurfaceVariant,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (_gameUsesBoard)
+                GestureDetector(
+                  onTap: _setupModelLoaded ? null : _setupLoadModel,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: _setupModelLoaded
+                          ? Colors.green.withValues(alpha: 0.15)
+                          : Colors.amber.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(
+                        color: _setupModelLoaded
+                            ? Colors.greenAccent.withValues(alpha: 0.4)
+                            : Colors.amberAccent.withValues(alpha: 0.6),
+                        width: 0.8,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _setupModelLoaded
+                              ? Icons.check_circle_rounded
+                              : Icons.warning_amber_rounded,
+                          size: 10,
+                          color: _setupModelLoaded
+                              ? Colors.greenAccent
+                              : Colors.amberAccent,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _setupModelLoaded
+                              ? 'VISION READY'
+                              : 'VISION INACTIVE (LOAD)',
+                          style: GoogleFonts.inter(
+                            fontSize: 8,
+                            fontWeight: FontWeight.w800,
+                            color: _setupModelLoaded
+                                ? Colors.greenAccent
+                                : Colors.amberAccent,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: ElevatedButton.icon(
+                  onPressed: (_snapshotDetecting || !isHumanTurn)
+                      ? null
+                      : _detectSnapshotMove,
+                  icon: _snapshotDetecting
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.black,
+                          ),
+                        )
+                      : const Icon(Icons.camera_alt_rounded, size: 16),
+                  label: Text(
+                    _snapshotDetecting ? 'DETECTING...' : 'DONE MOVING (DETECT)',
+                    style: GoogleFonts.outfit(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kPrimary,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    if (_liveFrame == null) {
+                      _fetchLiveFrame();
+                    } else {
+                      _clearSnapshot();
+                    }
+                  },
+                  icon: Icon(
+                    _liveFrame != null
+                        ? Icons.videocam_off_outlined
+                        : Icons.videocam_outlined,
+                    size: 15,
+                  ),
+                  label: Text(
+                    _liveFrame != null ? 'HIDE CAM' : 'VIEW CAM',
+                    style: GoogleFonts.outfit(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: kOnSurface,
+                    side: BorderSide(
+                      color: kOutlineVariant.withValues(alpha: 0.4),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── Interactive board builder ──
   Widget _buildChessBoard(BuildContext context) {
     final isHumanTurn =
         _gameMode != 'human_vs_ai' || _game.turn == _humanColor();
-    final inputEnabled = !_gameUsesBoard && !_game.game_over && isHumanTurn;
+    final inputEnabled = !_game.game_over && isHumanTurn;
     final boardTheme = ref.watch(boardThemeProvider);
     return LayoutBuilder(
       builder: (context, constraints) {

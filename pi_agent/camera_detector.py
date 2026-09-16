@@ -111,7 +111,12 @@ class PiCameraDetector:
 
     @property
     def model_available(self) -> bool:
-        return bool(self.recognizer and self.recognizer.is_ready)
+        if self.recognizer is None or not getattr(self.recognizer, "is_ready", False):
+            try:
+                self._load_recognizer()
+            except Exception:
+                pass
+        return bool(self.recognizer and getattr(self.recognizer, "is_ready", False))
 
     @property
     def calibrated(self) -> bool:
@@ -178,20 +183,14 @@ class PiCameraDetector:
         # VIDIOC_QUERYCAP = _IOR('V', 0, struct v4l2_capability), 104 bytes.
         VIDIOC_QUERYCAP = 0x80685600
         V4L2_CAP_VIDEO_CAPTURE = 0x00000001
-        V4L2_CAP_DEVICE_CAPS = 0x80000000
-        buffer = bytearray(104)
         try:
             with open(path, "rb", buffering=0) as handle:
-                fcntl.ioctl(handle, VIDIOC_QUERYCAP, buffer, True)
+                buf = bytearray(104)
+                fcntl.ioctl(handle.fileno(), VIDIOC_QUERYCAP, buf)
+                caps = struct.unpack_from("<I", buf, 16)[0]
+                return bool(caps & V4L2_CAP_VIDEO_CAPTURE)
         except OSError:
             return False
-        except Exception:
-            return None
-        capabilities, device_caps = struct.unpack_from("<II", buffer, 84)
-        # device_caps describes this specific node; capabilities covers the
-        # whole physical device, which on a Pi spans many nodes.
-        effective = device_caps if capabilities & V4L2_CAP_DEVICE_CAPS else capabilities
-        return bool(effective & V4L2_CAP_VIDEO_CAPTURE)
 
     def _capture_nodes(self) -> list[str]:
         """Video nodes that report capture capability."""
@@ -318,15 +317,18 @@ class PiCameraDetector:
         frame = self.capture_frame()
         if self.recognizer:
             self._apply_calibration()
-            return self._warp(frame) if self.calibrated else frame
+            return self._warp(frame)
         return frame
 
     def status(self) -> dict:
         recognizer_status = self.recognizer.status() if self.recognizer else {}
         return {
-            "model_available": self.model_available,
+            "configured": True,
             "calibrated": self.calibrated,
-            "model_path_configured": bool(self.model_path),
+            "ready": self.model_available,
+            "hand_present": self.hand_present,
+            "pending_auto_move": self.pending_auto_move,
+            "camera_index": self.camera_index,
             "last_error": self.last_error,
             "detector": recognizer_status,
             # Surfaced so a camera problem can be diagnosed from the app
@@ -359,13 +361,13 @@ class PiCameraDetector:
                 detections, warped.shape[1], warped.shape[0], self.confidence
             )
             move, score, gap = self.recognizer.infer_move_from_state(
-                session.board, state, min_score=45, min_gap=1
+                session.board, state, min_score=40, min_gap=1
             )
             if move is None:
                 # Fallback to occupancy matching
                 occupancy = self.recognizer.to_occupancy_state(state)
                 move, score, gap = self.recognizer.infer_move_from_occupancy(
-                    session.board, occupancy, min_score=45, min_gap=1
+                    session.board, occupancy, min_score=38, min_gap=1
                 )
             self.last_error = None
             return [move.uci()] if move is not None else []
@@ -394,7 +396,8 @@ class PiCameraDetector:
 
     def _hand_loop(self) -> None:
         """Continuously check for hand motion and trigger detection on hand departure.
-        Matches robochess_control.py / robochess_tk.py _hand_loop behavior.
+        Also evaluates steady board state so moves are detected even if the initial
+        departure snapshot was missed or hand was moved quickly.
         """
         import time
         try:
@@ -403,22 +406,34 @@ class PiCameraDetector:
         except ImportError:
             return
 
-        MOTION_DIFF_THRESHOLD = 20
+        MOTION_DIFF_THRESHOLD = 28
         MOTION_BLUR = 7
-        MOTION_RATIO_TRIGGER = 0.02
-        HAND_ABSENCE_SECONDS = 0.35
-        HAND_TRIGGER_COOLDOWN = 0.8
+        MOTION_RATIO_TRIGGER = 0.04
+        HAND_ABSENCE_SECONDS = 0.4
+        HAND_TRIGGER_COOLDOWN = 0.6
+        STEADY_EVAL_INTERVAL = 1.2
 
         prev_gray = None
+        kernel = np.ones((5, 5), np.uint8)
+        steady_start_time = None
+        last_steady_eval_time = 0.0
+
         while not self._hand_stop_event.is_set():
             session = (self.session_getter() if self.session_getter else None) or self.active_session
             session_is_over = bool(getattr(session, "is_over", False)) if session else True
             session_phase = getattr(getattr(session, "phase", None), "value", None)
             if session is None or session_is_over or session_phase != "player_turn":
-                time.sleep(0.2)
+                self.hand_present = False
+                steady_start_time = None
+                time.sleep(0.15)
                 continue
             if not self.calibrated or not self.model_available:
                 time.sleep(0.2)
+                continue
+
+            if self.pending_auto_move is not None:
+                # Move is already pending for local API pickup
+                time.sleep(0.1)
                 continue
 
             try:
@@ -455,32 +470,41 @@ class PiCameraDetector:
 
             diff = cv2.absdiff(prev_gray, gray)
             _, thresh = cv2.threshold(diff, MOTION_DIFF_THRESHOLD, 255, cv2.THRESH_BINARY)
-            motion_ratio = float(np.count_nonzero(thresh)) / float(thresh.size)
+            # Filter isolated camera sensor noise
+            opened = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+            motion_ratio = float(np.count_nonzero(opened)) / float(opened.size)
             prev_gray = gray
             now = time.time()
 
             if motion_ratio >= MOTION_RATIO_TRIGGER:
                 self.hand_present = True
                 self.hand_last_seen = now
+                steady_start_time = None
             else:
+                if steady_start_time is None:
+                    steady_start_time = now
+
                 if self.hand_present and (now - self.hand_last_seen) >= HAND_ABSENCE_SECONDS:
+                    self.hand_present = False
                     if (now - self.last_trigger_time) >= HAND_TRIGGER_COOLDOWN:
                         self.last_trigger_time = now
-                        self._on_hand_left()
-                    self.hand_present = False
+                        self._on_hand_left(session)
+                        last_steady_eval_time = time.time()
+                elif not self.hand_present and self.pending_auto_move is None:
+                    # Continuous evaluation on steady board:
+                    # If the board is motionless for >= 0.5s and not recently evaluated, check for a legal move
+                    if (now - steady_start_time) >= 0.5 and (now - last_steady_eval_time) >= STEADY_EVAL_INTERVAL:
+                        last_steady_eval_time = now
+                        self._evaluate_steady_board(session)
 
             time.sleep(0.1)
 
-    def _on_hand_left(self) -> None:
-        """Triggered when the hand departs after making a move."""
-        import time
-        session = (self.session_getter() if self.session_getter else None) or self.active_session
-        session_is_over = bool(getattr(session, "is_over", False)) if session else True
-        session_phase = getattr(getattr(session, "phase", None), "value", None)
-        if session is None or session_is_over or session_phase != "player_turn":
+    def _evaluate_steady_board(self, session) -> None:
+        """Opportunistically evaluate the stationary board for legal moves."""
+        if not session or getattr(session.phase, "value", session.phase) != "player_turn":
             return
-        # Brief pause to let camera exposure stabilize after hand leaves
-        time.sleep(0.2)
+        if self.pending_auto_move is not None:
+            return
         candidates = self.detect_candidates(session)
         if candidates:
             move_uci = candidates[0]
@@ -495,3 +519,15 @@ class PiCameraDetector:
                 self.pending_auto_move = move_uci
                 self.pending_auto_san = san
 
+    def _on_hand_left(self, session=None) -> None:
+        """Triggered when the hand departs after making a move."""
+        import time
+        if session is None:
+            session = (self.session_getter() if self.session_getter else None) or self.active_session
+        session_is_over = bool(getattr(session, "is_over", False)) if session else True
+        session_phase = getattr(getattr(session, "phase", None), "value", None)
+        if session is None or session_is_over or session_phase != "player_turn":
+            return
+        # Brief pause to let camera exposure stabilize after hand leaves
+        time.sleep(0.15)
+        self._evaluate_steady_board(session)

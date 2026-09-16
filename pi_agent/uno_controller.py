@@ -69,18 +69,18 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-MAGNET_SETTLE_S = max(0.0, _env_float("ROBOCHESS_MAGNET_SETTLE_SECONDS", 0.08))
-GANTRY_HOME_MODE = os.getenv("ROBOCHESS_GANTRY_HOME_MODE", "interval").strip().lower()
+MAGNET_SETTLE_S = max(0.0, _env_float("ROBOCHESS_MAGNET_SETTLE_SECONDS", 0.04))
+GANTRY_HOME_MODE = os.getenv("ROBOCHESS_GANTRY_HOME_MODE", "never").strip().lower()
 if GANTRY_HOME_MODE not in {"always", "interval", "never"}:
-    GANTRY_HOME_MODE = "interval"
-GANTRY_REHOME_INTERVAL = max(1, _env_int("ROBOCHESS_GANTRY_REHOME_INTERVAL", 8))
+    GANTRY_HOME_MODE = "never"
+GANTRY_REHOME_INTERVAL = max(1, _env_int("ROBOCHESS_GANTRY_REHOME_INTERVAL", 50))
 
 # Speed profile pushed to the firmware after homing.
-# Restores safe, reliable defaults (70 mm/s / 800 mm/s² / 150 ms dwell) and
+# Restores safe, snappy verified speed (80 mm/s / 1000 mm/s² / 100 ms dwell) and
 # saves them to EEPROM.
-FIRMWARE_MAX_SPEED  = _env_float("ROBOCHESS_FIRMWARE_MAX_SPEED", 70.0)    # mm/s  — smooth, safe verified speed
-FIRMWARE_MAX_ACCEL  = _env_float("ROBOCHESS_FIRMWARE_MAX_ACCEL", 800.0)   # mm/s² — gentle acceleration; avoids step skipping
-FIRMWARE_MAG_DWELL  = _env_int("ROBOCHESS_FIRMWARE_MAG_DWELL", 150)       # ms    — ample dwell for piece pickup/release
+FIRMWARE_MAX_SPEED  = _env_float("ROBOCHESS_FIRMWARE_MAX_SPEED", 80.0)     # mm/s  — brisk, smooth verified speed
+FIRMWARE_MAX_ACCEL  = _env_float("ROBOCHESS_FIRMWARE_MAX_ACCEL", 1000.0)   # mm/s² — crisp acceleration; avoids step skipping
+FIRMWARE_MAG_DWELL  = _env_int("ROBOCHESS_FIRMWARE_MAG_DWELL", 100)        # ms    — ample dwell for piece pickup/release
 
 STATUS_RE = re.compile(
     r"X=(-?\d+(?:\.\d+)?)\s+Y=(-?\d+(?:\.\d+)?)"
@@ -328,13 +328,13 @@ class UnoController:
 
     def ensure_homed(self) -> dict:
         """Verify the Uno has homed before any coordinate motion."""
+        if self._homed:
+            return {"homed": True}
         try:
             status = self.read_status()
             if status.homed is True:
-                if not self._homed:
-                    # First time we confirm homing — push the fast speed profile.
-                    self._apply_speed_config()
                 self._homed = True
+                self._apply_speed_config()
                 return status.as_dict()
         except Exception:
             pass
