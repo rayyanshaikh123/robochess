@@ -24,6 +24,7 @@ import '../../domain/models/robochess_device.dart';
 import '../../domain/models/game_state.dart';
 import '../../domain/models/opening_context.dart';
 import '../../domain/models/calibration_frame.dart';
+import '../../domain/models/pi_setup.dart';
 import '../../domain/voice/voice_service.dart';
 import '../../domain/voice/move_parser.dart';
 import '../../data/repositories/pi_local_api.dart';
@@ -135,6 +136,9 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   Timer? _autoDetectTimer;
   Timer? _piSyncTimer;  // periodic Pi game-state sync when using board
   bool _piSyncInFlight = false;
+  bool _handOnBoard = false;  // Track if hand is detected on board
+  PiGamePhase? _piGamePhase;
+  Timer? _syncCoordinatorTimer;  // Unified sync coordinator
 
   @override
   void initState() {
@@ -181,6 +185,22 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     });
     _resultSub = _voiceService.resultStream.listen(_handleVoiceResult);
     _loadMicDevices();
+    // Sync vision model state with Pi on startup
+    _syncVisionModelState();
+  }
+
+  Future<void> _syncVisionModelState() async {
+    if (_piBaseUrl.isEmpty) return;
+    try {
+      final ready = await PiLocalApi(baseUrl: _piBaseUrl).checkVisionReady();
+      if (mounted) {
+        setState(() {
+          _setupModelLoaded = ready;
+        });
+      }
+    } catch (_) {
+      // Ignore errors - Pi may not be reachable yet
+    }
   }
 
   @override
@@ -479,40 +499,178 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       _livePreviewError = null;
       _livePreviewLoading = false;
       _snapshotNote = null;
+      _snapshotDetecting = false;
+      _inGameValidated = false;
+      _inGameValidationNote = null;
+      _handOnBoard = false;
     });
+    _fetchLiveFrame();
   }
 
   void _startAutoDetect() {
-    if (_autoDetectTimer != null) return;
-    _autoDetectTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
-      if (!_gameUsesBoard ||
-          _snapshotDetecting ||
-          _syncing ||
-          !_inGameValidated) return;
-      _checkAutoDetectReady();
-    });
-    _startPiSync();
+    _syncCoordinatorTimer?.cancel();
+    _syncCoordinatorTimer = null;
+    _scheduleSyncCoordinator();
   }
 
-  /// Periodically fetch the Pi's authoritative game state and sync the local
-  /// Flutter board. This catches engine moves executed on the Pi.
   void _startPiSync() {
-    if (_piSyncTimer != null) return;
-    _piSyncTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
-      if (!_gameUsesBoard || _piBaseUrl.isEmpty || !mounted || _piSyncInFlight) return;
-      _piSyncInFlight = true;
-      try {
-        final raw = await PiLocalApi(baseUrl: _piBaseUrl).gameState();
-        final version = int.tryParse(raw['version']?.toString() ?? '');
-        if (version != null && version >= _linkedGameVersion && mounted) {
-          setState(() => _applyPiSnapshot(raw, version));
-        }
-      } catch (_) {
-        // Silently ignore connectivity failures — the timer will retry.
-      } finally {
-        _piSyncInFlight = false;
+    // Now handled by unified sync coordinator
+    _startAutoDetect();
+  }
+
+  void _scheduleSyncCoordinator() {
+    if (!_gameUsesBoard || _piBaseUrl.isEmpty || !mounted) return;
+    
+    // Use 500ms interval for balanced polling
+    _syncCoordinatorTimer = Timer(const Duration(milliseconds: 500), () {
+      if (mounted) {
+        _runSyncCoordinator();
+        _scheduleSyncCoordinator();
       }
     });
+  }
+
+  Future<void> _runSyncCoordinator() async {
+    if (!_gameUsesBoard || _piBaseUrl.isEmpty || !mounted) return;
+    
+    try {
+      // 1. Get Pi game state (includes phase, version, moves, etc.)
+      final raw = await PiLocalApi(baseUrl: _piBaseUrl).gameState();
+      
+      // Parse Pi phase
+      final phaseStr = raw['phase']?.toString() ?? 'unknown';
+      final newPhase = PiGamePhase.fromString(phaseStr);
+      
+      if (mounted && newPhase != _piGamePhase) {
+        setState(() {
+          _piGamePhase = newPhase;
+        });
+      }
+      
+      final version = int.tryParse(raw['version']?.toString() ?? '');
+      if (version == null || version < _linkedGameVersion) return;
+      
+      // 2. Apply Pi snapshot if version advanced
+      // But only if no pending local move is waiting for confirmation
+      final hasPendingLocalMove = _pendingLocalUci != null && _pendingLocalVersion != null;
+      if (!hasPendingLocalMove) {
+        if (mounted) {
+          setState(() => _applyPiSnapshot(raw, version));
+        }
+      }
+      
+      // 3. Handle phase-specific behavior
+      await _handlePiPhase(newPhase, raw);
+      
+    } catch (_) {
+      // Silently ignore connectivity failures
+      if (mounted && _piGamePhase != PiGamePhase.disconnected) {
+        setState(() => _piGamePhase = PiGamePhase.disconnected);
+      }
+    }
+  }
+
+  Future<void> _handlePiPhase(PiGamePhase phase, Map<String, dynamic> raw) async {
+    if (!mounted) return;
+    
+    final isHumanTurn = _gameMode != 'human_vs_ai' || _game.turn == _humanColor();
+    
+    switch (phase) {
+      case PiGamePhase.waitingForMove:
+        // Human's turn - allow auto-detection if not already detecting
+        if (isHumanTurn && !_snapshotDetecting && _inGameValidated) {
+          await _checkAutoDetectReady();
+        }
+        if (mounted) {
+          setState(() {
+            _snapshotNote = 'Your turn — move on board or tap screen';
+          });
+        }
+        break;
+        
+      case PiGamePhase.detecting:
+        // Pi is detecting a move
+        if (mounted) {
+          setState(() {
+            _snapshotNote = 'Pi detecting move...';
+          });
+        }
+        break;
+        
+      case PiGamePhase.validating:
+        // Pi is validating the board
+        if (mounted) {
+          setState(() {
+            _snapshotNote = 'Validating board position...';
+          });
+        }
+        break;
+        
+      case PiGamePhase.thinking:
+        // Engine is thinking
+        if (mounted) {
+          setState(() {
+            _snapshotNote = 'Engine thinking...';
+          });
+        }
+        break;
+        
+      case PiGamePhase.moving:
+        // Pi is physically moving piece
+        if (mounted) {
+          setState(() {
+            _snapshotNote = 'Engine moving piece...';
+          });
+        }
+        break;
+        
+      case PiGamePhase.verifying:
+        // Pi is verifying the move result
+        if (mounted) {
+          setState(() {
+            _snapshotNote = 'Verifying board state...';
+          });
+        }
+        break;
+        
+      case PiGamePhase.stateMismatch:
+        // State mismatch - need recovery
+        if (mounted) {
+          setState(() {
+            _syncError = raw['last_error']?.toString() ?? 'State mismatch detected. Board recovery needed.';
+          });
+        }
+        break;
+        
+      case PiGamePhase.error:
+      case PiGamePhase.emergencyStop:
+      case PiGamePhase.cameraError:
+      case PiGamePhase.motorError:
+      case PiGamePhase.hardwareError:
+        if (mounted) {
+          setState(() {
+            _syncError = raw['last_error']?.toString() ?? 'Hardware error: ${phase.displayName}';
+          });
+        }
+        break;
+        
+      case PiGamePhase.disconnected:
+        if (mounted) {
+          setState(() {
+            _piConnectionError = 'Pi disconnected. Check connection.';
+          });
+        }
+        break;
+        
+      default:
+        // Other phases (boot, initializing, ready, calibrating) - just update note
+        if (mounted && phase != PiGamePhase.unknown) {
+          setState(() {
+            _snapshotNote = 'Pi: ${phase.displayName}';
+          });
+        }
+        break;
+    }
   }
 
   void _applyPiSnapshot(Map<String, dynamic> snapshot, int version) {
@@ -563,6 +721,26 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       final data = result['data'] as Map<String, dynamic>? ?? result;
       final ready = data['ready'] == true;
       final reason = data['reason']?.toString() ?? '';
+
+      // Handle hand detection - pause auto-detect when hand is present
+      if (reason == 'hand_present') {
+        if (!_handOnBoard && mounted) {
+          setState(() {
+            _handOnBoard = true;
+            _snapshotNote = 'Hand detected — waiting for clear board...';
+          });
+        }
+        // Hand present - skip this cycle, will retry on next timer tick
+        return;
+      }
+
+      // Hand was present but now cleared - resume detection
+      if (_handOnBoard && mounted) {
+        setState(() {
+          _handOnBoard = false;
+          _snapshotNote = 'Board clear — detecting moves...';
+        });
+      }
 
       // Keep model readiness in sync with Pi detector state
       if (data['vision'] is Map) {
@@ -1371,6 +1549,20 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
               _snapshotNote = 'Vision model loaded successfully!';
             }
           });
+        }
+        // If model load reported ready, verify with Pi's vision readiness check
+        if (isReady) {
+          await Future.delayed(const Duration(milliseconds: 500));
+          if (!mounted) return;
+          final visionReady = await PiLocalApi(baseUrl: _piBaseUrl).checkVisionReady();
+          if (mounted) {
+            setState(() {
+              _setupModelLoaded = visionReady;
+              if (!visionReady) {
+                _setupError = 'Vision model loaded but not ready. Tap LOAD MODEL again.';
+              }
+            });
+          }
         }
       } catch (e) {
         debugPrint('Pi loadModel note: $e');
@@ -2313,6 +2505,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
             busy: _setupBusy && !_setupModelLoaded,
             actionLabel: isVisionReady ? 'READY' : 'LOAD MODEL',
             onAction: isVisionReady ? null : _setupLoadModel,
+            secondaryLabel: 'CHECK STATUS',
+            onSecondaryAction: _syncVisionModelState,
           ),
           const SizedBox(height: 10),
 
@@ -3339,7 +3533,11 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                     : _detectSnapshotMove,
                 icon: const Icon(Icons.camera_alt, size: 14),
                 label: Text(
-                    _snapshotDetecting ? 'DETECTING...' : 'DETECT WHEN CLEAR',
+                    _snapshotDetecting
+                        ? 'DETECTING...'
+                        : (_handOnBoard
+                            ? 'WAITING FOR CLEAR BOARD...'
+                            : 'DETECT WHEN CLEAR'),
                     style: GoogleFonts.inter(
                         fontSize: 9,
                         fontWeight: FontWeight.w700,
@@ -3623,7 +3821,11 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                         )
                       : const Icon(Icons.camera_alt_rounded, size: 16),
                   label: Text(
-                    _snapshotDetecting ? 'DETECTING...' : 'DONE MOVING (DETECT)',
+                    _snapshotDetecting
+                        ? 'DETECTING...'
+                        : (_handOnBoard
+                            ? 'WAITING FOR CLEAR BOARD...'
+                            : 'DONE MOVING (DETECT)'),
                     style: GoogleFonts.outfit(
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
@@ -4242,14 +4444,65 @@ class _PreGameSheetState extends ConsumerState<_PreGameSheet> {
 
   Future<void> _startGame() async {
     final useBoard = _surface == _PlaySurface.board;
-    if (useBoard && !_validated) {
-      await _validateBoard();
-      if (!_validated) return;
+    if (useBoard) {
+      if (!_validated) {
+        await _validateBoard();
+        if (!_validated) return;
+      }
+      // Ensure vision model is loaded and ready on Pi
+      final visionReady = await _ensureVisionReady();
+      if (!visionReady) return;
     }
     final mode = _resolveMode();
     Navigator.of(context).pop(
       _PreGameResult(mode: mode, difficulty: _difficulty, useBoard: useBoard),
     );
+  }
+
+  Future<bool> _ensureVisionReady() async {
+    if (_modelLoaded) return true;
+    
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    
+    try {
+      // First check if vision is already ready on Pi
+      final ready = await widget.localApi.checkVisionReady();
+      if (ready) {
+        setState(() {
+          _modelLoaded = true;
+          _busy = false;
+        });
+        return true;
+      }
+      
+      // Load model on Pi
+      await widget.localApi.loadModel();
+      
+      // Poll until vision is ready (max 60 seconds)
+      for (int i = 0; i < 120; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (!mounted) return false;
+        final ready = await widget.localApi.checkVisionReady();
+        if (ready) {
+          setState(() {
+            _modelLoaded = true;
+            _busy = false;
+          });
+          return true;
+        }
+      }
+      
+      throw Exception('Vision model load timed out');
+    } catch (e) {
+      setState(() {
+        _error = 'Failed to load vision model: $e';
+        _busy = false;
+      });
+      return false;
+    }
   }
 
   @override

@@ -300,4 +300,37 @@ class PiLocalApi {
         .timeout(_requestTimeout);
     return _data(response, 'Pi flip calibration failed');
   }
+
+  Future<bool> checkVisionReady() async {
+    try {
+      final response = await client
+          .get(_uri('/local/move/auto-detect-ready'))
+          .timeout(_requestTimeout);
+      if (response.statusCode >= 400) return false;
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>?;
+      if (data == null) return false;
+      final vision = data['vision'] as Map<String, dynamic>?;
+      if (vision == null) return false;
+      return vision['ready'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<PiGamePhase> getGamePhase() async {
+    try {
+      final response = await client
+          .get(_uri('/local/game/state'))
+          .timeout(_requestTimeout);
+      if (response.statusCode >= 400) return PiGamePhase.disconnected;
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>?;
+      if (data == null) return PiGamePhase.disconnected;
+      final phaseStr = data['phase']?.toString() ?? 'unknown';
+      return PiGamePhase.fromString(phaseStr);
+    } catch (_) {
+      return PiGamePhase.disconnected;
+    }
+  }
 }
