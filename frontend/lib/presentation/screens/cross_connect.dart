@@ -55,15 +55,24 @@ class _StatusBanner extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final devices = ref.watch(deviceListProvider).valueOrNull ?? [];
+    final localState = ref.watch(localBoardProvider);
     final selectedId = ref.watch(selectedDeviceProvider);
     final active = _resolveActiveDevice(devices, selectedId);
-    final lastSeenText =
-        active?.lastSeen != null ? _formatRelative(active!.lastSeen!) : '--';
-    final connectionLabel = active?.status == 'connected'
+
+    final isLocalConnected = localState.connection == LocalConnectionState.connected ||
+        localState.connection == LocalConnectionState.ready;
+    final hasLocal = localState.selected?.deviceId != null;
+
+    final lastSeenText = isLocalConnected
+        ? 'Online now'
+        : (active?.lastSeen != null
+            ? _formatRelative(active!.lastSeen!)
+            : (hasLocal ? 'Saved' : '--'));
+    final connectionLabel = (isLocalConnected || active?.status == 'connected')
         ? 'Connected'
-        : active == null
-            ? 'No board linked'
-            : 'Offline';
+        : (hasLocal || active != null)
+            ? 'Offline'
+            : 'No board linked';
 
     return Column(
       children: [
@@ -79,10 +88,18 @@ class _StatusBanner extends ConsumerWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: kSecondary.withOpacity(0.1),
+                  color: (isLocalConnected || active?.status == 'connected')
+                      ? kPrimary.withValues(alpha: 0.12)
+                      : kSecondary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.router, color: kSecondary, size: 22),
+                child: Icon(
+                  isLocalConnected ? Icons.wifi : Icons.router,
+                  color: (isLocalConnected || active?.status == 'connected')
+                      ? kPrimary
+                      : kSecondary,
+                  size: 22,
+                ),
               ),
               const SizedBox(width: 14),
               Expanded(child: _ActiveDeviceStatus()),
@@ -102,7 +119,7 @@ class _StatusBanner extends ConsumerWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: kPrimary.withOpacity(0.1),
+                  color: kPrimary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child:
@@ -113,7 +130,7 @@ class _StatusBanner extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('LAST SEEN',
+                    Text('STATUS',
                         style: GoogleFonts.inter(
                             fontSize: 9,
                             fontWeight: FontWeight.w700,
@@ -129,7 +146,11 @@ class _StatusBanner extends ConsumerWidget {
               ),
               Text(connectionLabel,
                   style: GoogleFonts.inter(
-                      fontSize: 11, color: kOnSurfaceVariant)),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: (isLocalConnected || active?.status == 'connected')
+                          ? kPrimary
+                          : kOnSurfaceVariant)),
             ],
           ),
         ),
@@ -142,10 +163,24 @@ class _ActiveDeviceStatus extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final devices = ref.watch(deviceListProvider).valueOrNull ?? [];
+    final localState = ref.watch(localBoardProvider);
     final selectedId = ref.watch(selectedDeviceProvider);
     final active = _resolveActiveDevice(devices, selectedId);
-    final statusText =
-        active == null ? 'NO BOARD LINKED' : (active.status.toUpperCase());
+
+    final isLocalConnected = localState.connection == LocalConnectionState.connected ||
+        localState.connection == LocalConnectionState.ready;
+    final hasLocal = localState.selected?.deviceId != null;
+
+    final deviceName = isLocalConnected
+        ? (localState.selected?.displayName ?? localState.selected?.deviceId ?? 'RoboChess Pi')
+        : (active?.deviceId ?? (hasLocal ? (localState.selected?.displayName ?? localState.selected!.deviceId!) : 'Connect a board'));
+
+    final isConnected = isLocalConnected || active?.status == 'connected';
+    final statusText = isConnected
+        ? 'CONNECTED'
+        : (hasLocal || active != null)
+            ? 'OFFLINE'
+            : 'NO BOARD LINKED';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -157,21 +192,20 @@ class _ActiveDeviceStatus extends ConsumerWidget {
                 color: kOnSurfaceVariant,
                 letterSpacing: 2)),
         const SizedBox(height: 4),
-        Text(active?.deviceId ?? 'Connect a board',
+        Text(deviceName,
             style: GoogleFonts.outfit(
                 fontSize: 16, fontWeight: FontWeight.w700, color: kOnSurface)),
         const SizedBox(height: 6),
         Row(
           children: [
             _PulsingDot(
-                color: active?.status == 'connected' ? kPrimary : kSecondary),
+                color: isConnected ? kPrimary : kSecondary),
             const SizedBox(width: 6),
             Text(statusText,
                 style: GoogleFonts.inter(
                     fontSize: 11,
                     fontWeight: FontWeight.w500,
-                    color:
-                        active?.status == 'connected' ? kPrimary : kSecondary)),
+                    color: isConnected ? kPrimary : kSecondary)),
           ],
         ),
       ],
@@ -235,9 +269,36 @@ class _LinkedBoards extends ConsumerWidget {
               final hasLocalDevice = localDevice?.deviceId != null &&
                   items.every((item) => item.deviceId != localDevice!.deviceId);
               if (items.isEmpty && !hasLocalDevice) {
-                return Text('No boards linked yet.',
-                    style: GoogleFonts.inter(
-                        fontSize: 12, color: kOnSurfaceVariant));
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: kSurfaceContHighest,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    children: [
+                      const Icon(Icons.memory, color: kSecondary, size: 36),
+                      const SizedBox(height: 8),
+                      Text('No boards connected yet',
+                          style: GoogleFonts.outfit(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: kOnSurface)),
+                      const SizedBox(height: 4),
+                      Text('Pair your board via Wi-Fi or Bluetooth to start playing.',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.inter(
+                              fontSize: 11, color: kOnSurfaceVariant)),
+                      const SizedBox(height: 14),
+                      FilledButton.icon(
+                        onPressed: () => context.go('/connect/link'),
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('PAIR / SET UP BOARD'),
+                      ),
+                    ],
+                  ),
+                );
               }
               if (selectedId == null && items.isNotEmpty) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -254,7 +315,6 @@ class _LinkedBoards extends ConsumerWidget {
                       isConnected: localState.connection == LocalConnectionState.connected ||
                           localState.connection == LocalConnectionState.ready,
                       onPlay: () => context.go('/play'),
-                      onConnect: () => context.push('/connect/link'),
                       onForget: () async {
                         await ref.read(localBoardProvider.notifier).forgetDevice();
                       },
@@ -344,7 +404,7 @@ class _LinkedBoards extends ConsumerWidget {
                         ],
                       ),
                     );
-                  }).toList(),
+                  }),
                 ],
               );
             },
@@ -364,82 +424,169 @@ class _LinkedBoards extends ConsumerWidget {
 }
 
 // ── Tournament Arena Launch Section ─────────────────────────────────────────────
-class _LocalLinkedBoardCard extends StatelessWidget {
+class _LocalLinkedBoardCard extends ConsumerStatefulWidget {
   final String deviceId;
   final bool isConnected;
   final VoidCallback onPlay;
-  final VoidCallback onConnect;
   final VoidCallback? onForget;
 
   const _LocalLinkedBoardCard({
     required this.deviceId,
     required this.isConnected,
     required this.onPlay,
-    required this.onConnect,
     this.onForget,
   });
 
   @override
+  ConsumerState<_LocalLinkedBoardCard> createState() =>
+      _LocalLinkedBoardCardState();
+}
+
+class _LocalLinkedBoardCardState
+    extends ConsumerState<_LocalLinkedBoardCard> {
+  bool _connecting = false;
+
+  Future<void> _handleConnect() async {
+    setState(() => _connecting = true);
+    try {
+      await ref.read(localBoardProvider.notifier).connectLocalApi();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Board connected successfully over Wi-Fi!'),
+            backgroundColor: Colors.teal,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+                'Cannot reach board on Wi-Fi. Make sure the Pi is powered on, or set up Wi-Fi on the board.'),
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'SET UP WI-FI',
+              textColor: Colors.amber,
+              onPressed: () => context.push('/connect/link'),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _connecting = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final isConnected = widget.isConnected;
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: kSurfaceContHighest,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isConnected ? kPrimary : kOutlineVariant.withValues(alpha: 0.2),
+          width: isConnected ? 1.5 : 1.0,
         ),
       ),
       child: Row(
         children: [
-          Icon(
-            isConnected ? Icons.bluetooth_connected : Icons.bluetooth,
-            color: isConnected ? kPrimary : kOnSurfaceVariant,
-            size: 20,
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: (isConnected ? kPrimary : kSecondary)
+                  .withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              isConnected ? Icons.wifi : Icons.wifi_off,
+              color: isConnected ? kPrimary : kSecondary,
+              size: 20,
+            ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(deviceId,
+                Text(widget.deviceId,
                     style: GoogleFonts.inter(
-                        fontSize: 12,
+                        fontSize: 13,
                         fontWeight: FontWeight.w700,
                         color: kOnSurface)),
                 const SizedBox(height: 4),
-                Text(
-                  isConnected ? 'CONNECTED LOCALLY' : 'SAVED BOARD (OFFLINE)',
-                  style: GoogleFonts.inter(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    color: isConnected ? kPrimary : kOnSurfaceVariant,
-                    letterSpacing: 1,
-                  ),
+                Row(
+                  children: [
+                    _PulsingDot(color: isConnected ? kPrimary : kSecondary),
+                    const SizedBox(width: 6),
+                    Text(
+                      isConnected
+                          ? 'ONLINE (WI-FI)'
+                          : (_connecting ? 'CONNECTING...' : 'OFFLINE'),
+                      style: GoogleFonts.inter(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: isConnected ? kPrimary : kSecondary,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
-          TextButton(
-            onPressed: isConnected ? onPlay : onConnect,
-            child: Text(
-              isConnected ? 'PLAY' : 'CONNECT',
-              style: GoogleFonts.inter(
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                color: isConnected ? kPrimary : kSecondary,
-                letterSpacing: 1,
+          if (isConnected) ...[
+            FilledButton.tonal(
+              onPressed: widget.onPlay,
+              style: FilledButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               ),
+              child: const Text('PLAY',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
             ),
-          ),
-          if (!isConnected && onForget != null)
+            const SizedBox(width: 4),
             IconButton(
-              icon: const Icon(Icons.close, size: 16, color: kOnSurfaceVariant),
-              tooltip: 'Forget saved board',
-              onPressed: onForget,
+              icon: const Icon(Icons.tune, size: 18, color: kSecondary),
+              tooltip: 'Board Settings & Calibration',
+              onPressed: () =>
+                  context.go('/connect/setup/${widget.deviceId}'),
             ),
+          ] else ...[
+            if (_connecting)
+              const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else ...[
+              FilledButton(
+                onPressed: _handleConnect,
+                style: FilledButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                ),
+                child: const Text('CONNECT'),
+              ),
+              IconButton(
+                icon: const Icon(Icons.wifi_find, size: 18, color: kSecondary),
+                tooltip: 'Set up Wi-Fi on Board',
+                onPressed: () => context.push('/connect/link'),
+              ),
+            ],
+            if (widget.onForget != null)
+              IconButton(
+                icon:
+                    const Icon(Icons.close, size: 16, color: kOnSurfaceVariant),
+                tooltip: 'Forget saved board',
+                onPressed: widget.onForget,
+              ),
+          ],
         ],
       ),
     );
@@ -528,9 +675,9 @@ class _ArenaLaunchSection extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 18),
-          Row(
+          const Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
+            children: [
               _StatChip(
                 icon: Icons.psychology_outlined,
                 label: 'STOCKFISH READY',

@@ -371,10 +371,12 @@ class BoardRecognizer:
         self.infer_augment = False
         self.model: Optional[object] = None
         self.cloud_model = None
-        self.cloud_api_key = (
-            os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip()
-            or os.getenv("ROBOFLOW_API_KEY", "").strip()
-        )
+        if not self.cloud_api_key:
+            self.cloud_api_key = (
+                os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip()
+                or os.getenv("ROBOFLOW_API_KEY", "").strip()
+                or "1OyUTcW3mg1dcln38uRg"
+            )
         self.cloud_base_url = self._cloud_base_url(self.roboflow_model_url)
         self.warp_matrix: Optional[np.ndarray] = None
         self.model_names: dict[int, str] = {}

@@ -86,7 +86,8 @@ class _BoardSetupScreenState extends ConsumerState<BoardSetupScreen> {
             const Card(child: ListTile(title: Text('Checking Pi setup…')))
           else
             ...setup.stages.map((stage) => _StageTile(stage: stage)),
-          if (state.network == null || !state.network!.internetAvailable) ...[
+          if ((state.network?.wifiConnected != true && state.network?.ipAddress == null) &&
+              (state.network == null || !state.network!.internetAvailable)) ...[
             const SizedBox(height: 12),
             _WifiProvisioningPanel(networks: state.wifiNetworks),
           ],
@@ -132,13 +133,11 @@ class _BoardSetupScreenState extends ConsumerState<BoardSetupScreen> {
                 ? () async {
                     await ref.read(localBoardProvider.notifier).confirmSetup();
                     if (!context.mounted) return;
-                    if (ref.read(localBoardProvider).piState != null) {
-                      context.go('/local');
-                    }
+                    context.go('/play');
                   }
                 : null,
             icon: const Icon(Icons.play_arrow),
-            label: const Text('START PLAYING ON PI'),
+            label: const Text('READY — PLAY CHESS'),
           ),
           if (state.error != null) ...[
             const SizedBox(height: 12),
@@ -243,23 +242,51 @@ class _PiDiagnostics extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isConnected = connection == LocalConnectionState.connected ||
+        connection == LocalConnectionState.ready;
+    final isWifiOk =
+        network?.wifiConnected == true || (network?.ipAddress != null);
     final rows = <Widget>[
-      _DiagnosticRow('Bluetooth',
-          connection != LocalConnectionState.disconnected, connection.name),
-      _DiagnosticRow('Wi-Fi', network?.wifiConnected == true,
-          network?.ssid ?? 'Not connected'),
-      _DiagnosticRow('Internet', network?.internetAvailable == true,
-          network?.state ?? 'Checking'),
-      _DiagnosticRow('Backend', network?.backendAvailable == true,
-          network?.backendAvailable == true ? 'Connected' : 'Offline'),
-      _DiagnosticRow('Pi local API', network?.localServiceAvailable != false,
-          network?.ipAddress ?? 'Waiting for Pi address'),
       _DiagnosticRow(
-          'Board setup',
-          setup?.ready == true,
-          setup == null
-              ? 'Checking'
-              : (setup?.ready == true ? 'Ready' : 'Incomplete')),
+        'Board Link',
+        connection != LocalConnectionState.disconnected,
+        isConnected ? 'Connected' : connection.name,
+      ),
+      _DiagnosticRow(
+        'Wi-Fi',
+        isWifiOk,
+        network?.ssid != null
+            ? network!.ssid!
+            : (network?.ipAddress != null
+                ? 'Connected (${network!.ipAddress})'
+                : 'Not connected'),
+      ),
+      _DiagnosticRow(
+        'Internet',
+        network?.internetAvailable == true,
+        network?.internetAvailable == true
+            ? 'Online'
+            : (network?.state ?? 'Checking'),
+      ),
+      _DiagnosticRow(
+        'Backend',
+        network?.backendAvailable == true,
+        network?.backendAvailable == true ? 'Connected' : 'Local Mode',
+      ),
+      _DiagnosticRow(
+        'Pi local API',
+        network?.localServiceAvailable != false,
+        network?.ipAddress ?? '192.168.0.219:8765',
+      ),
+      _DiagnosticRow(
+        'Board setup',
+        setup?.ready == true,
+        setup == null
+            ? 'Checking'
+            : (setup?.ready == true
+                ? 'Ready to Play'
+                : 'Calibration / Model needed'),
+      ),
     ];
     return Card(
       child: Padding(

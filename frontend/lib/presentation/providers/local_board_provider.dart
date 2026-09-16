@@ -250,18 +250,24 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
     try {
       final api = PiLocalApi(baseUrl: targetUrl);
       final setup = await api.setupStatus();
+      PiNetworkStatus? net;
+      try {
+        final netData = await api.networkStatus();
+        net = PiNetworkStatus.fromMap(netData);
+      } catch (_) {}
       final id = defaultDeviceId;
       await store.saveDevice(id);
       state = state.copyWith(
         selected: RoboChessDevice(
           remoteId: id,
-          displayName: 'RoboChess Pi (Wi-Fi)',
+          displayName: 'RoboChess Pi',
           deviceId: id,
           rssi: 0,
           state: LocalConnectionState.connected,
         ),
         localApiBaseUrl: targetUrl,
         setup: setup,
+        network: net ?? state.network,
         connection: setup.ready
             ? LocalConnectionState.ready
             : LocalConnectionState.connected,
@@ -360,6 +366,14 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
   }
 
   Future<void> refreshNetworkStatus() async {
+    final baseUrl = state.localApiBaseUrl ?? AppConfig.piLocalApiBaseUrl;
+    try {
+      final api = PiLocalApi(baseUrl: baseUrl);
+      final data = await api.networkStatus();
+      final net = PiNetworkStatus.fromMap(data);
+      state = state.copyWith(network: net, clearError: true);
+      return;
+    } catch (_) {}
     try {
       await repository.requestNetworkStatus();
     } catch (error) {
