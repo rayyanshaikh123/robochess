@@ -37,11 +37,13 @@ from pi_agent.heartbeat import HeartbeatWorker
 from pi_agent.camera_detector import PiCameraDetector
 from pi_agent.config import (
     ENGINE_SKILL_LEVEL, ENGINE_TIME_SECONDS, STOCKFISH_PATH, UNO_BAUDRATE,
-    UNO_PORT, UNO_SIMULATOR, UNO_TIMEOUT_SECONDS,
+    UNO_PORT, UNO_SIMULATOR, UNO_TIMEOUT_SECONDS, _get_env_bool,
 )
 from pi_agent.engine import StockfishEngine
 from pi_agent.game_controller import GameController
-from pi_agent.uno_controller import SerialTransport, SimulatedTransport, UnoController, find_uno_port
+from pi_agent.uno_controller import (
+    SerialTransport, SimulatedTransport, TextLineTransport, UnoController, find_uno_port,
+)
 from pi_agent.session_store import SessionStore
 
 
