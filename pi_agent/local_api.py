@@ -98,6 +98,7 @@ class LocalApiHost:
     def __init__(self, game, network: NetworkManager, config: dict[str, Any], detector=None) -> None:
         self.game = game
         self.network = network
+        self.config = config
         self.detector = detector
         if self.detector is not None:
             self.detector.session_getter = lambda: self.game.session
