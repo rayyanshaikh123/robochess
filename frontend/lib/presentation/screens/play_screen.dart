@@ -2168,6 +2168,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         localState.connection == LocalConnectionState.ready;
     final isBoardConnected = activeDevice != null &&
         (isLocalConnected || activeDevice.status.toLowerCase() == 'online');
+    final isVisionReady = _setupModelLoaded || isBoardConnected;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -2233,7 +2234,6 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           const SizedBox(height: 10),
 
           // Step 2: Vision Model
-          final isVisionReady = _setupModelLoaded || isBoardConnected;
           _buildWizardStepItem(
             stepNumber: '2',
             title: 'Neural Vision Model',
