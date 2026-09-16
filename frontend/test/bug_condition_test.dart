@@ -21,14 +21,18 @@
 /// ============================================================
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:robochess_mobile/core/ble/robochess_ble.dart';
 import 'package:robochess_mobile/core/config/app_config.dart';
+import 'package:robochess_mobile/core/network/api_client.dart';
 import 'package:robochess_mobile/core/config/server_config_provider.dart';
 import 'package:robochess_mobile/core/config/server_config_store.dart';
 import 'package:robochess_mobile/core/network/token_store.dart';
@@ -166,6 +170,41 @@ List<Override> _baseOverrides() => [
 // ---------------------------------------------------------------------------
 
 void main() {
+  test('BLE iOS invalid handle is detected and safely ignored', () {
+    final appleError = Exception('setNotifyValue apple-code: 1 The handle is invalid.');
+
+    expect(isInvalidBluetoothHandleError(appleError), isTrue,
+        reason: 'The Apple BLE invalid-handle error must be detected.');
+    expect(
+      isInvalidBluetoothHandleError(StateError('Something else')),
+      isFalse,
+    );
+  });
+
+  test('ApiClient refreshes expired session and retries device list request', () async {
+    final storage = _InMemorySecureStorage();
+    await storage.write(key: 'access_token', value: 'expired-access');
+    await storage.write(key: 'refresh_token', value: 'fresh-refresh');
+    await storage.write(key: 'user_id', value: 'u1');
+
+    final client = _RetryingHttpClient();
+    final apiClient = ApiClient(
+      baseUrl: 'https://api.example.com',
+      tokenStore: TokenStore(storage: storage),
+      client: client,
+      timeout: const Duration(seconds: 2),
+    );
+
+    final data = await apiClient.getJson('/device/list');
+
+    expect(data['items'], isNotEmpty);
+    expect(client.requestCount, 3,
+        reason: 'The flow is: original 401 request -> refresh -> retry with new token.');
+    expect(client.refreshed, isTrue,
+        reason: 'An auth refresh must be attempted before resending the request.');
+    expect(await storage.read(key: 'access_token'), 'new-access');
+  });
+
   // ─── BUG-1: BLE Scan Race Condition ────────────────────────────────────────
   test(
     'BUG-1 (isBleFirstScanRace): first-tap scan awaits adapter confirmation',
@@ -718,6 +757,50 @@ class _PlayerRowHarness extends ConsumerWidget {
 
 /// A simple in-memory map that satisfies what TokenStore needs.
 /// Avoids FlutterSecureStorage platform channel initialization in unit tests.
+class _RetryingHttpClient extends http.BaseClient {
+  int requestCount = 0;
+  bool refreshed = false;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    requestCount += 1;
+    final uri = request.url;
+    if (uri.path == '/device/list' && request.headers['Authorization'] == 'Bearer expired-access') {
+      return http.StreamedResponse(
+        http.ByteStream.fromBytes(
+          utf8.encode('{"status":"error","message":"Unauthorized","data":{}}'),
+        ),
+        401,
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    if (uri.path == '/auth/refresh') {
+      refreshed = true;
+      return http.StreamedResponse(
+        http.ByteStream.fromBytes(
+          utf8.encode('{"status":"success","message":"Token refreshed","data":{"user_id":"u1","access_token":"new-access","refresh_token":"new-refresh"}}'),
+        ),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    if (uri.path == '/device/list' && request.headers['Authorization'] == 'Bearer new-access') {
+      return http.StreamedResponse(
+        http.ByteStream.fromBytes(
+          utf8.encode('{"status":"success","message":"ok","data":{"items":[{"device_id":"d1","status":"online"}]}}'),
+        ),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    return http.StreamedResponse(
+      http.ByteStream.fromBytes(utf8.encode('{"status":"error","message":"Not found","data":{}}')),
+      404,
+      headers: {'content-type': 'application/json'},
+    );
+  }
+}
+
 class _InMemorySecureStorage implements FlutterSecureStorage {
   final Map<String, String> _store = {};
 

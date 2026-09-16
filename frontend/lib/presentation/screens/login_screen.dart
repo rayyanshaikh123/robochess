@@ -41,6 +41,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _error = null;
     });
     try {
+      final serverReady = await ref
+          .read(serverConfigProvider.notifier)
+          .discoverIfUnavailable();
+      if (!serverReady) {
+        throw ApiException(
+            'Backend not found on this Wi-Fi network. Check that the server is running and both devices use the same network.');
+      }
       await ref.read(sessionProvider.notifier).login(
             email: _emailCtrl.text.trim(),
             password: _passwordCtrl.text,

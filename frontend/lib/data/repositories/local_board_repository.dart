@@ -1,4 +1,5 @@
 import '../../core/ble/robochess_ble.dart';
+import '../../domain/models/device_credentials.dart';
 import '../../domain/models/robochess_protocol.dart';
 
 class LocalBoardRepository {
@@ -23,6 +24,22 @@ class LocalBoardRepository {
   Future<String> connect(RoboChessBleDevice device) async {
     _deviceId = await ble.connectAndReadDeviceId(device.result.device);
     return _deviceId!;
+  }
+
+  Future<void> sendOnboardingCredentials(DeviceCredentials credentials) async {
+    final id = _deviceId;
+    if (id == null) {
+      throw StateError('Connect to a board before sending onboarding credentials');
+    }
+    final secret = credentials.deviceSecret;
+    if (secret == null || secret.isEmpty) {
+      throw StateError('Backend did not return the board device secret');
+    }
+    await ble.sendOnboardingToken(
+      id,
+      credentials.onboardingToken,
+      deviceSecret: secret,
+    );
   }
 
   Future<String> connectRemote(String remoteId) {

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -11,6 +12,22 @@ const wifiUuid = '0000f010-0000-1000-8000-00805f9b34fb';
 const statusUuid = '0000f011-0000-1000-8000-00805f9b34fb';
 const bleProtocolVersion = '1';
 const maxBleChunkBytes = 180;
+
+bool isInvalidBluetoothHandleError(Object error) {
+  final message = error.toString().toLowerCase();
+  return message.contains('handle is invalid') ||
+      message.contains('apple-code: 1') ||
+      message.contains('invalid handle') ||
+      message.contains('cbatt: invalid handle');
+}
+
+bool shouldSkipBluetoothNotify(BluetoothCharacteristic characteristic) {
+  if (!Platform.isIOS) return false;
+  final uuid = characteristic.uuid.toString().toLowerCase();
+  return uuid == controlUuid.toLowerCase() ||
+      uuid == statusUuid.toLowerCase() ||
+      uuid == wifiUuid.toLowerCase();
+}
 
 class RoboChessBleDevice {
   final ScanResult result;
@@ -70,41 +87,60 @@ class RoboChessBleClient {
   }
 
   Future<String> connectAndReadDeviceId(BluetoothDevice device) async {
-    await device.connect(
-        timeout: const Duration(seconds: 15), autoConnect: false);
-    // Request larger MTU for faster chunk transfers if supported.
+    await disconnect();
     try {
-      await device.requestMtu(517);
+      await device.connect(
+          timeout: const Duration(seconds: 15), autoConnect: false);
+      // Request larger MTU for faster chunk transfers if supported.
+      try {
+        await device.requestMtu(517);
+      } catch (_) {
+        // Ignore if MTU request fails; fallback to default.
+      }
+      // iOS owns the pairing UI; Android also bonds automatically on the first
+      // authenticated write. Do not force a platform-specific bond dialog here.
+      _device = device;
+      final services = await device.discoverServices();
+      final service = services.firstWhere(
+        (item) => item.uuid == Guid(roboChessServiceUuid),
+        orElse: () => throw StateError('RoboChess BLE service not found'),
+      );
+      BluetoothCharacteristic find(String uuid) =>
+          service.characteristics.firstWhere(
+            (item) => item.uuid == Guid(uuid),
+            orElse: () =>
+                throw StateError('BLE characteristic not found: $uuid'),
+          );
+      final info = find(deviceInfoUuid);
+      _control = find(controlUuid);
+      _wifi = find(wifiUuid);
+      _status = find(statusUuid);
+      if (_control!.properties.notify && !shouldSkipBluetoothNotify(_control!)) {
+        _controlSubscription = _control!.onValueReceived.listen(_handleFrame);
+        try {
+          await _control!.setNotifyValue(true);
+        } catch (error) {
+          if (!isInvalidBluetoothHandleError(error)) {
+            rethrow;
+          }
+        }
+      }
+      if (_status!.properties.notify && !shouldSkipBluetoothNotify(_status!)) {
+        _statusSubscription = _status!.onValueReceived.listen(_handleFrame);
+        try {
+          await _status!.setNotifyValue(true);
+        } catch (error) {
+          if (!isInvalidBluetoothHandleError(error)) {
+            rethrow;
+          }
+        }
+      }
+      final bytes = await info.read();
+      return utf8.decode(bytes, allowMalformed: true);
     } catch (_) {
-      // Ignore if MTU request fails; fallback to default.
+      await disconnect();
+      rethrow;
     }
-    // iOS owns the pairing UI; Android also bonds automatically on the first
-    // authenticated write. Do not force a platform-specific bond dialog here.
-    _device = device;
-    final services = await device.discoverServices();
-    final service = services.firstWhere(
-      (item) => item.uuid == Guid(roboChessServiceUuid),
-      orElse: () => throw StateError('RoboChess BLE service not found'),
-    );
-    BluetoothCharacteristic find(String uuid) =>
-        service.characteristics.firstWhere(
-          (item) => item.uuid == Guid(uuid),
-          orElse: () => throw StateError('BLE characteristic not found: $uuid'),
-        );
-    final info = find(deviceInfoUuid);
-    _control = find(controlUuid);
-    _wifi = find(wifiUuid);
-    _status = find(statusUuid);
-    if (_control!.properties.notify) {
-      await _control!.setNotifyValue(true);
-      _controlSubscription = _control!.onValueReceived.listen(_handleFrame);
-    }
-    if (_status!.properties.notify) {
-      await _status!.setNotifyValue(true);
-      _statusSubscription = _status!.onValueReceived.listen(_handleFrame);
-    }
-    final bytes = await info.read();
-    return utf8.decode(bytes, allowMalformed: true);
   }
 
   Stream<Map<String, dynamic>> get messages => _messages.stream;

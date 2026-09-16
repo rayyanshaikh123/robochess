@@ -1,14 +1,14 @@
 class AppConfig {
   static const piLocalApiBaseUrl = String.fromEnvironment(
     'PI_LOCAL_API_BASE_URL',
-    defaultValue: 'http://172.20.10.2:8765',
+    defaultValue: 'http://192.168.0.219:8765',
   );
 
   static const apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    // Current RoboChess hotspot/LAN backend address. Override with
+    // Current RoboChess LAN backend address. Override with
     // --dart-define=API_BASE_URL=http://<host-ip>:8000 when the network changes.
-    defaultValue: 'http://172.20.10.4:8000',
+    defaultValue: 'http://192.168.0.119:8000',
   );
 
   static const wsBaseUrl = String.fromEnvironment(

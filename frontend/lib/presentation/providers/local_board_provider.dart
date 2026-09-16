@@ -2,9 +2,11 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/config/app_config.dart';
 import '../../core/ble/robochess_ble.dart';
+import '../../data/repositories/device_repository.dart';
 import '../../data/repositories/local_board_repository.dart';
 import '../../data/repositories/local_state_store.dart';
 import '../../data/repositories/pi_local_api.dart';
+import 'session_provider.dart';
 import '../../domain/models/pi_setup.dart';
 import '../../domain/models/robochess_device.dart';
 import '../../domain/models/robochess_protocol.dart';
@@ -87,11 +89,12 @@ class LocalBoardState {
 
 class LocalBoardController extends StateNotifier<LocalBoardState> {
   final LocalBoardRepository repository;
+  final DeviceRepository deviceRepository;
   final LocalStateStore store;
   StreamSubscription<RoboChessBleDevice>? _devices;
   StreamSubscription<Map<String, dynamic>>? _notifications;
 
-  LocalBoardController(this.repository, this.store)
+  LocalBoardController(this.repository, this.deviceRepository, this.store)
       : super(const LocalBoardState()) {
     _notifications = repository.notifications.listen(_onMessage);
     _restoreState();
@@ -175,6 +178,19 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
   }
 
   Future<void> _restoreState() async {
+    final savedDeviceId = await store.loadDevice();
+    if (savedDeviceId != null && savedDeviceId.isNotEmpty && mounted) {
+      state = state.copyWith(
+        selected: RoboChessDevice(
+          remoteId: savedDeviceId,
+          displayName: 'RoboChess Pi',
+          deviceId: savedDeviceId,
+          rssi: 0,
+          state: LocalConnectionState.connected,
+        ),
+        connection: LocalConnectionState.paired,
+      );
+    }
     final cached = await store.loadState();
     if (cached != null && mounted) state = state.copyWith(piState: cached);
   }
@@ -240,6 +256,15 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
         ),
         connection: LocalConnectionState.paired,
       );
+      try {
+        final credentials =
+            await deviceRepository.onboardingToken(deviceId: id);
+        await repository.sendOnboardingCredentials(credentials);
+      } catch (error) {
+        state = state.copyWith(
+          error: 'Board connected, but backend onboarding failed: $error',
+        );
+      }
       await repository.requestState();
       await repository.requestNetworkStatus();
       return id;
@@ -448,6 +473,9 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
 
 final localBoardProvider =
     StateNotifierProvider<LocalBoardController, LocalBoardState>((ref) {
-  return LocalBoardController(ref.read(localBoardRepositoryProvider),
-      ref.read(localStateStoreProvider));
+  return LocalBoardController(
+    ref.read(localBoardRepositoryProvider),
+    ref.read(deviceRepositoryProvider),
+    ref.read(localStateStoreProvider),
+  );
 });
