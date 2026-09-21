@@ -38,6 +38,7 @@ class PiCameraDetector:
         self.last_trigger_time: float = 0.0
         self.pending_auto_move: str | None = None
         self.pending_auto_san: str | None = None
+        self.pending_auto_version: int | None = None
         self.active_session: Any = None
         self.session_getter: Any = None
         self._hand_stop_event = threading.Event()
@@ -126,6 +127,27 @@ class PiCameraDetector:
             self.recognizer = None
             self.last_error = None
             self._load_recognizer()
+
+    def clear_pending_move(self) -> None:
+        with self._lock:
+            self.pending_auto_move = None
+            self.pending_auto_san = None
+            self.pending_auto_version = None
+
+    def take_pending_move(self) -> dict[str, Any] | None:
+        """Atomically consume the stabilized move waiting for the app."""
+        with self._lock:
+            if self.pending_auto_move is None:
+                return None
+            result = {
+                "uci": self.pending_auto_move,
+                "san": self.pending_auto_san,
+                "version": self.pending_auto_version,
+            }
+            self.pending_auto_move = None
+            self.pending_auto_san = None
+            self.pending_auto_version = None
+            return result
 
     @property
     def model_available(self) -> bool:
@@ -445,6 +467,10 @@ class PiCameraDetector:
             if session is None or session_is_over or session_phase != "player_turn":
                 self.hand_present = False
                 steady_start_time = None
+                # Do not compare the next player-turn frame with a stale
+                # engine-move frame; that creates a false hand event and can
+                # make the app wait for a snapshot that was never needed.
+                prev_gray = None
                 time.sleep(0.15)
                 continue
             if not self.calibrated or not self.model_available:
@@ -538,6 +564,7 @@ class PiCameraDetector:
             with self._lock:
                 self.pending_auto_move = move_uci
                 self.pending_auto_san = san
+                self.pending_auto_version = session.version
 
     def _on_hand_left(self, session=None) -> None:
         """Triggered when the hand departs after making a move."""

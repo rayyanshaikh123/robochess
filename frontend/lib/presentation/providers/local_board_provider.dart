@@ -37,6 +37,9 @@ class LocalBoardState {
   final PiState? piState;
   final PiNetworkStatus? network;
   final List<PiWifiNetwork> wifiNetworks;
+  final WifiProvisioningState wifiProvisioning;
+  final String? wifiProvisioningError;
+  final String? provisionedSsid;
   final String? localApiBaseUrl;
   final PiSetupStatus? setup;
   final LocalConnectionState connection;
@@ -50,6 +53,9 @@ class LocalBoardState {
     this.piState,
     this.network,
     this.wifiNetworks = const [],
+    this.wifiProvisioning = WifiProvisioningState.idle,
+    this.wifiProvisioningError,
+    this.provisionedSsid,
     this.localApiBaseUrl = AppConfig.piLocalApiBaseUrl,
     this.setup,
     this.connection = LocalConnectionState.disconnected,
@@ -64,6 +70,9 @@ class LocalBoardState {
     PiState? piState,
     PiNetworkStatus? network,
     List<PiWifiNetwork>? wifiNetworks,
+    WifiProvisioningState? wifiProvisioning,
+    String? wifiProvisioningError,
+    String? provisionedSsid,
     String? localApiBaseUrl,
     PiSetupStatus? setup,
     LocalConnectionState? connection,
@@ -78,6 +87,11 @@ class LocalBoardState {
         piState: piState ?? this.piState,
         network: network ?? this.network,
         wifiNetworks: wifiNetworks ?? this.wifiNetworks,
+        wifiProvisioning: wifiProvisioning ?? this.wifiProvisioning,
+        wifiProvisioningError: clearError
+            ? null
+            : (wifiProvisioningError ?? this.wifiProvisioningError),
+        provisionedSsid: provisionedSsid ?? this.provisionedSsid,
         localApiBaseUrl: localApiBaseUrl ?? this.localApiBaseUrl,
         setup: setup ?? this.setup,
         connection: connection ?? this.connection,
@@ -152,7 +166,15 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
                 .where((item) => item.ssid.isNotEmpty)
                 .toList()
             : <PiWifiNetwork>[];
-        state = state.copyWith(wifiNetworks: networks, clearError: true);
+        state = state.copyWith(
+          wifiNetworks: networks,
+          wifiProvisioning: WifiProvisioningState.ready,
+          clearError: true,
+        );
+        return;
+      }
+      if (message.type == 'wifi.result' || message.type == 'status') {
+        _applyWifiStatus(message.data);
         return;
       }
       if ((message.type == 'control.result' || message.type == 'game.state') &&
@@ -174,6 +196,53 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
       }
     } catch (error) {
       state = state.copyWith(error: 'Invalid board message: $error');
+    }
+  }
+
+  void _applyWifiStatus(Map<String, dynamic> data) {
+    final status = data['status']?.toString().toLowerCase();
+    final networkData = data['network'] is Map
+        ? Map<String, dynamic>.from(data['network'] as Map)
+        : <String, dynamic>{
+            if (data['ip_address'] != null) 'ip_address': data['ip_address'],
+            if (data['ssid'] != null) 'ssid': data['ssid'],
+            if (status == 'wifi_connected') 'wifi_connected': true,
+          };
+    final ssid = data['ssid']?.toString() ?? networkData['ssid']?.toString();
+    final network = networkData.isEmpty
+        ? state.network
+        : PiNetworkStatus.fromMap(networkData);
+    final reportedIp = network?.ipAddress?.trim();
+    final usableIp = reportedIp == null ||
+            reportedIp.isEmpty ||
+            reportedIp == '127.0.0.1' ||
+            reportedIp == '0.0.0.0' ||
+            reportedIp == 'localhost'
+        ? null
+        : reportedIp;
+
+    if (status == 'wifi_connected') {
+      state = state.copyWith(
+        network: network,
+        provisionedSsid: ssid,
+        wifiProvisioning: WifiProvisioningState.connected,
+        localApiBaseUrl:
+            usableIp == null ? state.localApiBaseUrl : 'http://$usableIp:8765',
+        clearError: true,
+      );
+    } else if (status == 'wifi_connecting' || status == 'connecting') {
+      state = state.copyWith(
+        network: network,
+        wifiProvisioning: WifiProvisioningState.connecting,
+        clearError: true,
+      );
+    } else if (status == 'error') {
+      state = state.copyWith(
+        wifiProvisioning: WifiProvisioningState.error,
+        wifiProvisioningError:
+            data['error']?.toString() ?? 'Wi-Fi connection failed',
+        error: data['error']?.toString() ?? 'Wi-Fi connection failed',
+      );
     }
   }
 
@@ -246,7 +315,8 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
       connection: LocalConnectionState.connecting,
       clearError: true,
     );
-    final targetUrl = baseUrl ?? state.localApiBaseUrl ?? AppConfig.piLocalApiBaseUrl;
+    final targetUrl =
+        baseUrl ?? state.localApiBaseUrl ?? AppConfig.piLocalApiBaseUrl;
     try {
       final api = PiLocalApi(baseUrl: targetUrl);
       final setup = await api.setupStatus();
@@ -382,11 +452,31 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
   }
 
   Future<void> scanWifiNetworks() async {
+    state = state.copyWith(
+      wifiNetworks: const [],
+      wifiProvisioning: WifiProvisioningState.scanning,
+      wifiProvisioningError: null,
+      clearError: true,
+    );
     try {
       await repository.scanWifiNetworks();
     } catch (error) {
-      state = state.copyWith(error: 'Pi Wi-Fi scan failed: $error');
+      state = state.copyWith(
+        wifiProvisioning: WifiProvisioningState.error,
+        wifiProvisioningError: 'Pi Wi-Fi scan failed: $error',
+        error: 'Pi Wi-Fi scan failed: $error',
+      );
     }
+  }
+
+  Future<void> refreshBleStatus() async {
+    try {
+      final payload = await repository.readBleStatus();
+      final data = payload?['data'];
+      if (data is Map) {
+        _applyWifiStatus(Map<String, dynamic>.from(data));
+      }
+    } catch (_) {}
   }
 
   PiLocalApi _localApi() => PiLocalApi(
@@ -535,11 +625,26 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
   }
 
   Future<void> provisionWifi(String ssid, String password) async {
+    state = state.copyWith(
+      wifiProvisioning: WifiProvisioningState.provisioning,
+      wifiProvisioningError: null,
+      clearError: true,
+    );
     try {
       await repository.provisionWifi(ssid, password);
-      state = state.copyWith(clearError: true);
+      state = state.copyWith(
+        provisionedSsid: ssid,
+        wifiProvisioning: WifiProvisioningState.connecting,
+        clearError: true,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      await refreshBleStatus();
     } catch (error) {
-      state = state.copyWith(error: 'Wi-Fi provisioning failed: $error');
+      state = state.copyWith(
+        wifiProvisioning: WifiProvisioningState.error,
+        wifiProvisioningError: 'Wi-Fi provisioning failed: $error',
+        error: 'Wi-Fi provisioning failed: $error',
+      );
     }
   }
 

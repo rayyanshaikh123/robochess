@@ -88,6 +88,8 @@ enum PiGamePhase {
         return PiGamePhase.thinking;
       case 'moving':
       case 'executing_engine_move':
+      case 'engine moving':
+      case 'engine_moving':
         return PiGamePhase.moving;
       case 'verifying':
         return PiGamePhase.verifying;

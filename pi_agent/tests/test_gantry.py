@@ -214,6 +214,26 @@ class UnoControllerTests(unittest.TestCase):
         self.assertTrue(uno.ping())
         self.assertTrue(uno.status()["homed"])
 
+    def test_speed_profile_converts_app_units_and_sends_firmware_commands(self):
+        uno, transport = self._controller()
+
+        profile = uno.set_speed(max_rate_mm_min=3000, accel_mm_sec2=200)
+
+        self.assertEqual(profile["max_rate_mm_min"], 3000.0)
+        self.assertEqual(profile["max_speed_mm_sec"], 50.0)
+        self.assertEqual(profile["max_accel_mm_sec2"], 200.0)
+        self.assertIn("SET max.speed 50.0", transport.commands)
+        self.assertIn("SET max.accel 200.0", transport.commands)
+        self.assertEqual(uno.speed_profile(), profile)
+
+    def test_speed_profile_rejects_invalid_values(self):
+        uno, _ = self._controller()
+
+        with self.assertRaises(ValueError):
+            uno.set_speed(max_rate_mm_min=0, accel_mm_sec2=200)
+        with self.assertRaises(ValueError):
+            uno.set_speed(max_rate_mm_min=3000, accel_mm_sec2=-1)
+
     def test_unhomed_gantry_is_rejected_before_motion(self):
         class UnhomedTransport(SimulatedTransport):
             def send(self, command, timeout):

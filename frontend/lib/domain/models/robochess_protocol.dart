@@ -128,6 +128,16 @@ class PiNetworkStatus {
   }
 }
 
+enum WifiProvisioningState {
+  idle,
+  scanning,
+  ready,
+  provisioning,
+  connecting,
+  connected,
+  error,
+}
+
 class PiWifiNetwork {
   final String ssid;
   final int signal;

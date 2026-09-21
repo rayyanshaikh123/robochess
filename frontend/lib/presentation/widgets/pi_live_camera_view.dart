@@ -26,6 +26,7 @@ class _PiLiveCameraViewState extends State<PiLiveCameraView> {
   late PiLocalApi _api;
   StreamSubscription<Uint8List>? _subscription;
   Timer? _fallbackTimer;
+  Timer? _pollingBackupTimer;
   Uint8List? _frame;
   String? _error;
   bool _polling = false;
@@ -67,6 +68,27 @@ class _PiLiveCameraViewState extends State<PiLiveCameraView> {
       },
       onDone: () => _startFrameFallback('Pi stream closed'),
     );
+    // Also start polling as backup to ensure we always get frames
+    _startPollingBackup();
+  }
+
+  void _startPollingBackup() {
+    _pollingBackupTimer?.cancel();
+    _pollingBackupTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
+      if (!mounted) return;
+      try {
+        final frame = await _api.cameraFrame(preview: true);
+        if (mounted && _frame == null) {
+          // Only use polled frame if we don't have a stream frame
+          setState(() {
+            _frame = frame;
+            _error = 'Live over Wi-Fi (polling fallback)';
+          });
+        }
+      } catch (_) {
+        // Ignore polling errors
+      }
+    });
   }
 
   void _startFrameFallback(Object error) {
@@ -132,6 +154,7 @@ class _PiLiveCameraViewState extends State<PiLiveCameraView> {
   void dispose() {
     _subscription?.cancel();
     _fallbackTimer?.cancel();
+    _pollingBackupTimer?.cancel();
     _api.client.close();
     super.dispose();
   }

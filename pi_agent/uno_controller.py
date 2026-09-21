@@ -325,6 +325,7 @@ class UnoController:
     home_mode: str = GANTRY_HOME_MODE
     rehome_interval: int = GANTRY_REHOME_INTERVAL
     _moves_since_home: int = 0
+    _speed_profile: dict = field(default_factory=dict)
 
     def ensure_homed(self) -> dict:
         """Verify the Uno has homed before any coordinate motion."""
@@ -361,6 +362,32 @@ class UnoController:
                 # Non-fatal: log and continue; defaults are safe.
                 import sys
                 print(f"[warn] uno_controller: SET {key} {val} failed: {exc}", file=sys.stderr)
+
+    def set_speed(self, *, max_rate_mm_min: float, accel_mm_sec2: float) -> dict:
+        """Set a user-facing speed profile and apply it immediately.
+
+        The app uses mm/min while the Uno firmware uses mm/s.
+        """
+        if max_rate_mm_min <= 0 or accel_mm_sec2 <= 0:
+            raise ValueError("Gantry speed and acceleration must be positive")
+        if max_rate_mm_min > 12000 or accel_mm_sec2 > 5000:
+            raise ValueError("Gantry speed or acceleration exceeds the safe limit")
+        max_speed = max_rate_mm_min / 60.0
+        self.command(f"SET max.speed {max_speed:.1f}", TIMEOUT_SHORT_S)
+        self.command(f"SET max.accel {accel_mm_sec2:.1f}", TIMEOUT_SHORT_S)
+        self._speed_profile = {
+            "max_rate_mm_min": float(max_rate_mm_min),
+            "max_speed_mm_sec": max_speed,
+            "max_accel_mm_sec2": float(accel_mm_sec2),
+        }
+        return self._speed_profile.copy()
+
+    def speed_profile(self) -> dict:
+        return self._speed_profile.copy() or {
+            "max_rate_mm_min": FIRMWARE_MAX_SPEED * 60.0,
+            "max_speed_mm_sec": FIRMWARE_MAX_SPEED,
+            "max_accel_mm_sec2": FIRMWARE_MAX_ACCEL,
+        }
 
     # -- protocol primitives --------------------------------------------------
 

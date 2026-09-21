@@ -101,30 +101,33 @@ class NetworkManager:
         )
 
     def configure(self, ssid: str, password: str) -> NetworkStatus:
-        if not ssid.strip() or not password:
-            raise NetworkManagerError("SSID and password are required")
+        if not ssid.strip():
+            raise NetworkManagerError("SSID is required")
         try:
             self._run(["connection", "delete", self.connection_name])
         except NetworkManagerError:
             # The first provisioning attempt has no existing profile.
             pass
-        self._run([
-            "device", "wifi", "connect", ssid,
-            "password", password,
-            "name", self.connection_name,
-        ])
+        args = ["device", "wifi", "connect", ssid, "name", self.connection_name]
+        # An open network is valid and must not receive an empty password
+        # argument: nmcli treats that as a real (empty) WPA credential.
+        if password:
+            args[4:4] = ["password", password]
+        self._run(args)
         self._run(["connection", "modify", self.connection_name, "connection.autoconnect", "yes"])
         return self.status()
 
     def scan_wifi(self) -> list[dict[str, str | int]]:
         """Return nearby Wi-Fi networks without exposing credentials."""
         output = self._run([
-            "-t", "--escape", "no", "-f", "SSID,SIGNAL,SECURITY",
+            "-t", "--escape", "no", "--separator", "\t",
+            "-f", "SSID,SIGNAL,SECURITY",
             "device", "wifi", "list", "--rescan", "yes",
         ])
         networks: dict[str, dict[str, str | int]] = {}
         for line in output.splitlines():
-            parts = line.split(":")
+            # Use a tab separator so SSIDs containing ':' survive parsing.
+            parts = line.split("\t", 2)
             if len(parts) < 3:
                 continue
             ssid, signal, security = (part.strip() for part in parts[:3])
@@ -137,7 +140,7 @@ class NetworkManager:
             networks[ssid] = {
                 "ssid": ssid,
                 "signal": signal_value,
-                "security": security or "open",
+                "security": security if security not in {"", "--", "none"} else "open",
             }
         return sorted(
             networks.values(),

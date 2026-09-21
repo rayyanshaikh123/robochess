@@ -135,10 +135,16 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   String? _inGameValidationNote;
   Timer? _autoDetectTimer;
   Timer? _piSyncTimer;  // periodic Pi game-state sync when using board
+  Timer? _autoDetectionTimer;  // Independent auto-detection timer
   bool _piSyncInFlight = false;
+  bool _autoDetectInFlight = false;
   bool _handOnBoard = false;  // Track if hand is detected on board
   PiGamePhase? _piGamePhase;
+  PiGamePhase? _previousPiPhase;  // Track previous phase for transitions
   Timer? _syncCoordinatorTimer;  // Unified sync coordinator
+  bool _homingAfterMove = false;  // Track if we're homing after engine move
+  double _gantryMaxRate = 3000;   // mm/min
+  double _gantryAccel = 200;      // mm/sec²
 
   @override
   void initState() {
@@ -233,7 +239,9 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     _clockTimer?.cancel();
     _botMoveTimer?.cancel();
     _autoDetectTimer?.cancel();
+    _autoDetectionTimer?.cancel();
     _piSyncTimer?.cancel();
+    _syncCoordinatorTimer?.cancel();
     _gameSub?.close();
     _statusSub?.cancel();
     _resultSub?.cancel();
@@ -432,6 +440,12 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       if (result.useBoard) {
         try {
           await PiLocalApi(baseUrl: _piBaseUrl).startGame();
+          // Home gantry to ensure known starting position
+          try {
+            await PiLocalApi(baseUrl: _piBaseUrl).homeGantry();
+          } catch (e) {
+            debugPrint('Initial homing failed: $e');
+          }
           if (mounted) {
             setState(() => _piConnectionError = null);
           }
@@ -510,19 +524,48 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   void _startAutoDetect() {
     _syncCoordinatorTimer?.cancel();
     _syncCoordinatorTimer = null;
+    _autoDetectionTimer?.cancel();
+    _autoDetectionTimer = null;
     _scheduleSyncCoordinator();
+    _scheduleAutoDetection();
   }
 
-  void _startPiSync() {
-    // Now handled by unified sync coordinator
-    _startAutoDetect();
+  void _scheduleAutoDetection() {
+    if (!_gameUsesBoard || !_inGameValidated || !mounted) return;
+    
+    final isHumanTurn = _gameMode != 'human_vs_ai' || _game.turn == _humanColor();
+    if (!isHumanTurn) return;
+    
+    // Run auto-detection every 2 seconds independently of Pi phase
+    _autoDetectionTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted && _gameUsesBoard && _inGameValidated) {
+        final isHumanTurnNow = _gameMode != 'human_vs_ai' || _game.turn == _humanColor();
+        if (isHumanTurnNow && !_snapshotDetecting && !_homingAfterMove) {
+          _checkAutoDetectReady();
+        }
+        _scheduleAutoDetection();
+      }
+    });
   }
 
   void _scheduleSyncCoordinator() {
     if (!_gameUsesBoard || _piBaseUrl.isEmpty || !mounted) return;
     
-    // Use 500ms interval for balanced polling
-    _syncCoordinatorTimer = Timer(const Duration(milliseconds: 500), () {
+    // Dynamic interval based on game state:
+    // - 500ms during active detection (human's turn)
+    // - 1000ms during engine turns
+    // - 2000ms during homing/other phases
+    int intervalMs;
+    if (_homingAfterMove) {
+      intervalMs = 1000;
+    } else if (_piGamePhase == PiGamePhase.waitingForMove) {
+      final isHumanTurn = _gameMode != 'human_vs_ai' || _game.turn == _humanColor();
+      intervalMs = isHumanTurn ? 500 : 1000;
+    } else {
+      intervalMs = 1000;
+    }
+    
+    _syncCoordinatorTimer = Timer(Duration(milliseconds: intervalMs), () {
       if (mounted) {
         _runSyncCoordinator();
         _scheduleSyncCoordinator();
@@ -530,38 +573,69 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     });
   }
 
-  Future<void> _runSyncCoordinator() async {
+Future<void> _runSyncCoordinator() async {
     if (!_gameUsesBoard || _piBaseUrl.isEmpty || !mounted) return;
-    
+
     try {
       // 1. Get Pi game state (includes phase, version, moves, etc.)
       final raw = await PiLocalApi(baseUrl: _piBaseUrl).gameState();
-      
+
       // Parse Pi phase
       final phaseStr = raw['phase']?.toString() ?? 'unknown';
       final newPhase = PiGamePhase.fromString(phaseStr);
-      
+
+      // Track phase transition
+      final previousPhase = _previousPiPhase;
       if (mounted && newPhase != _piGamePhase) {
         setState(() {
           _piGamePhase = newPhase;
+          _previousPiPhase = newPhase;
         });
+      } else if (previousPhase == null) {
+        // First run, set previous phase
+        _previousPiPhase = newPhase;
       }
-      
+
       final version = int.tryParse(raw['version']?.toString() ?? '');
-      if (version == null || version < _linkedGameVersion) return;
-      
+      if (version == null || version < _linkedGameVersion) {
+        // Still handle phase transitions even if version didn't change
+        if (previousPhase != null && previousPhase != newPhase) {
+          await _handlePhaseTransition(previousPhase, newPhase, raw);
+        }
+        return;
+      }
+
       // 2. Apply Pi snapshot if version advanced
       // But only if no pending local move is waiting for confirmation
       final hasPendingLocalMove = _pendingLocalUci != null && _pendingLocalVersion != null;
+      final isEngineMove = !hasPendingLocalMove && version > _linkedGameVersion;
       if (!hasPendingLocalMove) {
         if (mounted) {
           setState(() => _applyPiSnapshot(raw, version));
         }
       }
-      
-      // 3. Handle phase-specific behavior
-      await _handlePiPhase(newPhase, raw);
-      
+
+      // 3. Handle phase transitions
+      if (previousPhase != null && previousPhase != newPhase) {
+        await _handlePhaseTransition(previousPhase, newPhase, raw);
+      }
+
+      // 4. Fallback: If engine move was applied (version increment without pending local move)
+      // and we're now in waitingForMove, trigger homing
+      if (isEngineMove && newPhase == PiGamePhase.waitingForMove && !_homingAfterMove) {
+        await _homeGantryAfterEngineMove();
+      }
+
+      // 5. Additional fallback: If version advanced and it's now human's turn (engine just moved)
+      // but phase reporting might be delayed/wrong
+      final isHumanTurnNow = _gameMode != 'human_vs_ai' || _game.turn == _humanColor();
+      if (isEngineMove && isHumanTurnNow && !_homingAfterMove) {
+        await _homeGantryAfterEngineMove();
+      }
+
+      // 6. Handle current phase behavior (active detection, etc.)
+      await _handleCurrentPhase(newPhase, raw);
+
     } catch (_) {
       // Silently ignore connectivity failures
       if (mounted && _piGamePhase != PiGamePhase.disconnected) {
@@ -570,24 +644,67 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     }
   }
 
-  Future<void> _handlePiPhase(PiGamePhase phase, Map<String, dynamic> raw) async {
+  Future<void> _handlePhaseTransition(PiGamePhase from, PiGamePhase to, Map<String, dynamic> raw) async {
     if (!mounted) return;
-    
+
+    // Engine move completed: moving/verifying -> waitingForMove
+    // This handles both "verifying" and "moving" (including "engine moving") phases
+    if ((from == PiGamePhase.moving || from == PiGamePhase.verifying) &&
+        to == PiGamePhase.waitingForMove) {
+      await _homeGantryAfterEngineMove();
+    }
+
+    // Human move detected: waitingForMove -> detecting (Pi starts detecting)
+    // No action needed, Pi handles it
+  }
+
+  Future<void> _homeGantryAfterEngineMove() async {
+    if (_homingAfterMove) return; // Prevent duplicate calls
+    if (!mounted) return;
+
+    setState(() {
+      _homingAfterMove = true;
+      _snapshotNote = 'Homing gantry after engine move...';
+    });
+
+    try {
+      await PiLocalApi(baseUrl: _piBaseUrl).homeGantry();
+      if (mounted) {
+        setState(() {
+          _snapshotNote = 'Gantry homed. Your turn.';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _syncError = 'Homing failed: $e. Tap to retry.';
+          _snapshotNote = 'Homing failed. Tap DETECT to retry.';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _homingAfterMove = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleCurrentPhase(PiGamePhase phase, Map<String, dynamic> raw) async {
+    if (!mounted) return;
+
     final isHumanTurn = _gameMode != 'human_vs_ai' || _game.turn == _humanColor();
-    
+
     switch (phase) {
       case PiGamePhase.waitingForMove:
-        // Human's turn - allow auto-detection if not already detecting
-        if (isHumanTurn && !_snapshotDetecting && _inGameValidated) {
-          await _checkAutoDetectReady();
-        }
-        if (mounted) {
+        // Human's turn - auto-detection now runs on independent timer
+        if (mounted && !_homingAfterMove) {
           setState(() {
             _snapshotNote = 'Your turn — move on board or tap screen';
           });
         }
         break;
-        
+
       case PiGamePhase.detecting:
         // Pi is detecting a move
         if (mounted) {
@@ -596,7 +713,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           });
         }
         break;
-        
+
       case PiGamePhase.validating:
         // Pi is validating the board
         if (mounted) {
@@ -605,7 +722,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           });
         }
         break;
-        
+
       case PiGamePhase.thinking:
         // Engine is thinking
         if (mounted) {
@@ -614,7 +731,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           });
         }
         break;
-        
+
       case PiGamePhase.moving:
         // Pi is physically moving piece
         if (mounted) {
@@ -623,7 +740,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           });
         }
         break;
-        
+
       case PiGamePhase.verifying:
         // Pi is verifying the move result
         if (mounted) {
@@ -632,7 +749,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           });
         }
         break;
-        
+
       case PiGamePhase.stateMismatch:
         // State mismatch - need recovery
         if (mounted) {
@@ -641,7 +758,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           });
         }
         break;
-        
+
       case PiGamePhase.error:
       case PiGamePhase.emergencyStop:
       case PiGamePhase.cameraError:
@@ -653,7 +770,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           });
         }
         break;
-        
+
       case PiGamePhase.disconnected:
         if (mounted) {
           setState(() {
@@ -661,7 +778,7 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           });
         }
         break;
-        
+
       default:
         // Other phases (boot, initializing, ready, calibrating) - just update note
         if (mounted && phase != PiGamePhase.unknown) {
@@ -710,7 +827,8 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
   }
 
   Future<void> _checkAutoDetectReady() async {
-    if (_snapshotDetecting) return;
+    if (_snapshotDetecting || _autoDetectInFlight) return;
+    _autoDetectInFlight = true;
     try {
       final Map<String, dynamic> result;
       if (_gameUsesBoard && _piBaseUrl.isNotEmpty) {
@@ -767,10 +885,14 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
         final uci = data['uci']?.toString();
         final san = data['san']?.toString();
         if (uci != null && uci.isNotEmpty) {
-          final applied = _applyUciMove(uci);
-          setState(() {
-            _snapshotNote = 'Auto-detected: ${san ?? uci} ($uci)';
-          });
+          if (!_gameUsesBoard) {
+            _applyUciMove(uci);
+          }
+          if (mounted) {
+            setState(() {
+              _snapshotNote = 'Auto-detected: ${san ?? uci} ($uci)';
+            });
+          }
 
           // Check if engine move was provided by Pi or needs to be requested
           final engineData = data['engine_move'] as Map<String, dynamic>?;
@@ -829,6 +951,123 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       }
     } catch (err) {
       // Silently fail on auto-detect check errors
+    } finally {
+      _autoDetectInFlight = false;
+    }
+  }
+
+  Future<void> _activeDetectMove() async {
+    if (_snapshotDetecting || _homingAfterMove) return;
+    
+    setState(() {
+      _snapshotDetecting = true;
+      _snapshotNote = 'Detecting move...';
+    });
+
+    try {
+      final Map<String, dynamic> result;
+      if (_gameUsesBoard && _piBaseUrl.isNotEmpty) {
+        result = await PiLocalApi(baseUrl: _piBaseUrl).analyzeAndReply();
+      } else {
+        result = await ref.read(boardRepositoryProvider).analyzeAndReplySnapshot();
+      }
+      
+      final data = result['data'] as Map<String, dynamic>? ?? result;
+      final humanData = data['human_move'] as Map<String, dynamic>? ?? data;
+      final engineData = data['engine_move'] as Map<String, dynamic>?;
+      final status = humanData['analysis_status']?.toString() ?? 'unknown';
+      final message = humanData['analysis_message']?.toString();
+      final reason = humanData['reason']?.toString();
+      final uci = humanData['uci']?.toString();
+      final versionRaw = humanData['game_version'];
+      final version = int.tryParse(versionRaw?.toString() ?? '');
+      final fallback = humanData['fallback'] == true;
+
+      if (status == 'waiting') {
+        // Hand present or board not stable
+        if (mounted) {
+          setState(() {
+            _snapshotDetecting = false;
+            _snapshotNote = message ?? (reason == 'hand_present' 
+                ? 'Hand on board. Move hand away...' 
+                : 'Board not stable. Waiting...');
+          });
+        }
+        return;
+      }
+
+      if (status == 'red') {
+        // No legal move matched
+        if (mounted) {
+          setState(() {
+            _snapshotDetecting = false;
+            _snapshotNote = message ?? 'No legal move matched. Try again.';
+          });
+        }
+        return;
+      }
+
+      if (status == 'error') {
+        if (mounted) {
+          setState(() {
+            _snapshotDetecting = false;
+            _snapshotNote = message ?? (reason == 'vision_model_not_ready'
+                ? 'Vision model not ready. Load model first.'
+                : 'Detection error. Tap DETECT to retry.');
+          });
+        }
+        return;
+      }
+
+      // Success - move detected
+      if (mounted) {
+        setState(() {
+          _snapshotDetecting = false;
+          if (uci == null || uci.isEmpty) {
+            _snapshotNote = message ?? 'Move captured. Processing...';
+          } else {
+            _snapshotNote = message ?? (fallback ? 'Move: $uci (stabilized)' : 'Move: $uci');
+            if (_gameUsesBoard) {
+              final applied = _applyUciMove(uci);
+              if (applied && version != null) {
+                _pendingLocalUci = uci;
+                _pendingLocalVersion = version;
+                _linkedGameVersion = version;
+              }
+            }
+          }
+        });
+      }
+
+      // Handle engine response
+      if (_gameUsesBoard && engineData != null) {
+        final aiUci = engineData['uci']?.toString();
+        if (aiUci != null && aiUci.isNotEmpty && mounted) {
+          setState(() {
+            final aiApplied = _applyUciMove(aiUci);
+            if (aiApplied) {
+              final aiVersionRaw = engineData['game_version'];
+              final aiVersion = int.tryParse(aiVersionRaw?.toString() ?? '');
+              if (aiVersion != null) {
+                _pendingLocalUci = aiUci;
+                _pendingLocalVersion = aiVersion;
+                _linkedGameVersion = aiVersion;
+              }
+              _snapshotNote = '${_snapshotNote ?? 'Move detected.'} Engine: $aiUci';
+            }
+          });
+        }
+      }
+
+      await _fetchLiveFrame();
+
+    } catch (err) {
+      if (mounted) {
+        setState(() {
+          _snapshotDetecting = false;
+          _snapshotNote = 'Detection failed. Tap DETECT to retry.';
+        });
+      }
     }
   }
 
@@ -1639,6 +1878,23 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
     });
   }
 
+  Future<void> _setGantrySpeed(double value) async {
+    final api = PiLocalApi(baseUrl: _piBaseUrl);
+    try {
+      await api.setGantrySpeed(
+        maxRateMmMin: value,
+        accelMmSec2: _gantryAccel,
+      );
+      if (mounted) {
+        setState(() => _snapshotNote = 'Gantry speed set to ${value.round()} mm/min');
+      }
+    } catch (error) {
+      if (mounted) setState(() => _setupError = 'Speed update failed: $error');
+    } finally {
+      api.client.close();
+    }
+  }
+
   Future<void> _setupValidateBoard() async {
     if (_setupBusy) return;
     await _runSetupStep(() async {
@@ -1728,6 +1984,12 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
       if (useBoard) {
         try {
           await PiLocalApi(baseUrl: _piBaseUrl).startGame();
+          // Home gantry to ensure known starting position
+          try {
+            await PiLocalApi(baseUrl: _piBaseUrl).homeGantry();
+          } catch (e) {
+            debugPrint('Initial homing failed: $e');
+          }
         } catch (e) {
           if (mounted) {
             setState(
@@ -2665,6 +2927,30 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 12),
+                Text(
+                  'GANTRY SPEED  ${_gantryMaxRate.round()} mm/min',
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: kOnSurfaceVariant,
+                  ),
+                ),
+                Slider(
+                  value: _gantryMaxRate,
+                  min: 600,
+                  max: 6000,
+                  divisions: 18,
+                  label: '${_gantryMaxRate.round()} mm/min',
+                  onChanged: _setupBusy
+                      ? null
+                      : (value) => setState(() => _gantryMaxRate = value),
+                  onChangeEnd: _setupBusy ? null : _setGantrySpeed,
+                ),
+                Text(
+                  'Use a lower setting while debugging piece alignment.',
+                  style: GoogleFonts.inter(fontSize: 10, color: kOnSurfaceVariant),
+                ),
                 if (_setupShowCamera) ...[
                   const SizedBox(height: 10),
                   ClipRRect(
@@ -3087,8 +3373,6 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
               if (_gameUsesBoard) ...[
                 const SizedBox(height: 12),
                 _buildLiveBoardPreview(),
-                const SizedBox(height: 10),
-                _buildBoardValidationActions(),
               ],
 
               // ── Voice Command Panel ──
@@ -3527,26 +3811,13 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                       color: kOnSurfaceVariant,
                       letterSpacing: 2)),
               const Spacer(),
-              TextButton.icon(
-                onPressed: (_snapshotDetecting || _livePreviewLoading)
-                    ? null
-                    : _detectSnapshotMove,
-                icon: const Icon(Icons.camera_alt, size: 14),
-                label: Text(
-                    _snapshotDetecting
-                        ? 'DETECTING...'
-                        : (_handOnBoard
-                            ? 'WAITING FOR CLEAR BOARD...'
-                            : 'DETECT WHEN CLEAR'),
-                    style: GoogleFonts.inter(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1)),
-                style: TextButton.styleFrom(
-                  foregroundColor: kPrimary,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                ),
+              Text(
+                'DEBUG PREVIEW',
+                style: GoogleFonts.inter(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                    color: kOnSurfaceVariant,
+                    letterSpacing: 1),
               ),
             ],
           ),
@@ -3879,11 +4150,49 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    try {
+                      await PiLocalApi(baseUrl: _piBaseUrl).homeGantry();
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Gantry homed successfully')),
+                        );
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Homing failed: $e'), backgroundColor: kError),
+                        );
+                      }
+                    }
+                  },
+                  icon: const Icon(Icons.home_rounded, size: 15),
+                  label: Text(
+                    'HOME GANTRY',
+                    style: GoogleFonts.outfit(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: kSecondary,
+                    side: BorderSide(color: kSecondary.withValues(alpha: 0.5)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ],
       ),
-    );
+);
   }
 
   // ── Interactive board builder ──

@@ -303,19 +303,46 @@ class PiLocalApi {
 
   Future<bool> checkVisionReady() async {
     try {
+      // First try auto-detect-ready which includes vision status
       final response = await client
           .get(_uri('/local/move/auto-detect-ready'))
           .timeout(_requestTimeout);
-      if (response.statusCode >= 400) return false;
-      final payload = jsonDecode(response.body) as Map<String, dynamic>;
-      final data = payload['data'] as Map<String, dynamic>?;
-      if (data == null) return false;
-      final vision = data['vision'] as Map<String, dynamic>?;
-      if (vision == null) return false;
-      return vision['ready'] == true;
+      if (response.statusCode < 400) {
+        final payload = jsonDecode(response.body) as Map<String, dynamic>;
+        final data = payload['data'] as Map<String, dynamic>?;
+        if (data != null) {
+          final vision = data['vision'] as Map<String, dynamic>?;
+          if (vision != null && vision['ready'] == true) {
+            return true;
+          }
+        }
+      }
     } catch (_) {
-      return false;
+      // Ignore and try fallback
     }
+
+    // Fallback: check model status endpoint
+    try {
+      final response = await client
+          .get(_uri('/local/model/status'))
+          .timeout(_requestTimeout);
+      if (response.statusCode < 400) {
+        final payload = jsonDecode(response.body) as Map<String, dynamic>;
+        final data = payload['data'] as Map<String, dynamic>?;
+        if (data != null) {
+          // Check various possible fields for model loaded status
+          if (data['model_loaded'] == true || 
+              data['ready'] == true || 
+              data['model_available'] == true) {
+            return true;
+          }
+        }
+      }
+    } catch (_) {
+      // Ignore
+    }
+
+    return false;
   }
 
   Future<PiGamePhase> getGamePhase() async {
@@ -332,5 +359,29 @@ class PiLocalApi {
     } catch (_) {
       return PiGamePhase.disconnected;
     }
+  }
+
+  Future<Map<String, dynamic>> setGantrySpeed({
+    required double maxRateMmMin,
+    required double accelMmSec2,
+  }) async {
+    final response = await client
+        .post(
+          _uri('/local/gantry/speed'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'max_rate_mm_min': maxRateMmMin,
+            'accel_mm_sec2': accelMmSec2,
+          }),
+        )
+        .timeout(_requestTimeout);
+    return _data(response, 'Pi gantry speed config failed');
+  }
+
+  Future<Map<String, dynamic>> getGantrySpeed() async {
+    final response = await client
+        .get(_uri('/local/gantry/speed'))
+        .timeout(_requestTimeout);
+    return _data(response, 'Pi gantry speed get failed');
   }
 }

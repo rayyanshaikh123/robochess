@@ -29,6 +29,11 @@ class MoveRequest(BaseModel):
     expected_version: int | None = None
 
 
+class GantrySpeedRequest(BaseModel):
+    max_rate_mm_min: float = Field(gt=0, le=12000)
+    accel_mm_sec2: float = Field(gt=0, le=5000)
+
+
 class ModelLoadRequest(BaseModel):
     vision_mode: str | None = None
     roboflow_enabled: bool | None = None
@@ -501,15 +506,13 @@ class LocalApiHost:
         @self.app.post("/local/game/reset")
         def reset_game():
             if self.detector is not None:
-                self.detector.pending_auto_move = None
-                self.detector.pending_auto_san = None
+                self.detector.clear_pending_move()
             return {"status": "ok", "data": self.game.handle({"type": "session.reset", "data": {}})}
 
         @self.app.post("/local/game/move")
         def game_move(payload: MoveRequest):
             if self.detector is not None:
-                self.detector.pending_auto_move = None
-                self.detector.pending_auto_san = None
+                self.detector.clear_pending_move()
             return {"status": "ok", "data": self.game.handle({
                 "type": "move.propose",
                 "data": {"uci": payload.uci, "expected_version": payload.expected_version},
@@ -538,30 +541,12 @@ class LocalApiHost:
                     "hand_present": hand_present,
                     "state": snapshot,
                 }}
-            pending_move = self.detector.pending_auto_move if self.detector else None
-            pending_san = self.detector.pending_auto_san if self.detector else None
-
-            # If no pending move yet and hand is not on board, do a quick opportunistic check
-            if pending_move is None and not hand_present and self.detector and self.detector.model_available and self.detector.calibrated and session:
-                try:
-                    candidates = self.detector.detect_candidates(session)
-                    if candidates:
-                        pending_move = candidates[0]
-                        try:
-                            import chess
-                            pending_san = session.board.san(chess.Move.from_uci(pending_move))
-                        except Exception:
-                            pending_san = pending_move
-                except Exception:
-                    pass
+            pending = self.detector.take_pending_move() if self.detector else None
+            pending_move = pending.get("uci") if pending else None
+            pending_san = pending.get("san") if pending else None
 
             if pending_move is not None and self.game.session:
-                if self.detector:
-                    with self.detector._lock:
-                        self.detector.pending_auto_move = None
-                        self.detector.pending_auto_san = None
-
-                # Propose human move to game session
+                # Propose the stabilized move to the game session exactly once.
                 result = self.game.handle({
                     "type": "move.propose",
                     "data": {"uci": pending_move, "expected_version": self.game.session.version},
@@ -575,6 +560,7 @@ class LocalApiHost:
                     "reason": "move_detected",
                     "hand_present": False,
                     "engine_pending": bool(result.get("engine_pending")),
+                    "detector_version": pending.get("version") if pending else None,
                     "state": current_snapshot,
                     **result,
                 }}
@@ -648,6 +634,23 @@ class LocalApiHost:
         @self.app.get("/local/gantry/status")
         def gantry_status():
             return {"status": "ok", "data": self.game.handle({"type": "gantry.status", "data": {}})}
+
+        @self.app.get("/local/gantry/speed")
+        def gantry_speed():
+            return {"status": "ok", "data": self.game.uno.speed_profile()}
+
+        @self.app.post("/local/gantry/speed")
+        def gantry_speed_update(payload: GantrySpeedRequest):
+            try:
+                profile = self.game.uno.set_speed(
+                    max_rate_mm_min=payload.max_rate_mm_min,
+                    accel_mm_sec2=payload.accel_mm_sec2,
+                )
+                return {"status": "ok", "data": profile}
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            except Exception as exc:
+                raise HTTPException(503, f"Gantry speed update failed: {exc}") from exc
 
         @self.post_gantry("/local/gantry/stop")
         def gantry_stop():

@@ -34,9 +34,27 @@ If you encounter the following errors on iOS device:
 2. Rebuild:
    ```bash
    flutter pub get
-   cd ios && pod install --repo-update && cd ..
-   flutter run
-   ```
+cd ios && pod install --repo-update && cd ..
+flutter run
+```
+
+### Release builds
+
+Build the Android package with the backend host embedded at build time:
+
+```bash
+flutter build apk --release \
+  --dart-define=API_BASE_URL=https://api.example.com \
+  --dart-define=WS_BASE_URL=wss://api.example.com/ws
+```
+
+The APK is written to `build/app/outputs/flutter-apk/app-release.apk` and can
+be linked from the web landing page. For Play Store distribution, use
+`flutter build appbundle --release` instead. iOS requires macOS, Xcode,
+signing credentials, and a registered device; after configuring those, use
+`flutter build ipa --release` and upload the generated archive through Xcode
+or Transporter. Android and iOS must use a reachable HTTPS/WSS backend URL;
+`localhost` only works on the development machine.
 
 3. The following files have been configured to support the modern UIScene lifecycle:
    - `ios/Runner/Info.plist` - Added UIApplicationSceneManifest configuration

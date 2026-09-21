@@ -53,6 +53,7 @@ class RoboChessBleClient {
   BluetoothCharacteristic? _wifi;
   BluetoothCharacteristic? _status;
   StreamSubscription<List<int>>? _controlSubscription;
+  StreamSubscription<List<int>>? _wifiSubscription;
   StreamSubscription<List<int>>? _statusSubscription;
   final _messages = StreamController<Map<String, dynamic>>.broadcast();
   final Map<String, List<List<int>>> _chunks = {};
@@ -133,10 +134,21 @@ class RoboChessBleClient {
       _control = find(controlUuid);
       _wifi = find(wifiUuid);
       _status = find(statusUuid);
-      if (_control!.properties.notify && !shouldSkipBluetoothNotify(_control!)) {
+      if (_control!.properties.notify &&
+          !shouldSkipBluetoothNotify(_control!)) {
         _controlSubscription = _control!.onValueReceived.listen(_handleFrame);
         try {
           await _control!.setNotifyValue(true);
+        } catch (error) {
+          if (!isInvalidBluetoothHandleError(error)) {
+            rethrow;
+          }
+        }
+      }
+      if (_wifi!.properties.notify && !shouldSkipBluetoothNotify(_wifi!)) {
+        _wifiSubscription = _wifi!.onValueReceived.listen(_handleFrame);
+        try {
+          await _wifi!.setNotifyValue(true);
         } catch (error) {
           if (!isInvalidBluetoothHandleError(error)) {
             rethrow;
@@ -317,6 +329,7 @@ class RoboChessBleClient {
 
   Future<void> disconnect() async {
     await _controlSubscription?.cancel();
+    await _wifiSubscription?.cancel();
     await _statusSubscription?.cancel();
     await _device?.disconnect();
     _device = null;

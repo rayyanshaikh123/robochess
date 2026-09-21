@@ -29,7 +29,8 @@ class LocalBoardRepository {
   Future<void> sendOnboardingCredentials(DeviceCredentials credentials) async {
     final id = _deviceId;
     if (id == null) {
-      throw StateError('Connect to a board before sending onboarding credentials');
+      throw StateError(
+          'Connect to a board before sending onboarding credentials');
     }
     final secret = credentials.deviceSecret;
     if (secret == null || secret.isEmpty) {
@@ -74,6 +75,7 @@ class LocalBoardRepository {
   Future<void> requestState() => send('state.request');
   Future<void> requestNetworkStatus() => send('network.status');
   Future<void> scanWifiNetworks() => send('network.scan');
+  Future<Map<String, dynamic>?> readBleStatus() => ble.readStatus();
   Future<void> resumeSession() => send('session.resume');
   Future<void> resetSession() => send('session.reset');
   Future<void> undoSession() => send('session.undo');
