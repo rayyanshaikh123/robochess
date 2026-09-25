@@ -7,10 +7,10 @@ export default function Home() {
       <LandingClient />
 
       {/* ── Navigation Header ── */}
-      <header className="fixed top-0 left-0 right-0 w-full z-50 bg-white/90 backdrop-blur-md border-b border-[var(--color-outline)] shadow-sm">
+      <header className="site-header fixed top-0 left-0 right-0 w-full z-50 bg-white/90 backdrop-blur-md border-b border-[var(--color-outline)] shadow-sm">
         <div className="h-20 container flex items-center justify-between">
           <a href="#" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 rounded-xl overflow-hidden border border-[var(--color-outline-variant)] bg-[var(--color-surface-low)]">
+            <div className="site-brand-mark w-10 h-10 rounded-xl overflow-hidden border border-[var(--color-outline-variant)] bg-[var(--color-surface-low)]">
               <Image
                 src="/app_logo.png"
                 alt="RoboChess Logo"
@@ -25,8 +25,9 @@ export default function Home() {
             </span>
           </a>
 
-          <nav className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--color-surface-low)] border border-[var(--color-outline)] shadow-sm">
-            <a href="#history" className="text-sm font-semibold px-4 py-1.5 bg-[var(--color-primary)] text-white rounded-full shadow-sm">
+          <nav className="site-nav hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--color-surface-low)] border border-[var(--color-outline)] shadow-sm">
+            <a href="#history" className="active-nav text-sm font-semibold px-4 py-1.5 bg-[var(--color-primary)] text-white rounded-full shadow-sm">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-300 align-middle mr-1.5" />
               Our Story
             </a>
             <a href="#product" className="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors px-4 py-1.5 rounded-full hover:bg-slate-200/50">
@@ -44,18 +45,30 @@ export default function Home() {
           </nav>
 
           <div className="flex items-center gap-4">
+            <span className="site-status-pill hidden xl:inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--color-primary)]">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
+              Board online
+            </span>
             <a href="/app/" className="btn-primary inline-flex items-center justify-center text-sm font-semibold px-6 py-2.5">
               Launch App
             </a>
           </div>
         </div>
+        <nav className="site-nav-mobile lg:hidden flex items-center gap-2 overflow-x-auto border-t border-[var(--color-outline)] px-4 py-2.5 scrollbar-none">
+          <a href="#history" className="active-nav inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[var(--color-primary)] px-3.5 py-1.5 text-xs font-semibold text-white">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> Story
+          </a>
+          <a href="#product" className="inline-flex shrink-0 rounded-full border border-[var(--color-outline)] bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-600">Technology</a>
+          <a href="#features" className="inline-flex shrink-0 rounded-full border border-[var(--color-outline)] bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-600">Features</a>
+          <a href="#how-it-works" className="inline-flex shrink-0 rounded-full border border-[var(--color-outline)] bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-600">How it works</a>
+        </nav>
       </header>
 
-      <main className="w-full pt-20">
+      <main className="w-full pt-32 lg:pt-20">
         <div className="flex flex-col w-full">
 
           {/* ── 1. HERO SECTION ── */}
-          <section className="relative w-full overflow-hidden pt-16 pb-24 lg:pt-20 lg:pb-32 bg-gradient-to-b from-slate-100/70 via-[var(--color-background)] to-[var(--color-background)]">
+          <section className="hero-section relative w-full overflow-hidden pt-16 pb-24 lg:pt-20 lg:pb-32 bg-gradient-to-b from-slate-100/70 via-[var(--color-background)] to-[var(--color-background)]">
             {/* Ambient Green Accent Glow */}
             <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[500px] bg-[var(--color-primary)]/5 rounded-full blur-[120px] pointer-events-none" />
 
@@ -79,7 +92,7 @@ export default function Home() {
               </p>
 
               {/* Dual CTAs */}
-              <div className="flex flex-wrap items-center justify-center gap-4 mb-16 fade-in-up">
+              <div className="flex flex-wrap items-center justify-center gap-4 mb-10 fade-in-up">
                 <a href="/app/" className="btn-primary inline-flex items-center gap-2 text-base font-semibold px-8 py-3.5">
                   <span className="material-symbols-outlined text-[20px]">play_arrow</span>
                   <span>Launch Web App</span>
@@ -90,8 +103,25 @@ export default function Home() {
                 </a>
               </div>
 
+              {/* Product proof points */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-3xl mb-14 fade-in-up">
+                {[
+                  { value: "64", label: "Squares tracked", icon: "grid_4x4" },
+                  { value: "99.8%", label: "Detection accuracy", icon: "center_focus_strong" },
+                  { value: "< 1s", label: "Move response", icon: "speed" },
+                ].map((metric) => (
+                  <div key={metric.label} className="flex items-center gap-3 rounded-2xl border border-[var(--color-outline)] bg-white/80 px-4 py-3 text-left shadow-sm backdrop-blur-sm">
+                    <span className="material-symbols-outlined flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-[var(--color-primary)] text-[20px]">{metric.icon}</span>
+                    <div>
+                      <div className="font-[var(--font-headline)] text-lg font-bold leading-none text-slate-900">{metric.value}</div>
+                      <div className="mt-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{metric.label}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
               {/* Hero Showcase Image */}
-              <div className="relative w-full max-w-5xl mx-auto rounded-2xl overflow-hidden bg-white p-2 border border-[var(--color-outline)] shadow-xl group fade-in-up">
+              <div className="hero-frame relative w-full max-w-5xl mx-auto rounded-[1.75rem] overflow-hidden bg-white p-2 border border-[var(--color-outline)] shadow-[0_24px_70px_rgba(15,23,42,0.16)] group fade-in-up">
                 <div className="relative aspect-[16/9] w-full overflow-hidden rounded-xl bg-slate-900">
                   <Image
                     src="https://lh3.googleusercontent.com/aida/AEtjO1W5h3Ugbe2MWGpbf02-QLd7Ykxu0meiDQv7fg5QEr3g02MkGMuDHUkaHBglMr7H4oIf5IF5RAI8X8hZ-uuPg9IusY9U-wAvR4qWSsvXnQkfqnlUYvGDK56y8AdyFQX0SSfOYWbSpFyPzAKt8Sb_zlZq-ns86cpVCdlywpVbj5yWTD4335gDd1VNJNLfOPCT2jLYj4F16P68pFb3cDJsLllCCj0g9Wp_A7MmcH5xBbOWh-cARlAWrlZ1F3I"
@@ -99,8 +129,44 @@ export default function Home() {
                     width={1280}
                     height={720}
                     className="w-full h-full object-cover object-center transform group-hover:scale-[1.01] transition-transform duration-700 ease-out"
+                    loading="eager"
                     unoptimized
                   />
+                  <div className="absolute left-5 top-5 flex items-center gap-2 rounded-full border border-white/20 bg-slate-950/70 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-white shadow-lg backdrop-blur-md">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-75" />
+                      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                    </span>
+                    Live board telemetry
+                  </div>
+                  <div className="telemetry-panel absolute bottom-5 right-5 hidden min-w-56 rounded-2xl border border-white/15 bg-slate-950/75 p-4 text-left text-white shadow-xl backdrop-blur-md sm:block">
+                    <div className="mb-3 flex items-center justify-between gap-5">
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300">System ready</span>
+                      <span className="material-symbols-outlined text-[18px] text-emerald-300">verified</span>
+                    </div>
+                    <div className="flex items-end justify-between gap-6">
+                      <div>
+                        <div className="font-[var(--font-headline)] text-2xl font-bold leading-none">+0.42</div>
+                        <div className="mt-1 text-[11px] text-slate-300">Engine evaluation</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-[var(--font-headline)] text-lg font-semibold leading-none">12 ms</div>
+                        <div className="mt-1 text-[11px] text-slate-300">Board latency</div>
+                      </div>
+                    </div>
+                    <div className="mt-4 grid grid-cols-3 gap-2 border-t border-white/10 pt-3">
+                      {[
+                        { label: "Vision", icon: "visibility" },
+                        { label: "Engine", icon: "bolt" },
+                        { label: "BLE", icon: "bluetooth" },
+                      ].map((status) => (
+                        <div key={status.label} className="flex flex-col items-center gap-1 rounded-lg bg-white/5 px-2 py-1.5 text-[9px] font-semibold uppercase tracking-wider text-slate-300">
+                          <span className="material-symbols-outlined text-[14px] text-emerald-300">{status.icon}</span>
+                          <span>{status.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -131,7 +197,7 @@ export default function Home() {
               </div>
 
               {/* Archival Artifact */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center p-8 lg:p-10 rounded-2xl bg-[var(--color-surface-low)] border border-[var(--color-outline)] shadow-sm fade-in-up">
+              <div className="ui-card grid grid-cols-1 lg:grid-cols-12 gap-10 items-center p-8 lg:p-10 rounded-2xl bg-[var(--color-surface-low)] border border-[var(--color-outline)] shadow-sm fade-in-up">
                 <div className="lg:col-span-6 relative overflow-hidden rounded-xl bg-white border border-[var(--color-outline)] p-2 shadow-sm group">
                   <Image
                     src="https://lh3.googleusercontent.com/aida/AEtjO1W05pphxyKflm0UbleWq_SxHIj1mIBLoWHRtkZadkoBFnkPpWXtaVAoWbHAthjEeGB9EjuwxLsmULqECoLn28E9a3Km6lL7DlO0LqnJgN1UvwsMKybqXdjiIPex3obQGJll5a5QmAT7a-ByjzVdoAccK4E_zVGuyfyrPG1CCnESdzHOnXmTZ5d3ELntMOjyykQ7MjH7egfW33onjrGJL1MiHhTavSFH3DXqHcxmIgWksuJ3LEcUX1uLR9w"
@@ -174,14 +240,14 @@ export default function Home() {
               </div>
 
               {/* Timeline */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 fade-in-up">
+              <div className="history-rail grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 fade-in-up">
                 {[
                   { num: "01", era: "6th Century", title: "Ancient India", desc: "Gupta Empire origin. Conceived on the uncheckered Ashtapada 8×8 board as a philosophical simulator of military strategy.", tag: "Birth of the Royal Game", tagColor: "text-[var(--color-primary)]", highlight: false },
                   { num: "02", era: "7th–15th Cent.", title: "Persia to Europe", desc: "Transitioned to Persian Shatranj, traversing silk trade routes to European nobility. The Mantri evolved into the devastatingly powerful Queen.", tag: "Global Dispersion", tagColor: "text-[var(--color-wood-dark)]", highlight: false },
                   { num: "03", era: "19th–20th Cent.", title: "Universal Standardization", desc: "FIDE codification, Staunton design, world championship rivalries, and the shift toward cold, flat glass computer screens.", tag: "The Digital Pivot", tagColor: "text-slate-600", highlight: false },
                   { num: "04", era: "Today & Beyond", title: "Robotic Reimagination", desc: "RoboChess merges ancient tangible wood craftsmanship with autonomous sub-surface robotics and machine vision telemetry.", tag: "The Living Board", tagColor: "text-emerald-200", highlight: true },
                 ].map((stage) => (
-                  <div key={stage.num} className={`p-6 rounded-xl flex flex-col justify-between group transition-all ${stage.highlight ? "bg-[var(--color-primary)] text-white shadow-md" : "bg-white border border-[var(--color-outline)] shadow-sm hover:border-slate-300 hover:shadow-md"}`}>
+                  <div key={stage.num} className={`history-stage p-6 rounded-xl flex flex-col justify-between group transition-all ${stage.highlight ? "bg-[var(--color-primary)] text-white shadow-md" : "bg-white border border-[var(--color-outline)] shadow-sm hover:border-slate-300 hover:shadow-md"}`}>
                     <div>
                       <div className="flex items-center justify-between mb-4">
                         <span className={`font-[var(--font-headline)] text-3xl font-bold ${stage.highlight ? "text-emerald-300" : "text-[var(--color-primary)]"}`}>{stage.num}</span>
@@ -216,7 +282,7 @@ export default function Home() {
               </div>
 
               {/* Cutaway Showcase */}
-              <div className="relative rounded-2xl bg-white border border-[var(--color-outline)] p-6 lg:p-10 shadow-md fade-in-up">
+              <div className="ui-card relative rounded-2xl bg-white border border-[var(--color-outline)] p-6 lg:p-10 shadow-md fade-in-up">
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
                   <div className="lg:col-span-7 relative rounded-xl overflow-hidden bg-slate-900 border border-slate-800">
                     <Image
@@ -282,7 +348,7 @@ export default function Home() {
                   const isPrimary = f.accent === "primary";
                   const accentColor = isPrimary ? "var(--color-primary)" : "var(--color-wood-dark)";
                   return (
-                    <div key={f.title} className={`p-8 rounded-2xl bg-[var(--color-surface-low)] border border-[var(--color-outline)] flex flex-col justify-between transition-all group ${isPrimary ? "hover:border-[var(--color-primary)]/40" : "hover:border-[var(--color-wood-dark)]/50"} hover:shadow-md`}>
+                    <div key={f.title} className={`ui-card p-8 rounded-2xl bg-[var(--color-surface-low)] border border-[var(--color-outline)] flex flex-col justify-between transition-all group ${isPrimary ? "hover:border-[var(--color-primary)]/40" : "hover:border-[var(--color-wood-dark)]/50"} hover:shadow-md`}>
                       <div className="flex flex-col gap-4">
                         <div className={`w-12 h-12 rounded-xl bg-white border border-[var(--color-outline)] flex items-center justify-center shadow-sm transition-all`} style={{ color: accentColor }}>
                           <span className="material-symbols-outlined text-[24px]">{f.icon}</span>
@@ -349,7 +415,7 @@ export default function Home() {
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-8 fade-in-up">
                 {/* Mode 1 */}
-                <div className="p-8 rounded-2xl bg-[var(--color-surface-low)] border border-[var(--color-outline)] flex flex-col justify-between hover:shadow-md transition-all group">
+                <div className="ui-card p-8 rounded-2xl bg-[var(--color-surface-low)] border border-[var(--color-outline)] flex flex-col justify-between hover:shadow-md transition-all group">
                   <div>
                     <div className="w-12 h-12 rounded-xl bg-white border border-[var(--color-outline)] text-[var(--color-primary)] flex items-center justify-center mb-6 shadow-sm">
                       <span className="material-symbols-outlined text-[26px]">token</span>
@@ -369,7 +435,7 @@ export default function Home() {
                 </div>
 
                 {/* Mode 2 — Highlighted */}
-                <div className="p-8 rounded-2xl bg-[var(--color-primary)] text-white flex flex-col justify-between shadow-lg relative overflow-hidden group">
+                <div className="ui-card p-8 rounded-2xl bg-[var(--color-primary)] text-white flex flex-col justify-between shadow-lg relative overflow-hidden group">
                   <div className="relative z-10">
                     <div className="w-12 h-12 rounded-xl bg-white/15 text-emerald-200 border border-white/20 flex items-center justify-center mb-6">
                       <span className="material-symbols-outlined text-[26px]">language</span>
@@ -389,7 +455,7 @@ export default function Home() {
                 </div>
 
                 {/* Mode 3 */}
-                <div className="p-8 rounded-2xl bg-[var(--color-surface-low)] border border-[var(--color-outline)] flex flex-col justify-between hover:shadow-md transition-all group">
+                <div className="ui-card p-8 rounded-2xl bg-[var(--color-surface-low)] border border-[var(--color-outline)] flex flex-col justify-between hover:shadow-md transition-all group">
                   <div>
                     <div className="w-12 h-12 rounded-xl bg-white border border-[var(--color-outline)] text-[var(--color-primary)] flex items-center justify-center mb-6 shadow-sm">
                       <span className="material-symbols-outlined text-[26px]">devices</span>
@@ -426,7 +492,7 @@ export default function Home() {
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 fade-in-up">
                 {/* Heritage */}
-                <div className="p-8 lg:p-10 rounded-2xl bg-white border border-[var(--color-outline)] shadow-sm flex flex-col gap-6">
+                <div className="ui-card p-8 lg:p-10 rounded-2xl bg-white border border-[var(--color-outline)] shadow-sm flex flex-col gap-6">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 text-[var(--color-wood-dark)] flex items-center justify-center">
                       <span className="material-symbols-outlined text-[22px]">history_edu</span>
@@ -455,7 +521,7 @@ export default function Home() {
                 </div>
 
                 {/* Innovation */}
-                <div className="p-8 lg:p-10 rounded-2xl bg-white border border-[var(--color-outline)] shadow-sm flex flex-col gap-6">
+                <div className="ui-card p-8 lg:p-10 rounded-2xl bg-white border border-[var(--color-outline)] shadow-sm flex flex-col gap-6">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 text-[var(--color-primary)] flex items-center justify-center">
                       <span className="material-symbols-outlined text-[22px]">memory</span>
@@ -541,7 +607,7 @@ export default function Home() {
                 </div>
 
                 {/* QR Code */}
-                <div className="lg:col-span-5 flex flex-col items-center justify-center gap-5 p-8 rounded-2xl bg-white text-slate-900 shadow-lg border border-[var(--color-outline)]">
+                <div className="ui-card lg:col-span-5 flex flex-col items-center justify-center gap-5 p-8 rounded-2xl bg-white text-slate-900 shadow-lg border border-[var(--color-outline)]">
                   <div className="p-3 bg-slate-50 rounded-xl border border-[var(--color-outline)] shadow-inner flex flex-col items-center justify-center">
                     <svg className="w-32 h-32 text-slate-900" fill="currentColor" viewBox="0 0 100 100">
                       <rect fill="currentColor" height="30" rx="3" width="30" x="0" y="0" />
