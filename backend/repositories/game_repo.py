@@ -85,19 +85,20 @@ async def update_game_status(
     return result.modified_count == 1
 
 
-async def count_games_by_players(
-    db: AsyncIOMotorDatabase, player_ids: list[str]
-) -> int:
-    if not player_ids:
-        return 0
-    return await db[GAMES].count_documents({"players": {"$in": player_ids}})
-
-
-async def count_games_by_players_and_status(
-    db: AsyncIOMotorDatabase, player_ids: list[str], statuses: list[str]
-) -> int:
-    if not player_ids or not statuses:
-        return 0
-    return await db[GAMES].count_documents(
-        {"players": {"$in": player_ids}, "status": {"$in": statuses}}
+async def finish_game(
+    db: AsyncIOMotorDatabase,
+    game_id: str,
+    status: str,
+    result: str,
+    reason: str,
+) -> bool:
+    """Store the final result. Guarded on ``status`` so a game only ends once."""
+    object_id = _to_object_id(game_id)
+    if object_id is None:
+        return False
+    now = datetime.now(timezone.utc)
+    updated = await db[GAMES].update_one(
+        {"_id": object_id, "status": "active"},
+        {"$set": {"status": status, "result": result, "end_reason": reason, "updated_at": now}},
     )
+    return updated.modified_count == 1

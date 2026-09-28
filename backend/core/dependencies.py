@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
@@ -7,6 +9,7 @@ from backend.core.security import decode_token
 from backend.utils.rate_limit import rate_limiter
 
 _bearer = HTTPBearer()
+_optional_bearer = HTTPBearer(auto_error=False)
 
 
 def _get_subject(credentials: HTTPAuthorizationCredentials, expected_type: str) -> str:
@@ -30,6 +33,18 @@ async def get_current_user_id(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer),
 ) -> str:
     return _get_subject(credentials, "access")
+
+
+async def get_optional_user_id(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_optional_bearer),
+) -> Optional[str]:
+    """The signed-in user when a valid access token is sent, else ``None``."""
+    if credentials is None:
+        return None
+    try:
+        return _get_subject(credentials, "access")
+    except HTTPException:
+        return None
 
 
 async def get_current_device_id(

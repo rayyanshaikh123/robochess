@@ -6,7 +6,12 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import DuplicateKeyError
 
 from backend.repositories.game_repo import create_game as repo_create_game
-from backend.repositories.game_repo import get_game, update_game_state, update_game_status
+from backend.repositories.game_repo import (
+    finish_game,
+    get_game,
+    update_game_state,
+    update_game_status,
+)
 from backend.repositories.move_repo import get_moves_after, insert_move
 
 
@@ -17,6 +22,7 @@ def _serialize_game(game: dict) -> dict:
         "status": game.get("status"),
         "game_version": game.get("game_version", 0),
         "last_move": game.get("last_move"),
+        "result": game.get("result"),
         "mode": game.get("mode"),
         "difficulty": game.get("difficulty"),
         "player_side": game.get("player_side"),
@@ -43,6 +49,7 @@ async def create_game(
     mode: str = "human_vs_ai",
     difficulty: int = 5,
     player_side: str = "white",
+    owner_user_id: Optional[str] = None,
 ) -> dict:
     # Per-game settings live on the document so the AI never depends on
     # process-wide state shared between players.
@@ -51,6 +58,8 @@ async def create_game(
         "difficulty": difficulty,
         "player_side": player_side,
         "uses_board": bool(players),
+        # Who the game counts for in stats (solo games have no user in ``players``).
+        "owner_user_id": owner_user_id,
     }
     game = await repo_create_game(db, players or [], current_fen, "active", settings=settings)
     return _serialize_game(game)
@@ -111,6 +120,13 @@ async def record_move(
         # as the version check prevents corrupted game states.
         return None, "Version conflict (someone else moved first)"
 
+    # Close the game out when this move ended it (checkmate, stalemate, ...).
+    outcome = chess.Board(fen_after).outcome()
+    if outcome is not None:
+        await finish_game(
+            db, game_id, "completed", outcome.result(), outcome.termination.name.lower()
+        )
+
     # Fetch fresh game state
     game = await get_game(db, game_id)
     if not game:
@@ -127,6 +143,8 @@ async def validate_and_record_move(
     game = await get_game(db, game_id)
     if not game:
         return None, "Game not found"
+    if game.get("status", "active") != "active":
+        return None, "Game is over"
 
     try:
         board = chess.Board(game.get("current_fen"))
@@ -149,6 +167,24 @@ async def end_game(
     updated = await update_game_status(db, game_id, status)
     if not updated:
         return False, "Game not found"
+    return True, None
+
+
+async def resign_game(
+    db: AsyncIOMotorDatabase, game_id: str
+) -> tuple[bool, Optional[str]]:
+    """Resign a solo or board game on behalf of the human player."""
+    game = await get_game(db, game_id)
+    if not game:
+        return False, "Game not found"
+    if (game.get("mode") or "human_vs_ai") == "human_vs_ai":
+        loser_is_white = (game.get("player_side") or "white") == "white"
+    else:
+        # Pass-and-play: the side to move is the one resigning.
+        loser_is_white = chess.Board(game.get("current_fen")).turn == chess.WHITE
+    result = "0-1" if loser_is_white else "1-0"
+    if not await finish_game(db, game_id, "resigned", result, "resignation"):
+        return False, "Game is already over"
     return True, None
 
 

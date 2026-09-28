@@ -42,26 +42,38 @@ class HomeDashboard extends ConsumerWidget {
           AnimatedProfileAvatar(size: 34),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _GreetingCard(
-                displayName: displayName, loading: profileAsync.isLoading),
-            const SizedBox(height: 14),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          ref.invalidate(userProfileProvider);
+          ref.invalidate(userStatsProvider);
+          try {
+            await ref.read(userStatsProvider.future);
+          } catch (_) {
+            // The stats card shows its own empty state on failure.
+          }
+        },
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _GreetingCard(
+                  displayName: displayName, loading: profileAsync.isLoading),
+              const SizedBox(height: 14),
 
-            _StatsCard(
-              loading: statsAsync.isLoading,
-              gamesPlayed: stats?.gamesPlayed,
-              wins: stats?.wins,
-              losses: stats?.losses,
-              draws: stats?.draws,
-            ),
-            const SizedBox(height: 20),
+              _StatsCard(
+                loading: statsAsync.isLoading,
+                gamesPlayed: stats?.gamesPlayed,
+                wins: stats?.wins,
+                losses: stats?.losses,
+                draws: stats?.draws,
+              ),
+              const SizedBox(height: 20),
 
-            _LiveBoardCard(game: game),
-          ],
+              _LiveBoardCard(game: game),
+            ],
+          ),
         ),
       ),
     );

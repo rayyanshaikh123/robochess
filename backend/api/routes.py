@@ -21,6 +21,7 @@ from backend.api.schemas import (
 )
 from backend.core.game_manager import GameManager
 from backend.core.config import load_settings
+from backend.core.dependencies import get_optional_user_id
 from backend.core.security import decode_token
 from backend.db.client import get_db
 from backend.repositories.device_repo import get_by_device_id
@@ -37,6 +38,7 @@ from backend.services.game_service import (
     get_game_state,
     get_moves_since,
     record_move,
+    resign_game,
     validate_and_record_move,
 )
 from backend.services.move_service import detect_move
@@ -1327,7 +1329,12 @@ def calibrate_force() -> ApiResponse:
 
 
 @router.post("/game/start", response_model=ApiResponse)
-async def start_game(payload: GameStartRequest, background_tasks: BackgroundTasks, db=Depends(get_db)) -> ApiResponse:
+async def start_game(
+    payload: GameStartRequest,
+    background_tasks: BackgroundTasks,
+    db=Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+) -> ApiResponse:
     manager = GameManager.get_instance()
     with manager.state_lock:
         manager.mode = payload.mode
@@ -1355,6 +1362,7 @@ async def start_game(payload: GameStartRequest, background_tasks: BackgroundTask
         mode=payload.mode,
         difficulty=payload.difficulty,
         player_side=manager.player_side,
+        owner_user_id=user_id,
     )
     manager.current_game_id = game.get("game_id")
 
@@ -1896,7 +1904,7 @@ async def game_resign(game_id: str, db=Depends(get_db)) -> ApiResponse:
     if game.get("user_players"):
         return error("Use the multiplayer resign endpoint for friend games")
 
-    ended, err = await end_game(db, game_id, "resigned")
+    ended, err = await resign_game(db, game_id)
     if err:
         return error(err)
     state, state_err = await get_game_state(db, game_id)
