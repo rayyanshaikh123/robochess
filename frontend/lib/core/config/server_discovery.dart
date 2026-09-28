@@ -5,10 +5,20 @@ import 'dart:io';
 class ServerDiscovery {
   const ServerDiscovery();
 
-  Future<String?> find({required String preferredUrl}) async {
+  Future<String?> find({
+    required String preferredUrl,
+    String? fallbackUrl,
+  }) async {
     final preferred = _normalize(preferredUrl);
     if (preferred != null && await _isBackend(preferred)) {
       return preferred;
+    }
+
+    // A saved LAN address may be stale; try the configured (hosted) backend
+    // before scanning the local subnet.
+    final fallback = fallbackUrl == null ? null : _normalize(fallbackUrl);
+    if (fallback != null && fallback != preferred && await _isBackend(fallback)) {
+      return fallback;
     }
 
     final hosts = await _localSubnetHosts();
@@ -30,13 +40,21 @@ class ServerDiscovery {
   }
 
   Future<bool> _isBackend(String baseUrl) async {
+    // LAN probes stay fast so the subnet scan finishes quickly. A hosted
+    // backend needs room for TLS and a cold start (Render free instances
+    // take up to about a minute to wake).
+    final remote = !_isLanUrl(baseUrl);
     final client = HttpClient()
-      ..connectionTimeout = const Duration(milliseconds: 350);
+      ..connectionTimeout = remote
+          ? const Duration(seconds: 15)
+          : const Duration(milliseconds: 350);
     try {
       final request = await client.getUrl(Uri.parse('$baseUrl/health'));
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final response = await request.close().timeout(
-            const Duration(milliseconds: 700),
+            remote
+                ? const Duration(seconds: 75)
+                : const Duration(milliseconds: 700),
           );
       if (response.statusCode < 200 || response.statusCode >= 300) {
         await response.drain<void>();
@@ -75,6 +93,18 @@ class ServerDiscovery {
       }
     }
     return hosts.toList();
+  }
+
+  static bool _isLanUrl(String baseUrl) {
+    final host = Uri.tryParse(baseUrl)?.host ?? '';
+    if (host == 'localhost') return true;
+    final parts = host.split('.').map(int.tryParse).toList();
+    if (parts.length != 4 || parts.contains(null)) return false;
+    final a = parts[0]!, b = parts[1]!;
+    return a == 10 ||
+        a == 127 ||
+        (a == 172 && b >= 16 && b <= 31) ||
+        (a == 192 && b == 168);
   }
 
   String? _normalize(String value) {

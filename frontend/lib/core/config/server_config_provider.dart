@@ -50,7 +50,10 @@ class ServerConfigNotifier extends StateNotifier<String> {
   }
 
   Future<bool> discoverIfUnavailable() async {
-    final discovered = await _discovery.find(preferredUrl: state);
+    final discovered = await _discovery.find(
+      preferredUrl: state,
+      fallbackUrl: _compileTimeFallback,
+    );
     if (discovered == null || discovered == state) {
       return discovered != null;
     }
