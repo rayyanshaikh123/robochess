@@ -1328,7 +1328,9 @@ Future<void> _runSyncCoordinator() async {
 
     if (_linkedGameId != null) {
       try {
-        await ref.read(gameControllerProvider.notifier).undoMove();
+        await ref
+            .read(gameControllerProvider.notifier)
+            .undoMove(gameId: _linkedGameId);
       } catch (e) {
         if (!mounted) return;
         setState(() => _syncError = 'Failed to undo move.');

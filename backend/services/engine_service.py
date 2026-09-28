@@ -15,10 +15,15 @@ def get_ai_move(
     
     # Map 1-10 difficulty to Stockfish Skill Level 0-20
     skill_level = int((difficulty - 1) * (20 / 9))
-    engine.configure({"Skill Level": skill_level})
-    
+
+    # Pass the skill per call: the engine process is shared by every game, so a
+    # global configure() could leak one player's difficulty into another's move.
     time_limit = max(0.1, float(base_time) * (0.4 + (difficulty / 10.0)))
-    result = engine.play(board, chess.engine.Limit(time=time_limit))
+    result = engine.play(
+        board,
+        chess.engine.Limit(time=time_limit),
+        options={"Skill Level": skill_level},
+    )
     if result.move is None:
         raise RuntimeError("Engine returned no move")
     return result.move

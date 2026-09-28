@@ -17,6 +17,9 @@ def _serialize_game(game: dict) -> dict:
         "status": game.get("status"),
         "game_version": game.get("game_version", 0),
         "last_move": game.get("last_move"),
+        "mode": game.get("mode"),
+        "difficulty": game.get("difficulty"),
+        "player_side": game.get("player_side"),
     }
 
 
@@ -37,8 +40,19 @@ async def create_game(
     db: AsyncIOMotorDatabase,
     current_fen: str,
     players: Optional[list[str]] = None,
+    mode: str = "human_vs_ai",
+    difficulty: int = 5,
+    player_side: str = "white",
 ) -> dict:
-    game = await repo_create_game(db, players or [], current_fen, "active")
+    # Per-game settings live on the document so the AI never depends on
+    # process-wide state shared between players.
+    settings = {
+        "mode": mode,
+        "difficulty": difficulty,
+        "player_side": player_side,
+        "uses_board": bool(players),
+    }
+    game = await repo_create_game(db, players or [], current_fen, "active", settings=settings)
     return _serialize_game(game)
 
 

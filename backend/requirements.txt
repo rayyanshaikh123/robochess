@@ -1,23 +1,27 @@
-# RoboChess — backend + ML dependencies
-# Core
-ultralytics
-opencv-contrib-python
-numpy
-python-chess
-requests
-pillow
+# RoboChess — backend server dependencies (used by Render / production)
+# Local YOLO training/inference extras live in requirements-ml.txt.
 
-# Server
+# Web server
 fastapi
-python-dotenv
 uvicorn[standard]
 python-multipart
 pydantic
+python-dotenv
+
+# Database / cache
 motor
 pymongo
+certifi
+redis
+
+# Auth
 python-jose[cryptography]
 passlib[bcrypt]
 bcrypt<4.0.0
-redis
-locust
-websockets==10.4
+
+# Chess + vision (headless OpenCV: no libGL needed on servers)
+python-chess
+numpy
+opencv-contrib-python-headless
+pillow
+requests

@@ -20,16 +20,19 @@ async def create_game(
     current_fen: str,
     status: str,
     session=None,
+    settings: Optional[dict] = None,
 ) -> dict:
     now = datetime.now(timezone.utc)
     doc = {
         "players": players,
+        "initial_fen": current_fen,
         "current_fen": current_fen,
         "status": status,
         "game_version": 0,
         "last_move": None,
         "created_at": now,
         "updated_at": now,
+        **(settings or {}),
     }
     result = await db[GAMES].insert_one(doc, session=session)
     doc["_id"] = result.inserted_id

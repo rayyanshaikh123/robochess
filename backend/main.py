@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 # pyrefly: ignore [missing-import]
 from fastapi import FastAPI
 from pathlib import Path
+import os
 import sys
 
 if __package__ is None:
@@ -27,8 +28,9 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        manager = GameManager.get_instance()
-        manager.close() 
+        # Only close the manager if a request created it; don't boot camera/model on shutdown.
+        if GameManager._instance is not None:
+            GameManager._instance.close()
         pubsub = getattr(app.state, "redis_pubsub", None)
         if pubsub is not None:
             await pubsub.close()
@@ -43,4 +45,4 @@ app.middleware("http")(request_logging_middleware())
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))

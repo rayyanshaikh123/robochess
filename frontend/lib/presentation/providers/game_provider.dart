@@ -44,10 +44,10 @@ class GameController extends StateNotifier<AsyncValue<GameStateModel?>> {
     state = AsyncValue.data(game);
   }
 
-  Future<void> undoMove() async {
+  Future<void> undoMove({String? gameId}) async {
     // We don't necessarily need to set state to loading if we want the WS
     // to handle the actual state update, but it's safe to do so.
-    await _repository.undoMove();
+    await _repository.undoMove(gameId: gameId);
   }
 
   Future<void> resignGame(String gameId) async {

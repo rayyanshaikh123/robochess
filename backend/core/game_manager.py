@@ -22,6 +22,7 @@ class GameManager:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.state_lock = threading.RLock()
+        self._engine_lock = threading.Lock()
         self.board = chess.Board()
         self.prev_state: Optional[dict[str, Optional[str]]] = None
         self.calibrated = False
@@ -70,6 +71,17 @@ class GameManager:
                         return capture
                 capture.release()
         return None
+
+    def restart_engine(self) -> Optional[chess.engine.SimpleEngine]:
+        """Replace a dead Stockfish process (e.g. killed for memory) with a fresh one."""
+        with self._engine_lock:
+            if self.engine is not None:
+                try:
+                    self.engine.quit()
+                except Exception:
+                    pass
+            self.engine = self._load_engine(self.settings.stockfish_path)
+            return self.engine
 
     def _load_engine(self, path: str) -> Optional[chess.engine.SimpleEngine]:
         if not path:

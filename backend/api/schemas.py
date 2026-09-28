@@ -18,6 +18,11 @@ class GameStartRequest(BaseModel):
 
 class MoveAiRequest(BaseModel):
     difficulty: Optional[int] = Field(default=None, ge=1, le=10)
+    game_id: Optional[str] = None
+
+
+class GameUndoRequest(BaseModel):
+    game_id: Optional[str] = None
 
 
 class RegisterRequest(BaseModel):

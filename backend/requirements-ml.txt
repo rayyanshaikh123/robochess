@@ -1,0 +1,6 @@
+# RoboChess — local extras (YOLO weights, training, desktop tools, load tests)
+# Not needed on Render: the server uses Roboflow cloud vision there.
+-r requirements.txt
+
+ultralytics
+locust

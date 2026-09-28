@@ -37,7 +37,7 @@ class GameRepository {
     return AnalysisReport.fromJson(data);
   }
 
-  Future<void> undoMove() => _remote.undoMove();
+  Future<void> undoMove({String? gameId}) => _remote.undoMove(gameId: gameId);
 
   Future<void> resignGame(String gameId) => _remote.resignGame(gameId);
 }

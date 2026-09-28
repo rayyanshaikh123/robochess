@@ -44,8 +44,10 @@ class GameRemoteDataSource {
     return await _client.getJson('/game/$gameId/analysis');
   }
 
-  Future<void> undoMove() async {
-    await _client.postJson('/game/undo', body: {});
+  Future<void> undoMove({String? gameId}) async {
+    await _client.postJson('/game/undo', body: {
+      if (gameId != null) 'game_id': gameId,
+    });
   }
 
   Future<void> resignGame(String gameId) async {

@@ -6,6 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, BackgroundTasks
 import chess
+import chess.engine
 import cv2
 import numpy as np
 
@@ -14,6 +15,7 @@ from backend.api.schemas import (
     GameMoveRequest,
     GameStartRequest,
     ManualCalibrationRequest,
+    GameUndoRequest,
     ModelLoadRequest,
     MoveAiRequest,
 )
@@ -22,6 +24,7 @@ from backend.core.config import load_settings
 from backend.core.security import decode_token
 from backend.db.client import get_db
 from backend.repositories.device_repo import get_by_device_id
+from backend.repositories.game_repo import get_game as get_game_doc
 from backend.services.calibration_service import validate_initial_board
 from backend.services.detection_service import (
     detect_board_state,
@@ -730,7 +733,7 @@ async def detect_move_if_clear(
 
     ai_color = chess.BLACK if getattr(manager, "player_side", "white") == "white" else chess.WHITE
     if manager.mode == "human_vs_ai" and not manager.board.is_game_over() and manager.board.turn == ai_color:
-        background_tasks.add_task(_trigger_ai_move, db)
+        background_tasks.add_task(_trigger_board_ai_move, db)
 
     data = {
         "uci": move.uci(),
@@ -951,7 +954,7 @@ async def analyze_move_snapshot(
 
     ai_color = chess.BLACK if getattr(manager, "player_side", "white") == "white" else chess.WHITE
     if manager.mode == "human_vs_ai" and not manager.board.is_game_over() and manager.board.turn == ai_color:
-        background_tasks.add_task(_trigger_ai_move, db)
+        background_tasks.add_task(_trigger_board_ai_move, db)
 
     data = {
         "analysis_status": "green",
@@ -1157,7 +1160,7 @@ async def check_auto_detect_ready(background_tasks: BackgroundTasks, db=Depends(
         
         ai_color = chess.BLACK if getattr(manager, "player_side", "white") == "white" else chess.WHITE
         if manager.mode == "human_vs_ai" and not manager.board.is_game_over() and manager.board.turn == ai_color:
-            background_tasks.add_task(_trigger_ai_move, db)
+            background_tasks.add_task(_trigger_board_ai_move, db)
         
         return ok(
             "Move auto-detected",
@@ -1344,17 +1347,27 @@ async def start_game(payload: GameStartRequest, background_tasks: BackgroundTask
     if manager.prev_state is None and manager.recognizer is not None:
         manager.prev_state = manager.recognizer.expected_initial_state()
     
-    game = await create_game(db, manager.get_fen(), players=payload.players)
+    uses_board = bool(payload.players)
+    game = await create_game(
+        db,
+        chess.STARTING_FEN,
+        players=payload.players,
+        mode=payload.mode,
+        difficulty=payload.difficulty,
+        player_side=manager.player_side,
+    )
     manager.current_game_id = game.get("game_id")
-    
-    # Start auto-detect if using a board or if calibrated
-    if (payload.players and len(payload.players) > 0) or manager.calibrated:
+
+    # Backend-side auto-detect only makes sense when this server has a camera
+    # (LAN setup). On a cloud host the Pi watches the board instead.
+    if manager.camera is not None and (uses_board or manager.calibrated):
         manager.start_auto_detect()
 
-    # If playing vs AI and user is Black, AI needs to make the first move (White)
+    # If playing vs AI and user is Black, AI needs to make the first move (White).
+    # Board games get their engine replies from the Pi, not from this server.
     ai_color = chess.BLACK if manager.player_side == "white" else chess.WHITE
-    if manager.mode == "human_vs_ai" and manager.board.turn == ai_color:
-        background_tasks.add_task(_trigger_ai_move, db)
+    if manager.mode == "human_vs_ai" and not uses_board and manager.board.turn == ai_color:
+        background_tasks.add_task(_trigger_ai_move, db, game["game_id"])
 
     data = {
         "fen": manager.get_fen(),
@@ -1375,11 +1388,12 @@ async def game_state(game_id: str | None = None, db=Depends(get_db)) -> ApiRespo
     if resolved_id:
         game, err = await get_game_state(db, resolved_id)
         if not err:
+            fen = game.get("current_fen") or chess.STARTING_FEN
             data = {
-                "fen": game.get("current_fen"),
-                "turn": "white" if manager.board.turn == chess.WHITE else "black",
-                "mode": manager.mode,
-                "difficulty": manager.difficulty,
+                "fen": fen,
+                "turn": "white" if chess.Board(fen).turn == chess.WHITE else "black",
+                "mode": game.get("mode") or manager.mode,
+                "difficulty": game.get("difficulty") or manager.difficulty,
                 "calibrated": manager.calibrated,
                 "game_id": game.get("game_id"),
                 "game_version": game.get("game_version"),
@@ -1456,7 +1470,7 @@ async def detect_move_endpoint(
     # Trigger AI response when playing against the bot
     ai_color = chess.BLACK if getattr(manager, "player_side", "white") == "white" else chess.WHITE
     if manager.mode == "human_vs_ai" and not manager.board.is_game_over() and manager.board.turn == ai_color:
-        background_tasks.add_task(_trigger_ai_move, db)
+        background_tasks.add_task(_trigger_board_ai_move, db)
 
     data = {
         "uci": move.uci(),
@@ -1471,6 +1485,12 @@ async def detect_move_endpoint(
 
 @router.post("/move/ai", response_model=ApiResponse)
 async def ai_move(payload: MoveAiRequest, db=Depends(get_db)) -> ApiResponse:
+    if payload.game_id:
+        data, err = await _play_game_ai_move(db, payload.game_id, payload.difficulty)
+        if err:
+            return error(err)
+        return ok("AI move", data)
+
     manager = GameManager.get_instance()
     difficulty = payload.difficulty or manager.difficulty
     try:
@@ -1512,8 +1532,112 @@ async def ai_move(payload: MoveAiRequest, db=Depends(get_db)) -> ApiResponse:
     return ok("AI move", data)
 
 
-async def _trigger_ai_move(db):
-    """Background task to fetch and play an AI move."""
+def _game_ai_color(game: dict) -> chess.Color:
+    return chess.BLACK if (game.get("player_side") or "white") == "white" else chess.WHITE
+
+
+def _server_plays_ai(game: dict) -> bool:
+    """The server answers vs-AI games; board games get engine moves from the Pi."""
+    return (
+        (game.get("mode") or "human_vs_ai") == "human_vs_ai"
+        and not game.get("uses_board")
+        and game.get("status", "active") == "active"
+    )
+
+
+def _is_ai_turn(game: dict) -> bool:
+    try:
+        board = chess.Board(game.get("current_fen") or chess.STARTING_FEN)
+    except ValueError:
+        return False
+    return not board.is_game_over() and board.turn == _game_ai_color(game)
+
+
+async def _engine_move(board: chess.Board, difficulty: int) -> chess.Move:
+    manager = GameManager.get_instance()
+    engine = manager.engine or await asyncio.to_thread(manager.restart_engine)
+    try:
+        return await asyncio.to_thread(
+            get_ai_move, board, engine, difficulty, manager.settings.engine_time
+        )
+    except chess.engine.EngineTerminatedError:
+        # Stockfish died (OOM, crash); start a fresh process and retry once.
+        engine = await asyncio.to_thread(manager.restart_engine)
+        return await asyncio.to_thread(
+            get_ai_move, board, engine, difficulty, manager.settings.engine_time
+        )
+
+
+async def _play_game_ai_move(
+    db, game_id: str, difficulty: Optional[int] = None
+) -> tuple[Optional[dict], Optional[str]]:
+    """Play the engine's move for one game, using only that game's stored position."""
+    game = await get_game_doc(db, game_id)
+    if not game:
+        return None, "Game not found"
+    if game.get("status", "active") != "active":
+        return None, "Game is not active"
+
+    board = chess.Board(game.get("current_fen") or chess.STARTING_FEN)
+    if board.is_game_over():
+        return None, "Game is over"
+    version = int(game.get("game_version", 0))
+
+    try:
+        move = await _engine_move(board, difficulty or int(game.get("difficulty") or 5))
+    except Exception as exc:
+        return None, f"Engine failed: {exc}"
+    if move not in board.legal_moves:
+        return None, f"Engine returned illegal move {move.uci()}"
+    board.push(move)
+
+    # expected_version rejects the move if the player undid or moved meanwhile.
+    game_state, err = await record_move(db, game_id, move.uci(), board.fen(), expected_version=version)
+    if err:
+        return None, err
+
+    # Keep the backend-camera flow's board in step when it tracks this game.
+    manager = GameManager.get_instance()
+    if manager.current_game_id == game_id:
+        with manager.state_lock:
+            if move in manager.board.legal_moves:
+                manager.board.push(move)
+
+    await ws_manager.send_to_game(
+        game_id,
+        {
+            "type": "game.move",
+            "data": {
+                "game_id": game_id,
+                "uci": move.uci(),
+                "fen": board.fen(),
+                "game_version": game_state.get("game_version"),
+            },
+        },
+    )
+    return {
+        "uci": move.uci(),
+        "fen": board.fen(),
+        "turn": "white" if board.turn == chess.WHITE else "black",
+        "game_id": game_id,
+        "game_version": game_state.get("game_version"),
+    }, None
+
+
+async def _trigger_ai_move(db, game_id: str):
+    """Background AI reply for one game (on-screen play against the computer)."""
+    # Wait a bit to let the user see their move on screen
+    await asyncio.sleep(0.5)
+    game = await get_game_doc(db, game_id)
+    if not game or not _server_plays_ai(game) or not _is_ai_turn(game):
+        return  # AI must never move on the human's turn or in a board game
+    _, err = await _play_game_ai_move(db, game_id)
+    if err:
+        print(f"[ERROR] AI move for game {game_id} failed: {err}")
+
+
+async def _trigger_board_ai_move(db):
+    """Background AI reply for the backend-camera flow, which drives the shared board."""
     manager = GameManager.get_instance()
     # Wait a bit to let the user see their move on screen
     await asyncio.sleep(0.5)
@@ -1600,10 +1724,10 @@ async def submit_move(payload: GameMoveRequest, background_tasks: BackgroundTask
         },
     )
 
-    # Trigger AI move if in AI mode and it's AI's turn
-    ai_color = chess.BLACK if getattr(manager, "player_side", "white") == "white" else chess.WHITE
-    if manager.mode == "human_vs_ai" and not manager.board.is_game_over() and manager.board.turn == ai_color:
-        background_tasks.add_task(_trigger_ai_move, db)
+    # Trigger the AI reply from this game's own settings, never the shared board.
+    game_doc = await get_game_doc(db, payload.game_id)
+    if game_doc and _server_plays_ai(game_doc) and _is_ai_turn(game_doc):
+        background_tasks.add_task(_trigger_ai_move, db, payload.game_id)
 
     return ok("Move accepted", game_state)
 
@@ -1787,49 +1911,54 @@ async def game_resign(game_id: str, db=Depends(get_db)) -> ApiResponse:
 
 
 @router.post("/game/undo", response_model=ApiResponse)
-async def game_undo(db=Depends(get_db)) -> ApiResponse:
-    manager = GameManager.get_instance()
-    game_id = manager.current_game_id
-    if not game_id:
-        return error("No active game to undo")
-
-    undo_count = 2 if manager.mode == "human_vs_ai" else 1
-
-    with manager.state_lock:
-        if len(manager.board.move_stack) < undo_count:
-            return error("Not enough moves to undo")
-            
-        for _ in range(undo_count):
-            manager.board.pop()
-            
-        new_fen = manager.get_fen()
-
+async def game_undo(payload: Optional[GameUndoRequest] = None, db=Depends(get_db)) -> ApiResponse:
     from backend.db.collections import MOVES, GAMES
     from bson import ObjectId
-    
+
+    manager = GameManager.get_instance()
+    game_id = (payload.game_id if payload else None) or manager.current_game_id
+    if not game_id:
+        return error("No active game to undo")
+    game = await get_game_doc(db, game_id)
+    if not game:
+        return error("Game not found")
+
+    current_version = int(game.get("game_version", 0))
+    board = chess.Board(game.get("current_fen") or chess.STARTING_FEN)
+    undo_count = 1
+    if (game.get("mode") or manager.mode) == "human_vs_ai":
+        # Rewind to the human's turn: one ply if the AI hasn't answered yet, else two.
+        undo_count = 1 if board.turn == _game_ai_color(game) else 2
+    if current_version < undo_count:
+        return error("Not enough moves to undo")
+
+    new_version = current_version - undo_count
     game_oid = ObjectId(game_id)
-    game = await db[GAMES].find_one({"_id": game_oid})
-    if game:
-        current_version = game.get("game_version", 0)
-        await db[MOVES].delete_many({
-            "game_id": game_oid,
-            "move_number": {"$gt": current_version - undo_count}
-        })
-        
-        last_move_doc = await db[MOVES].find_one(
-            {"game_id": game_oid}, sort=[("move_number", -1)]
-        )
-        last_move_uci = last_move_doc.get("uci") if last_move_doc else None
-        new_version = max(0, current_version - undo_count)
-        
-        await db[GAMES].update_one(
-            {"_id": game_oid},
-            {"$set": {
-                "current_fen": new_fen,
-                "game_version": new_version,
-                "last_move": last_move_uci
-            }}
-        )
+    # Version-guarded so an in-flight AI move can't interleave with the rewind.
+    result = await db[GAMES].update_one(
+        {"_id": game_oid, "game_version": current_version},
+        {"$set": {"game_version": new_version}},
+    )
+    if result.modified_count != 1:
+        return error("Game changed while undoing, try again")
+    await db[MOVES].delete_many({"game_id": game_oid, "move_number": {"$gt": new_version}})
+
+    last_move_doc = await db[MOVES].find_one({"game_id": game_oid}, sort=[("move_number", -1)])
+    last_move_uci = last_move_doc.get("uci") if last_move_doc else None
+    new_fen = (
+        last_move_doc.get("fen_after")
+        if last_move_doc
+        else game.get("initial_fen") or chess.STARTING_FEN
+    )
+    await db[GAMES].update_one(
+        {"_id": game_oid},
+        {"$set": {"current_fen": new_fen, "last_move": last_move_uci}},
+    )
+
+    # Keep the backend-camera flow's board in step when it tracks this game.
+    if manager.current_game_id == game_id:
+        with manager.state_lock:
+            manager.board.set_fen(new_fen)
 
     await ws_manager.send_to_game(
         game_id,
@@ -1838,13 +1967,13 @@ async def game_undo(db=Depends(get_db)) -> ApiResponse:
             "data": {
                 "game_id": game_id,
                 "current_fen": new_fen,
-                "game_version": new_version if game else 0,
-                "last_move": last_move_uci if game else None,
+                "game_version": new_version,
+                "last_move": last_move_uci,
             },
         },
     )
 
-    return ok("Undo successful", {"fen": new_fen})
+    return ok("Undo successful", {"fen": new_fen, "game_version": new_version})
 
 
 @router.post("/game/reset", response_model=ApiResponse)
