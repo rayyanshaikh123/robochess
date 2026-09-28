@@ -71,7 +71,11 @@ class GameSession:
         if not self.moves:
             raise SessionError("There are no moves to undo")
 
-        plies = 2 if len(self.moves) >= 2 else 1
+        # Rewind to the human's turn: one ply when the engine has not answered
+        # yet (e.g. the human's move ended the game), otherwise the engine's
+        # reply plus the human's move.
+        plies = 1 if self.board.turn != self.human_color else 2
+        plies = min(plies, len(self.moves))
         remaining = self.moves[:-plies]
         board = chess.Board(self.initial_fen)
         for uci in remaining:

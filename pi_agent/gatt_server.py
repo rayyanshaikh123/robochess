@@ -6,6 +6,7 @@ callbacks are kept independent from BlueZ so they can be tested on a laptop.
 
 from collections.abc import Callable
 import json
+import queue
 import threading
 import time
 
@@ -21,6 +22,20 @@ from pi_agent.ble_protocol import (
     envelope,
     validate_game_message,
 )
+
+
+# Every app message is a JSON envelope that starts with this key, so a write
+# beginning with it is a new message, never the continuation of an older one.
+_ENVELOPE_START = b'{"version"'
+# Far above any real message; a buffer this large can only be leftover garbage.
+_MAX_BUFFER_BYTES = 16 * 1024
+
+
+def _append_fragment(buffer: bytearray, raw: bytes) -> None:
+    """Add one BLE write to a reassembly buffer, dropping an abandoned partial."""
+    if raw.startswith(_ENVELOPE_START) or len(buffer) + len(raw) > _MAX_BUFFER_BYTES:
+        buffer.clear()
+    buffer.extend(raw)
 
 
 class GattServer:
@@ -70,6 +85,13 @@ class GattServer:
         # earlier notification before the central has received it.
         self._send_lock = threading.Lock()
 
+        # One worker per characteristic handles writes strictly in arrival
+        # order: a message split over several writes must be reassembled in
+        # sequence, and the reassembly buffers are not shared across threads.
+        self._control_queue: queue.Queue[bytes] = queue.Queue()
+        self._wifi_queue: queue.Queue[bytes] = queue.Queue()
+        self._workers_started = False
+
         self._thread: threading.Thread | None = None
         self.adapter_address = adapter_address
         self.require_bond = require_bond
@@ -77,7 +99,7 @@ class GattServer:
     def handle_control(self, raw: bytes) -> list[bytes]:
         """Process a message received through the Control characteristic."""
 
-        self._control_buffer.extend(raw)
+        _append_fragment(self._control_buffer, raw)
 
         try:
             message = decode_message(bytes(self._control_buffer))
@@ -165,17 +187,11 @@ class GattServer:
     ) -> None:
         """Handle writes received on the Control characteristic.
 
-        Dispatches to a background thread so the GLib/BLE event loop is never
+        Queued for the control worker so the GLib/BLE event loop is never
         blocked by slow operations (e.g. internet-connectivity checks).
         """
 
-        raw = bytes(value)
-        threading.Thread(
-            target=self._handle_control_in_bg,
-            args=(raw,),
-            daemon=True,
-            name="robochess-ble-ctrl",
-        ).start()
+        self._control_queue.put(bytes(value))
 
     def _handle_control_in_bg(self, raw: bytes) -> None:
         replies = self.handle_control(raw)
@@ -189,17 +205,32 @@ class GattServer:
     ) -> None:
         """Handle Wi-Fi provisioning messages received through F010.
 
-        Dispatched to a background thread so the GLib event loop is not
-        blocked while waiting for the network to associate.
+        Queued for the Wi-Fi worker so the GLib event loop is not blocked
+        while waiting for the network to associate.
         """
 
-        raw = bytes(value)
-        threading.Thread(
-            target=self._handle_wifi_in_bg,
-            args=(raw,),
-            daemon=True,
-            name="robochess-ble-wifi",
-        ).start()
+        self._wifi_queue.put(bytes(value))
+
+    def _start_workers(self) -> None:
+        if self._workers_started:
+            return
+        self._workers_started = True
+        for name, source, handler in (
+            ("robochess-ble-ctrl", self._control_queue, self._handle_control_in_bg),
+            ("robochess-ble-wifi", self._wifi_queue, self._handle_wifi_in_bg),
+        ):
+            threading.Thread(
+                target=self._drain, args=(source, handler), daemon=True, name=name
+            ).start()
+
+    @staticmethod
+    def _drain(source: "queue.Queue[bytes]", handler: Callable[[bytes], None]) -> None:
+        while True:
+            raw = source.get()
+            try:
+                handler(raw)
+            except Exception as exc:  # keep serving later writes
+                print(f"BLE handler error: {exc}", flush=True)
 
     def _handle_wifi_in_bg(self, raw: bytes) -> None:
         replies = self.handle_wifi(raw)
@@ -229,7 +260,7 @@ class GattServer:
     def handle_wifi(self, raw: bytes) -> list[bytes]:
         """Decode and process a Wi-Fi provisioning message."""
 
-        self._wifi_buffer.extend(raw)
+        _append_fragment(self._wifi_buffer, raw)
 
         try:
             message = decode_message(
@@ -409,6 +440,8 @@ class GattServer:
         self._status_characteristic = (
             self._peripheral.characteristics[-1]
         )
+
+        self._start_workers()
 
         # BlueZero owns a GLib loop in publish(); keep the board
         # controller alive.

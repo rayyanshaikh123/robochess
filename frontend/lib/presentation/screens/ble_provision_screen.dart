@@ -115,18 +115,25 @@ class _BleProvisionScreenState extends ConsumerState<BleProvisionScreen> {
     if (!mounted) return;
     final state = ref.read(localBoardProvider);
     setState(() {
-      _message = state.wifiProvisioning == WifiProvisioningState.error
-          ? (state.wifiProvisioningError ?? 'Wi-Fi scan failed.')
-          : 'Select the Wi-Fi network the Pi should use.';
+      _message = state.wifiProvisioning == WifiProvisioningState.connected
+          ? 'The Pi is already online. Continue to board setup, or pick another network to switch Wi-Fi.'
+          : state.wifiProvisioning == WifiProvisioningState.error
+              ? (state.wifiProvisioningError ?? 'Wi-Fi scan failed.')
+              : 'Select the Wi-Fi network the Pi should use.';
     });
   }
 
   void _startStatusPolling() {
     _statusTimer?.cancel();
+    var tick = 0;
     _statusTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
       final state = ref.read(localBoardProvider);
       if (state.wifiProvisioning == WifiProvisioningState.connected) return;
-      await ref.read(localBoardProvider.notifier).refreshBleStatus();
+      final notifier = ref.read(localBoardProvider.notifier);
+      await notifier.refreshBleStatus();
+      // The live network report is slower on the Pi (internet check), so
+      // ask for it every third tick.
+      if (tick++ % 3 == 0) await notifier.requestBleNetworkStatus();
     });
   }
 

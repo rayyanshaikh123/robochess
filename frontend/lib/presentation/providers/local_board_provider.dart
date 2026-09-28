@@ -147,11 +147,21 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
                 reportedIp == 'localhost'
             ? null
             : reportedIp;
+        // A Pi that is already online needs no Wi-Fi provisioning. Don't
+        // override a provisioning attempt that is still in flight.
+        final online = network.wifiConnected || usableIp != null;
+        final provisioningInFlight =
+            state.wifiProvisioning == WifiProvisioningState.provisioning ||
+                state.wifiProvisioning == WifiProvisioningState.connecting;
         state = state.copyWith(
           network: network,
           localApiBaseUrl: usableIp == null
               ? AppConfig.piLocalApiBaseUrl
               : 'http://$usableIp:8765',
+          wifiProvisioning: online && !provisioningInFlight
+              ? WifiProvisioningState.connected
+              : null,
+          provisionedSsid: online ? network.ssid : null,
           clearError: true,
         );
         return;
@@ -168,7 +178,11 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
             : <PiWifiNetwork>[];
         state = state.copyWith(
           wifiNetworks: networks,
-          wifiProvisioning: WifiProvisioningState.ready,
+          // A scan must not hide that the Pi is already connected.
+          wifiProvisioning:
+              state.wifiProvisioning == WifiProvisioningState.connected
+                  ? null
+                  : WifiProvisioningState.ready,
           clearError: true,
         );
         return;
@@ -452,9 +466,11 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
   }
 
   Future<void> scanWifiNetworks() async {
+    final alreadyConnected =
+        state.wifiProvisioning == WifiProvisioningState.connected;
     state = state.copyWith(
       wifiNetworks: const [],
-      wifiProvisioning: WifiProvisioningState.scanning,
+      wifiProvisioning: alreadyConnected ? null : WifiProvisioningState.scanning,
       wifiProvisioningError: null,
       clearError: true,
     );
@@ -467,6 +483,14 @@ class LocalBoardController extends StateNotifier<LocalBoardState> {
         error: 'Pi Wi-Fi scan failed: $error',
       );
     }
+  }
+
+  /// Ask the Pi for its live network state; the reply arrives as a
+  /// `network_status` message (the status characteristic may hold game state).
+  Future<void> requestBleNetworkStatus() async {
+    try {
+      await repository.requestNetworkStatus();
+    } catch (_) {}
   }
 
   Future<void> refreshBleStatus() async {

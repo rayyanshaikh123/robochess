@@ -63,6 +63,58 @@ class NetworkManager:
                 return value
         return None
 
+    @staticmethod
+    def _split_terse(line: str, fields: int) -> list[str]:
+        """Split one ``nmcli -t`` line; the last field may hold escaped ':'."""
+        parts = line.split(":", fields - 1)
+        return [part.replace("\\:", ":") for part in parts]
+
+    def _active_link(self) -> tuple[str, str, str] | None:
+        """(device, type, connection) of the connected Wi-Fi/Ethernet link, Wi-Fi first."""
+        output = self._run(["-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", "status"])
+        links = []
+        for line in output.splitlines():
+            parts = self._split_terse(line, 4)
+            if len(parts) < 4:
+                continue
+            device, kind, state, connection = parts
+            # "connected" or "connected (externally)"; never "disconnected".
+            if kind in {"wifi", "ethernet"} and state.startswith("connected"):
+                links.append((device, kind, connection))
+        links.sort(key=lambda link: link[1] != "wifi")
+        return links[0] if links else None
+
+    def _device_ip(self, device: str) -> str | None:
+        try:
+            output = self._run(["-g", "IP4.ADDRESS", "device", "show", device])
+        except NetworkManagerError:
+            return None
+        for value in output.replace("|", "\n").splitlines():
+            address = value.strip().split("/", 1)[0]
+            if self._usable_ip(address):
+                return address
+        return None
+
+    def _active_ssid(self) -> str | None:
+        try:
+            output = self._run(["-t", "-f", "ACTIVE,SSID", "device", "wifi", "list", "--rescan", "no"])
+        except NetworkManagerError:
+            return None
+        for line in output.splitlines():
+            parts = self._split_terse(line, 2)
+            if len(parts) == 2 and parts[0] == "yes" and parts[1]:
+                return parts[1]
+        return None
+
+    def _internet(self, enabled: bool, url: str, timeout: float) -> bool:
+        if not enabled:
+            return False
+        try:
+            response = requests.get(url, timeout=timeout)
+            return 200 <= response.status_code < 400
+        except (requests.RequestException, socket.gaierror):
+            return False
+
     def status(
         self,
         internet_check_enabled: bool = True,
@@ -70,30 +122,23 @@ class NetworkManager:
         internet_timeout: float = 5.0,
     ) -> NetworkStatus:
         try:
-            output = self._run(["-t", "-f", "GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS", "device", "show"])
+            link = self._active_link()
         except NetworkManagerError as exc:
-            return NetworkStatus(False, state="network_error", error=str(exc))
-        connected = "connected" in output.lower()
-        ssid = None
-        ip_address = None
-        for line in output.splitlines():
-            if "GENERAL.CONNECTION:" in line:
-                ssid = line.split(":", 1)[1] or None
-            if "IP4.ADDRESS" in line:
-                value = line.split(":", 1)[1].split("/", 1)[0]
-                if self._usable_ip(value):
-                    ip_address = value
-        if not ip_address:
+            # nmcli missing or failing must not hide a working network: if the
+            # Pi has a routable address it is online (e.g. dhcpcd-based images).
             ip_address = self._host_ip()
-        if not connected:
-            return NetworkStatus(False, ssid=ssid, ip_address=ip_address, state="no_wifi")
-        internet_available = False
-        if internet_check_enabled:
-            try:
-                response = requests.get(internet_check_url, timeout=internet_timeout)
-                internet_available = 200 <= response.status_code < 400
-            except (requests.RequestException, socket.gaierror):
-                internet_available = False
+            if not ip_address:
+                return NetworkStatus(False, state="network_error", error=str(exc))
+            link, ssid = None, None
+        else:
+            if link is None:
+                return NetworkStatus(False, ip_address=self._host_ip(), state="no_wifi")
+            device, kind, connection = link
+            ip_address = self._device_ip(device) or self._host_ip()
+            # The NetworkManager profile name (e.g. "preconfigured") is not the SSID.
+            ssid = (self._active_ssid() or connection or None) if kind == "wifi" else (connection or kind)
+
+        internet_available = self._internet(internet_check_enabled, internet_check_url, internet_timeout)
         state = "internet_available" if internet_available else "wifi_connected_no_internet"
         return NetworkStatus(
             True, ssid=ssid, ip_address=ip_address,

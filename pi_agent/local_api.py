@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from pathlib import Path
@@ -32,6 +33,10 @@ class MoveRequest(BaseModel):
 class GantrySpeedRequest(BaseModel):
     max_rate_mm_min: float = Field(gt=0, le=12000)
     accel_mm_sec2: float = Field(gt=0, le=5000)
+
+
+class GameStartRequest(BaseModel):
+    human_color: str = Field(default="white", pattern="^(white|black)$")
 
 
 class ModelLoadRequest(BaseModel):
@@ -111,6 +116,8 @@ class LocalApiHost:
         self.calibration_path = self.state_path / "camera_calibration.json"
         self._camera = None
         self._camera_lock = threading.Lock()
+        self._network_cache: tuple[float, dict] | None = None
+        self._network_lock = threading.Lock()
         self.readiness = SetupReadiness(
             vision_mode=str(config.get("vision_mode", "cloud")),
             vision_require_internet=bool(config.get("vision_require_internet", True)),
@@ -118,12 +125,23 @@ class LocalApiHost:
         self.app = FastAPI(title="RoboChess Local Board API")
         self._routes()
 
+    # The app polls setup/auto-detect routes about once a second; re-running
+    # nmcli and an internet round trip on every poll made each reply as slow
+    # as the internet check. A few seconds of staleness is fine for display.
+    _NETWORK_CACHE_SECONDS = 5.0
+
     def _network(self):
-        return self.network.status(
-            self.config["internet_check_enabled"],
-            self.config["internet_check_url"],
-            self.config["internet_check_timeout"],
-        ).to_dict()
+        with self._network_lock:
+            now = time.monotonic()
+            if self._network_cache and now - self._network_cache[0] < self._NETWORK_CACHE_SECONDS:
+                return dict(self._network_cache[1])
+            status = self.network.status(
+                self.config["internet_check_enabled"],
+                self.config["internet_check_url"],
+                self.config["internet_check_timeout"],
+            ).to_dict()
+            self._network_cache = (now, status)
+            return dict(status)
 
     def _gantry(self) -> dict[str, Any]:
         try:
@@ -281,8 +299,6 @@ class LocalApiHost:
                     self.detector.confidence = payload.confidence
             if not os.getenv("ROBOCHESS_ROBOFLOW_MODEL_URL") and not os.getenv("ROBOFLOW_MODEL_URL"):
                 os.environ["ROBOCHESS_ROBOFLOW_MODEL_URL"] = "chess-yimaf-jwsta/5"
-            if not os.getenv("ROBOCHESS_ROBOFLOW_API_KEY") and not os.getenv("ROBOFLOW_API_KEY"):
-                os.environ["ROBOCHESS_ROBOFLOW_API_KEY"] = "1OyUTcW3mg1dcln38uRg"
             try:
                 self.detector.load_model()
             except Exception as exc:
@@ -494,9 +510,10 @@ class LocalApiHost:
                 raise HTTPException(503, f"Pi board validation failed: {exc}") from exc
 
         @self.app.post("/local/game/start")
-        def start_game():
+        def start_game(payload: GameStartRequest | None = Body(default=None)):
             setup = self._setup_status()
-            result = self.game.handle({"type": "session.start", "data": {}})
+            human_color = payload.human_color if payload else "white"
+            result = self.game.handle({"type": "session.start", "data": {"human_color": human_color}})
             if self.detector is not None:
                 self.detector.pending_auto_move = None
                 self.detector.pending_auto_san = None

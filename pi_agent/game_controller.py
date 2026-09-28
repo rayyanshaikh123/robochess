@@ -5,6 +5,7 @@ from __future__ import annotations
 import chess
 import json
 import threading
+from collections import OrderedDict
 from pathlib import Path
 
 from pi_agent.engine import StockfishEngine
@@ -13,13 +14,16 @@ from pi_agent.uno_controller import UnoController, UnoError, motion_plan
 from pi_agent.session_store import SessionStore
 
 
+# Replies kept for retransmitted commands; a retry arrives within seconds.
+_RESULT_CACHE_SIZE = 64
+
+
 class GameController:
     def __init__(self, engine: StockfishEngine, uno: UnoController, store: SessionStore | None = None) -> None:
         self.engine, self.uno = engine, uno
         self.store = store
         self.session: GameSession | None = store.load() if store else None
-        self._last_seq = -1
-        self._cached_results: dict[int, dict] = {}
+        self._cached_results: OrderedDict[str, dict] = OrderedDict()
         self._state_lock = threading.RLock()
         self._engine_thread: threading.Thread | None = None
         self._engine_generation = 0
@@ -27,22 +31,28 @@ class GameController:
 
     def handle(self, message: dict) -> dict:
         data = message.get("data", {})
-        sequence = data.get("client_seq")
+        # A retransmitted command carries the same request_id; answer it from
+        # cache instead of applying it twice. (The app's client_seq restarts at
+        # 0 whenever the app relaunches, so it can't identify duplicates.)
+        request_id = message.get("request_id")
+        request_id = str(request_id) if request_id else None
         with self._state_lock:
-            if isinstance(sequence, int) and sequence in self._cached_results:
-                return self._cached_results[sequence]
-            if isinstance(sequence, int) and sequence <= self._last_seq:
-                return self._result("error", error="Out-of-order client_seq")
+            if request_id and request_id in self._cached_results:
+                return self._cached_results[request_id]
             try:
                 result = self._dispatch(message["type"], data)
             except Exception as exc:
                 if self.session and message["type"] == "move.propose":
                     self.session.recover(str(exc))
                 result = self._result("error", error=str(exc))
-            if isinstance(sequence, int):
-                self._last_seq = sequence
-                self._cached_results[sequence] = result
+            if request_id:
+                self._cached_results[request_id] = result
+                while len(self._cached_results) > _RESULT_CACHE_SIZE:
+                    self._cached_results.popitem(last=False)
             self._save_session()
+            # Start, reset, resume or undo can all leave the engine to move
+            # (e.g. the human plays black); not only a player move.
+            self._start_engine_work()
             return result
 
     def _dispatch(self, kind: str, data: dict) -> dict:
@@ -90,7 +100,6 @@ class GameController:
         if kind == "move.propose":
             self.session.accept_player_move(data["uci"], data.get("expected_version"))
             player_state = self.session.snapshot()
-            self._start_engine_work()
             return {
                 "status": "player_move_accepted",
                 "state": player_state,

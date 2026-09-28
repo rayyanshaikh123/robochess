@@ -330,7 +330,6 @@ class BoardRecognizer:
         self.cloud_api_key = (
             os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip()
             or os.getenv("ROBOFLOW_API_KEY", "").strip()
-            or "1OyUTcW3mg1dcln38uRg"
         )
         configured_cloud = os.getenv("ROBOCHESS_ROBOFLOW_ENABLED", "1").strip().lower() in {
             "1", "true", "yes", "on"
@@ -375,7 +374,6 @@ class BoardRecognizer:
             self.cloud_api_key = (
                 os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip()
                 or os.getenv("ROBOFLOW_API_KEY", "").strip()
-                or "1OyUTcW3mg1dcln38uRg"
             )
         self.cloud_base_url = self._cloud_base_url(self.roboflow_model_url)
         self.warp_matrix: Optional[np.ndarray] = None

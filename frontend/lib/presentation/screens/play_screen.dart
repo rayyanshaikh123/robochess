@@ -439,13 +439,15 @@ class _PlayScreenState extends ConsumerState<PlayScreen> {
           );
       if (result.useBoard) {
         try {
-          await PiLocalApi(baseUrl: _piBaseUrl).startGame();
-          // Home gantry to ensure known starting position
+          // Home first: when the human plays black the Pi's engine opens
+          // immediately, and it refuses to move an unhomed gantry.
           try {
             await PiLocalApi(baseUrl: _piBaseUrl).homeGantry();
           } catch (e) {
             debugPrint('Initial homing failed: $e');
           }
+          await PiLocalApi(baseUrl: _piBaseUrl)
+              .startGame(humanColor: _setupSide);
           if (mounted) {
             setState(() => _piConnectionError = null);
           }
@@ -1985,13 +1987,15 @@ Future<void> _runSyncCoordinator() async {
 
       if (useBoard) {
         try {
-          await PiLocalApi(baseUrl: _piBaseUrl).startGame();
-          // Home gantry to ensure known starting position
+          // Home first: when the human plays black the Pi's engine opens
+          // immediately, and it refuses to move an unhomed gantry.
           try {
             await PiLocalApi(baseUrl: _piBaseUrl).homeGantry();
           } catch (e) {
             debugPrint('Initial homing failed: $e');
           }
+          await PiLocalApi(baseUrl: _piBaseUrl)
+              .startGame(humanColor: _setupSide);
         } catch (e) {
           if (mounted) {
             setState(

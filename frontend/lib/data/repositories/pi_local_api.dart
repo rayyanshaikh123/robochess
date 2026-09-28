@@ -49,9 +49,11 @@ class PiLocalApi {
     String? roboflowApiKey,
     String? visionMode,
   }) async {
+    // The Roboflow key lives only on the Pi (pi-agent.env); the app never
+    // ships or sends one unless a caller passes it explicitly.
     final body = <String, dynamic>{
       'roboflow_model_url': roboflowModelUrl ?? 'chess-yimaf-jwsta/5',
-      'roboflow_api_key': roboflowApiKey ?? '1OyUTcW3mg1dcln38uRg',
+      if (roboflowApiKey != null) 'roboflow_api_key': roboflowApiKey,
       'vision_mode': visionMode ?? 'cloud',
       'roboflow_enabled': true,
     };
@@ -107,9 +109,16 @@ class PiLocalApi {
     return _data(response, 'Pi gantry status failed');
   }
 
-  Future<Map<String, dynamic>> startGame() async {
-    final response =
-        await client.post(_uri('/local/game/start')).timeout(_requestTimeout);
+  /// [humanColor] is 'white' or 'black'; the Pi makes the engine's moves for
+  /// the other side (including the opening move when the human is black).
+  Future<Map<String, dynamic>> startGame({String? humanColor}) async {
+    final response = await client
+        .post(
+          _uri('/local/game/start'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({if (humanColor != null) 'human_color': humanColor}),
+        )
+        .timeout(_requestTimeout);
     return _data(response, 'Pi game start failed');
   }
 

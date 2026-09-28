@@ -61,10 +61,11 @@ class PiCameraDetector:
             or os.getenv("ROBOFLOW_MODEL_URL", "").strip()
             or "chess-yimaf-jwsta/5"
         )
+        # The key must come from the environment (/etc/robochess/pi-agent.env);
+        # never ship one in source.
         cloud_key = (
             os.getenv("ROBOCHESS_ROBOFLOW_API_KEY", "").strip()
             or os.getenv("ROBOFLOW_API_KEY", "").strip()
-            or "1OyUTcW3mg1dcln38uRg"
         )
 
         if cloud_key:
@@ -459,6 +460,10 @@ class PiCameraDetector:
         kernel = np.ones((5, 5), np.uint8)
         steady_start_time = None
         last_steady_eval_time = 0.0
+        # Each evaluation is a Roboflow request in cloud mode. Once a still
+        # board has been checked without finding a move, looking again is
+        # pointless (and costly) until something on the board moves.
+        evaluated_since_motion = False
 
         while not self._hand_stop_event.is_set():
             session = (self.session_getter() if self.session_getter else None) or self.active_session
@@ -467,6 +472,7 @@ class PiCameraDetector:
             if session is None or session_is_over or session_phase != "player_turn":
                 self.hand_present = False
                 steady_start_time = None
+                evaluated_since_motion = False
                 # Do not compare the next player-turn frame with a stale
                 # engine-move frame; that creates a false hand event and can
                 # make the app wait for a snapshot that was never needed.
@@ -526,6 +532,7 @@ class PiCameraDetector:
                 self.hand_present = True
                 self.hand_last_seen = now
                 steady_start_time = None
+                evaluated_since_motion = False
             else:
                 if steady_start_time is None:
                     steady_start_time = now
@@ -536,12 +543,18 @@ class PiCameraDetector:
                         self.last_trigger_time = now
                         self._on_hand_left(session)
                         last_steady_eval_time = time.time()
-                elif not self.hand_present and self.pending_auto_move is None:
-                    # Continuous evaluation on steady board:
-                    # If the board is motionless for >= 0.5s and not recently evaluated, check for a legal move
+                        evaluated_since_motion = True
+                elif (
+                    not self.hand_present
+                    and self.pending_auto_move is None
+                    and not evaluated_since_motion
+                ):
+                    # Backup for a missed hand departure: once the board has
+                    # been still for 0.5s, check it for a legal move one time.
                     if (now - steady_start_time) >= 0.5 and (now - last_steady_eval_time) >= STEADY_EVAL_INTERVAL:
                         last_steady_eval_time = now
                         self._evaluate_steady_board(session)
+                        evaluated_since_motion = True
 
             time.sleep(0.1)
 
