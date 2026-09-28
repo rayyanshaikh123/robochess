@@ -1,44 +1,64 @@
-import type { Metadata } from "next";
-import { Outfit, Inter, JetBrains_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Fraunces, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const outfit = Outfit({
-  variable: "--font-outfit",
+/* The type trio from web/design.md. Variable files, so one payload per family
+   and no weight ships that the page does not use. */
+const fraunces = Fraunces({
+  variable: "--font-fraunces",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+  display: "swap",
 });
 
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+  display: "swap",
 });
 
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
   subsets: ["latin"],
-  weight: ["400", "500", "700"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "RoboChess — The Connected Chess Platform",
+  title: "RoboChess. Chess you can touch, on a board that watches",
   description:
-    "Play against AI bots and human opponents, detect moves on a physical board with computer vision, analyze with Stockfish 17, and sync to a robotic smart board. Download the mobile app and join the connected chess platform.",
+    "RoboChess joins a real chessboard, a camera and a chess engine, so the game never has to move to a screen. The story runs from chaturanga to a board that reads its own position.",
   keywords: [
-    "chess",
-    "robochss",
+    "robochess",
+    "chaturanga",
+    "smart chessboard",
+    "electronic chessboard",
+    "computer vision chess",
+    "stockfish",
+    "raspberry pi chess",
     "flutter",
     "fastapi",
-    "stockfish",
-    "computer vision",
-    "raspberry pi",
-    "smart board",
-    "ai opponent",
   ],
   icons: {
-    icon: "/app_logo.png",
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/app_logo.png", type: "image/png" },
+    ],
     apple: "/app_logo.png",
   },
+  openGraph: {
+    title: "RoboChess. Chess you can touch, on a board that watches",
+    description:
+      "From an army drawn on the ground to a board that reads its own position. Play in the browser, or bring a real board to it.",
+    type: "website",
+    // DEPLOY STEP: og:url and og:image need absolute URLs, which only exist
+    // once the site has an address. Patch these with the live URL at deploy.
+    // url: "https://<live-domain>/",
+    // images: ["https://<live-domain>/og.png"],
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#f7f4ec",
+  colorScheme: "light",
 };
 
 export default function RootLayout({
@@ -47,16 +67,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${outfit.variable} ${inter.variable} ${jetbrainsMono.variable}`}>
-      <head>
-        <link
-          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body className="min-h-screen flex flex-col overflow-x-hidden bg-[var(--color-background)] text-[var(--color-on-surface)]">
-        {children}
-      </body>
+    <html
+      lang="en"
+      className={`${fraunces.variable} ${inter.variable} ${jetbrainsMono.variable}`}
+    >
+      <body>{children}</body>
     </html>
   );
 }
